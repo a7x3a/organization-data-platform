@@ -32,6 +32,8 @@ export function canonicalFilename(originalFilename: string, fileId: string, exte
   const base = dot > 0 ? originalFilename.slice(0, dot) : originalFilename;
   const ext = extension || (dot > 0 ? originalFilename.slice(dot) : '');
   const safeBase = sanitizeFilename(base);
-  const safeExt = ext ? `.${ext.replace(/^\./, '').replace(UNSAFE_CHARS, '')}` : '';
+  const safeExt = ext
+    ? `.${ext.replace(/\.\.+/g, '.').replace(/^\./, '').replace(UNSAFE_CHARS, '')}`
+    : '';
   return `${safeBase}-${fileId}${safeExt}`;
 }

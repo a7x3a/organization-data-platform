@@ -57,5 +57,18 @@ export async function deleteSource(id: string) {
     );
   }
 
+  // A source can have files with no collector at all — manual uploads and
+  // manual entries attach directly to a Source, bypassing Collector
+  // entirely. CollectedFile.sourceId has no cascade, so this must be
+  // checked independently of the collector check above.
+  const fileCount = await prisma.collectedFile.count({ where: { sourceId: id } });
+  if (fileCount > 0) {
+    throw new AppError(
+      409,
+      'Source has collected files and cannot be deleted. Disable it instead.',
+      'SOURCE_HAS_FILES'
+    );
+  }
+
   await prisma.source.delete({ where: { id } });
 }

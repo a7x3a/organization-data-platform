@@ -6,7 +6,8 @@ import { useFiles } from '../hooks/useFiles';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { FileStatusBadge } from '../components/FileStatusBadge';
 import { DataTable, Column } from '../components/DataTable';
-import { ArrowLeft, XCircle, FileText, CheckCircle2, Copy, AlertOctagon } from 'lucide-react';
+import { Button } from '../components/Button';
+import { ArrowLeft, XCircle } from 'lucide-react';
 import { CollectedFile, RunStatus } from '@odp/shared-types';
 import { formatBytes, formatDuration, truncateSha256 } from '../lib/utils';
 
@@ -61,13 +62,13 @@ export const RunDetail: React.FC = () => {
       <div className="flex items-center gap-4">
         <Link
           to="/runs"
-          className="p-2 bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
+            <h1 className="text-xl font-semibold font-mono text-[var(--color-text-primary)]">
               {run.runId}
             </h1>
             <RunStatusBadge status={run.status} />
@@ -78,55 +79,51 @@ export const RunDetail: React.FC = () => {
         </div>
 
         {isRunning && (
-          <button
-            onClick={() => cancelRun.mutate(run.id)}
-            disabled={cancelRun.isPending}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-500)]/30 rounded-[var(--radius-md)] text-sm font-medium hover:bg-[var(--color-error-500)] hover:text-white transition-colors"
-          >
+          <Button variant="danger" onClick={() => cancelRun.mutate(run.id)} disabled={cancelRun.isPending}>
             <XCircle className="w-4 h-4" />
             {t('runs.cancel')}
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Real-time Stats Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase">Pages Crawled</div>
-          <div className="text-xl font-bold font-mono mt-1">{run.pagesCrawled.toLocaleString()}</div>
+          <div className="text-lg font-semibold font-mono mt-1">{run.pagesCrawled.toLocaleString()}</div>
         </div>
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase">Files Found</div>
-          <div className="text-xl font-bold font-mono mt-1">{run.filesFound.toLocaleString()}</div>
+          <div className="text-lg font-semibold font-mono mt-1">{run.filesFound.toLocaleString()}</div>
         </div>
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-success-400)] uppercase">Downloaded</div>
-          <div className="text-xl font-bold font-mono text-[var(--color-success-400)] mt-1">
+          <div className="text-lg font-semibold font-mono text-[var(--color-success-400)] mt-1">
             {run.filesDownloaded.toLocaleString()}
           </div>
         </div>
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-warning-400)] uppercase">Duplicates</div>
-          <div className="text-xl font-bold font-mono text-[var(--color-warning-400)] mt-1">
+          <div className="text-lg font-semibold font-mono text-[var(--color-warning-400)] mt-1">
             {run.filesDuplicate.toLocaleString()}
           </div>
         </div>
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-error-400)] uppercase">Failed</div>
-          <div className="text-xl font-bold font-mono text-[var(--color-error-400)] mt-1">
+          <div className="text-lg font-semibold font-mono text-[var(--color-error-400)] mt-1">
             {run.filesFailed.toLocaleString()}
           </div>
         </div>
-        <div className="bg-[var(--color-bg-surface)] p-4 border border-[var(--color-border)] rounded-[var(--radius-lg)]">
+        <div>
           <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase">Duration</div>
-          <div className="text-xl font-bold font-mono text-[var(--color-brand-300)] mt-1">
+          <div className="text-lg font-semibold font-mono text-[var(--color-brand-400)] mt-1">
             {formatDuration(run.startedAt, run.completedAt)}
           </div>
         </div>
       </div>
 
       {/* R2 Run folder reference */}
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-4 text-xs font-mono flex items-center justify-between">
+      <div className="text-xs font-mono flex items-center justify-between border-t border-b border-[var(--color-border)] py-3">
         <span className="text-[var(--color-text-muted)]">R2 Raw Storage Location:</span>
         <span className="text-[var(--color-brand-400)]">
           00_raw/web/{run.source?.slug}/{run.runId}/
@@ -135,7 +132,7 @@ export const RunDetail: React.FC = () => {
 
       {/* Collected files in this run */}
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
           Files Collected in this Run
         </h2>
         <DataTable

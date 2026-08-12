@@ -84,22 +84,57 @@ def is_allowed_domain(url: str, allowed_domains: list[str]) -> bool:
     )
 
 
-def is_private_address(url: str) -> bool:
-    """SSRF protection — block private/internal addresses."""
+_BLOCKED_HOSTNAMES = {
+    "localhost",
+    "metadata.google.internal",  # GCP metadata service
+}
+
+
+def _is_private_ip(candidate: str) -> bool:
     import ipaddress
-    hostname = urlparse(url).hostname or ""
     try:
-        addr = ipaddress.ip_address(hostname)
-        return addr.is_private or addr.is_loopback or addr.is_link_local
+        addr = ipaddress.ip_address(candidate)
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified
     except ValueError:
-        # Not an IP — check hostname patterns
-        blocked = [
-            "localhost", "127.0.0.1", "0.0.0.0",
-            "169.254.", "10.", "192.168.", "172.",
-            "metadata.google.internal",
-            "169.254.169.254",  # AWS/GCP metadata
-        ]
-        return any(hostname.startswith(b) or hostname == b for b in blocked)
+        return False
+
+
+async def is_private_address(url: str) -> bool:
+    """
+    SSRF protection — block private/internal/loopback addresses.
+
+    Resolves hostnames via DNS and checks the *resolved* IP, not just the
+    hostname string — a bare string-prefix check (e.g. hostname.startswith
+    ("10.")) would both false-positive on public hostnames like
+    "10.example.com" and, more importantly, miss DNS rebinding: an attacker-
+    controlled domain that resolves to 127.0.0.1 or a cloud metadata IP.
+
+    Async because DNS resolution is a blocking syscall — doing it
+    synchronously here would stall the whole crawler event loop, not just
+    the current URL, while waiting on a slow or unresponsive resolver.
+    """
+    import asyncio
+    import socket
+
+    hostname = urlparse(url).hostname or ""
+    if not hostname:
+        return True  # no host at all — treat as unsafe rather than let it through
+
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        return True
+
+    if _is_private_ip(hostname):
+        return True
+
+    try:
+        loop = asyncio.get_running_loop()
+        # getaddrinfo covers both IPv4 and IPv6 resolution.
+        resolved = await loop.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        # Can't resolve — fail closed. A URL we can't verify is safe is not safe.
+        return True
+
+    return any(_is_private_ip(info[4][0]) for info in resolved)
 
 
 async def crawl(config: CrawlConfig) -> CrawlResult:
@@ -119,7 +154,7 @@ async def crawl(config: CrawlConfig) -> CrawlResult:
         if url is None:
             log.warning("malformed_or_unsupported_url", url=raw_url)
             continue
-        if is_private_address(url):
+        if await is_private_address(url):
             log.warning("ssrf_blocked", url=url)
             continue
         await queue.put((url, 0))
@@ -180,7 +215,12 @@ async def crawl(config: CrawlConfig) -> CrawlResult:
                     scrapy_response = HtmlResponse(
                         url=url, body=response.content, encoding="utf-8"
                     )
-                    extractor = LinkExtractor()
+                    # deny_extensions=() overrides Scrapy's default deny list,
+                    # which silently drops <a> links to pdf/doc/zip/image/etc.
+                    # — exactly the file types this crawler exists to find.
+                    # Filtering is handled explicitly via allowed_extensions/
+                    # excluded_url_patterns instead.
+                    extractor = LinkExtractor(deny_extensions=())
                     links = extractor.extract_links(scrapy_response)
 
                     for link in links:
@@ -191,7 +231,7 @@ async def crawl(config: CrawlConfig) -> CrawlResult:
                             continue
                         if not is_allowed_domain(link_url, config.allowed_domains):
                             continue
-                        if is_private_address(link_url):
+                        if await is_private_address(link_url):
                             continue
                         if config.allowed_url_patterns and not url_matches_pattern(
                             link_url, config.allowed_url_patterns

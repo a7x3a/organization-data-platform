@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from './Button';
 
 export interface Column<T> {
   header: string;
@@ -29,20 +30,23 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   if (isLoading) {
     return (
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-8 text-center text-[var(--color-text-muted)] animate-pulse">
-        Loading data...
+      <div className="py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">
+        Loading...
       </div>
     );
   }
 
   return (
-    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] overflow-hidden shadow-[var(--shadow-card)]">
+    <div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm text-[var(--color-text-primary)]">
-          <thead className="bg-[var(--color-bg-overlay)] border-b border-[var(--color-border)] text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            <tr>
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
               {columns.map((col, idx) => (
-                <th key={idx} className={`px-4 py-3.5 ${col.className || ''}`}>
+                <th
+                  key={idx}
+                  className={`pb-3 pr-4 text-xs font-medium text-[var(--color-text-muted)] ${col.className || ''}`}
+                >
                   {col.header}
                 </th>
               ))}
@@ -51,21 +55,15 @@ export function DataTable<T>({
           <tbody className="divide-y divide-[var(--color-border-subtle)]">
             {data.length === 0 ? (
               <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-4 py-8 text-center text-[var(--color-text-muted)]"
-                >
+                <td colSpan={columns.length} className="py-10 text-center text-sm text-[var(--color-text-muted)]">
                   {emptyMessage}
                 </td>
               </tr>
             ) : (
               data.map((row) => (
-                <tr
-                  key={keyExtractor(row)}
-                  className="hover:bg-[var(--color-bg-overlay)]/50 transition-colors"
-                >
+                <tr key={keyExtractor(row)} className="group">
                   {columns.map((col, idx) => (
-                    <td key={idx} className={`px-4 py-3 align-middle ${col.className || ''}`}>
+                    <td key={idx} className={`py-3 pr-4 align-middle ${col.className || ''}`}>
                       {typeof col.accessor === 'function'
                         ? col.accessor(row)
                         : col.accessor
@@ -81,25 +79,27 @@ export function DataTable<T>({
       </div>
 
       {pagination && pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 bg-[var(--color-bg-overlay)]/30 border-t border-[var(--color-border)] text-xs">
+        <div className="flex items-center justify-between pt-4 mt-2 border-t border-[var(--color-border)] text-xs">
           <span className="text-[var(--color-text-muted)]">
             Page {pagination.page} of {pagination.totalPages}
           </span>
-          <div className="flex gap-2">
-            <button
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => pagination.onPageChange(pagination.page - 1)}
               disabled={pagination.page <= 1}
-              className="px-3 py-1 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--color-bg-surface)] transition-colors"
             >
               Previous
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => pagination.onPageChange(pagination.page + 1)}
               disabled={pagination.page >= pagination.totalPages}
-              className="px-3 py-1 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--color-bg-surface)] transition-colors"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       )}

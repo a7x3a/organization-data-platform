@@ -42,7 +42,7 @@ async def crawl_with_browser(config: CrawlConfig) -> CrawlResult:
         if url is None:
             log.warning("malformed_or_unsupported_url", url=raw_url)
             continue
-        if is_private_address(url):
+        if await is_private_address(url):
             log.warning("ssrf_blocked", url=url)
             continue
         await queue.put((url, 0))
@@ -139,7 +139,7 @@ async def crawl_with_browser(config: CrawlConfig) -> CrawlResult:
                                 continue
                             if not is_allowed_domain(link_url, config.allowed_domains):
                                 continue
-                            if is_private_address(link_url):
+                            if await is_private_address(link_url):
                                 continue
                             if config.allowed_url_patterns and not url_matches_pattern(
                                 link_url, config.allowed_url_patterns

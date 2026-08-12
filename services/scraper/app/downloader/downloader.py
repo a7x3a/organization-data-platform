@@ -113,6 +113,7 @@ async def download_file(
         content_disposition = response.headers.get("content-disposition")
         file_name = extract_filename(final_url, content_disposition)
 
+        too_large = False
         with tempfile.NamedTemporaryFile(
             dir=settings.temp_dir, delete=False, suffix=os.path.splitext(file_name)[1]
         ) as tmp:
@@ -121,12 +122,18 @@ async def download_file(
             async for chunk in response.aiter_bytes(CHUNK_SIZE):
                 total_size += len(chunk)
                 if total_size > max_bytes:
-                    os.unlink(temp_path)
-                    raise FileTooLargeError(
-                        f"File exceeds {max_bytes} bytes at {url}"
-                    )
+                    # Don't unlink here — the file handle is still open, and
+                    # deleting an open file is a PermissionError on Windows
+                    # (POSIX allows it; this must work on both). Stop writing
+                    # and let the `with` block close it first.
+                    too_large = True
+                    break
                 hasher.update(chunk)
                 tmp.write(chunk)
+
+    if too_large:
+        os.unlink(temp_path)
+        raise FileTooLargeError(f"File exceeds {max_bytes} bytes at {url}")
 
     if total_size == 0:
         os.unlink(temp_path)

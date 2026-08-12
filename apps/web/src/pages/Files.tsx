@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useFiles, useFileDownloadUrl } from '../hooks/useFiles';
+import { useFiles } from '../hooks/useFiles';
 import { filesApi } from '../api/files';
 import { DataTable, Column } from '../components/DataTable';
 import { FileStatusBadge } from '../components/FileStatusBadge';
+import { Button } from '../components/Button';
+import { Select } from '../components/Input';
 import { CollectedFile } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
-import { Download, ExternalLink } from 'lucide-react';
+import { Download } from 'lucide-react';
 
 export const Files: React.FC = () => {
   const { t } = useTranslation();
@@ -17,8 +19,6 @@ export const Files: React.FC = () => {
     pageSize: 20,
     status: statusFilter || undefined,
   });
-
-  const getDownloadUrl = useFileDownloadUrl('');
 
   const handleDownload = async (fileId: string) => {
     try {
@@ -84,13 +84,15 @@ export const Files: React.FC = () => {
       header: t('common.actions'),
       accessor: (f) =>
         f.status === 'UPLOADED' ? (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             onClick={() => handleDownload(f.id)}
             title="Download from R2 via signed URL"
-            className="p-1.5 rounded-[var(--radius-md)] text-[var(--color-brand-400)] hover:bg-[var(--color-bg-elevated)] transition-colors"
           >
             <Download className="w-4 h-4" />
-          </button>
+          </Button>
         ) : null,
     },
   ];
@@ -99,23 +101,24 @@ export const Files: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('files.title')}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('files.subtitle')}</p>
         </div>
 
-        <select
+        <Select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-xs text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
-        >
-          <option value="">All Statuses</option>
-          <option value="UPLOADED">Uploaded</option>
-          <option value="DUPLICATE">Duplicate</option>
-          <option value="SKIPPED">Skipped</option>
-          <option value="FAILED">Failed</option>
-        </select>
+          onValueChange={setStatusFilter}
+          className="w-40"
+          options={[
+            { value: '', label: 'All Statuses' },
+            { value: 'UPLOADED', label: 'Uploaded' },
+            { value: 'DUPLICATE', label: 'Duplicate' },
+            { value: 'SKIPPED', label: 'Skipped' },
+            { value: 'FAILED', label: 'Failed' },
+          ]}
+        />
       </div>
 
       <DataTable

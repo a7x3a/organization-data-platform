@@ -56,7 +56,7 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           {t('dashboard.title')}
         </h1>
         <p className="text-sm text-[var(--color-text-muted)]">
@@ -106,7 +106,7 @@ export const Dashboard: React.FC = () => {
 
       {/* Recent Runs Section */}
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
           {t('dashboard.recentRuns')}
         </h2>
         <DataTable

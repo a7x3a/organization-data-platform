@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
+import { Input } from '../components/Input';
+import { Button } from '../components/Button';
 import { Database, Lock, User } from 'lucide-react';
 
 export const Login: React.FC = () => {
@@ -31,71 +33,59 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-8 shadow-[var(--shadow-elevated)]">
+    <div>
       {/* Header — compact on large screens (hero panel already carries the
           brand story), full identity on small screens where hero is hidden */}
-      <div className="mb-7">
-        <div className="lg:hidden inline-flex p-3 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-lg)] mb-3 shadow-[var(--shadow-brand)]">
-          <Database className="w-6 h-6" />
+      <div className="mb-8">
+        <div className="lg:hidden inline-flex p-2.5 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-lg)] mb-4">
+          <Database className="w-5 h-5" />
         </div>
-        <h1 className="text-xl font-bold text-[var(--color-text-primary)]">
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           {t('auth.login')}
         </h1>
-        <p className="text-xs text-[var(--color-text-muted)] mt-1 font-mono">
+        <p className="text-sm text-[var(--color-text-muted)] mt-1">
           {t('auth.platformSubtitle')}
         </p>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-[var(--color-error-bg)] border border-[var(--color-error-500)]/30 rounded-[var(--radius-md)] text-xs text-[var(--color-error-400)] text-center">
-          {error}
-        </div>
+        <div className="mb-5 text-sm text-[var(--color-error-400)]">{error}</div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">
+          <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
             {t('auth.username')}
           </label>
-          <div className="relative group">
-            <User className="w-4 h-4 absolute left-3 top-2.5 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-brand-400)] transition-colors" />
-            <input
-              type="text"
-              required
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="username"
-              className="w-full pl-9 pr-3 py-2.5 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-strong)] focus:border-[var(--color-brand-500)] focus:shadow-[var(--shadow-brand)] focus:outline-none"
-            />
-          </div>
+          <Input
+            type="text"
+            required
+            autoComplete="username"
+            icon={<User />}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="username"
+          />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">
+          <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
             {t('auth.password')}
           </label>
-          <div className="relative group">
-            <Lock className="w-4 h-4 absolute left-3 top-2.5 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-brand-400)] transition-colors" />
-            <input
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full pl-9 pr-3 py-2.5 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-strong)] focus:border-[var(--color-brand-500)] focus:shadow-[var(--shadow-brand)] focus:outline-none"
-            />
-          </div>
+          <Input
+            type="password"
+            required
+            autoComplete="current-password"
+            icon={<Lock />}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+          />
         </div>
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full py-2.5 bg-[var(--color-brand-600)] text-white text-sm font-medium rounded-[var(--radius-md)] hover:bg-[var(--color-brand-500)] active:bg-[var(--color-brand-700)] disabled:opacity-50 disabled:pointer-events-none transition-colors shadow-sm mt-2"
-        >
+        <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? t('common.loading') : t('auth.loginButton')}
-        </button>
+        </Button>
       </form>
     </div>
   );

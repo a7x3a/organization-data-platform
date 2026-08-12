@@ -1,16 +1,16 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { Shield, HardDrive, Key, UserCheck } from 'lucide-react';
+import { Shield, HardDrive, UserCheck } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-8 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           {t('nav.settings')}
         </h1>
         <p className="text-sm text-[var(--color-text-muted)]">
@@ -18,12 +18,12 @@ export const Settings: React.FC = () => {
         </p>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-8">
         {/* User Info */}
-        <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-5 shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-3 border-b border-[var(--color-border)] pb-4 mb-4">
-            <UserCheck className="w-5 h-5 text-[var(--color-brand-400)]" />
-            <h2 className="text-md font-semibold text-[var(--color-text-primary)]">
+        <div>
+          <div className="flex items-center gap-2.5 pb-4 border-b border-[var(--color-border)] mb-4">
+            <UserCheck className="w-4 h-4 text-[var(--color-brand-400)]" />
+            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
               Current User Session
             </h2>
           </div>
@@ -40,17 +40,17 @@ export const Settings: React.FC = () => {
         </div>
 
         {/* Cloudflare R2 Info */}
-        <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-5 shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-3 border-b border-[var(--color-border)] pb-4 mb-4">
-            <HardDrive className="w-5 h-5 text-[var(--color-accent-400)]" />
-            <h2 className="text-md font-semibold text-[var(--color-text-primary)]">
+        <div>
+          <div className="flex items-center gap-2.5 pb-4 border-b border-[var(--color-border)] mb-4">
+            <HardDrive className="w-4 h-4 text-[var(--color-accent-400)]" />
+            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
               Cloudflare R2 Immutable Storage
             </h2>
           </div>
           <div className="space-y-2 text-xs font-mono">
             <div className="flex justify-between">
               <span className="text-[var(--color-text-muted)]">Target Zone:</span>
-              <span className="text-[var(--color-text-primary)] font-bold">00_raw/web/</span>
+              <span className="text-[var(--color-text-primary)]">00_raw/web/</span>
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--color-text-muted)]">Security Model:</span>
@@ -64,10 +64,10 @@ export const Settings: React.FC = () => {
         </div>
 
         {/* Security Rules */}
-        <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-5 shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-3 border-b border-[var(--color-border)] pb-4 mb-4">
-            <Shield className="w-5 h-5 text-[var(--color-warning-400)]" />
-            <h2 className="text-md font-semibold text-[var(--color-text-primary)]">
+        <div>
+          <div className="flex items-center gap-2.5 pb-4 border-b border-[var(--color-border)] mb-4">
+            <Shield className="w-4 h-4 text-[var(--color-warning-400)]" />
+            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
               System Policy & SSRF Safeguards
             </h2>
           </div>

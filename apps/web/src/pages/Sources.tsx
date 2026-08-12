@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useSources, useCreateSource, useDeleteSource } from '../hooks/useSources';
 import { DataTable, Column } from '../components/DataTable';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Button } from '../components/Button';
+import { Input, Select, Textarea } from '../components/Input';
 import { Source } from '@odp/shared-types';
 import { Plus, Trash2, ExternalLink } from 'lucide-react';
 
@@ -51,8 +53,8 @@ export const Sources: React.FC = () => {
       header: t('sources.fields.name'),
       accessor: (s) => (
         <div>
-          <div className="font-semibold text-[var(--color-text-primary)]">{s.name}</div>
-          <div className="text-xs font-mono text-[var(--color-text-muted)]">{s.slug}</div>
+          <div className="text-[var(--color-text-primary)]">{s.name}</div>
+          <div className="text-xs text-[var(--color-text-muted)]">{s.slug}</div>
         </div>
       ),
     },
@@ -63,7 +65,7 @@ export const Sources: React.FC = () => {
           href={s.baseUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 font-mono text-xs text-[var(--color-brand-400)] hover:underline truncate max-w-xs"
+          className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-brand-400)] truncate max-w-xs"
         >
           {s.baseUrl}
           <ExternalLink className="w-3 h-3 flex-shrink-0" />
@@ -73,7 +75,7 @@ export const Sources: React.FC = () => {
     {
       header: t('sources.fields.robotsPolicy'),
       accessor: (s) => (
-        <span className="text-xs font-mono text-[var(--color-text-secondary)]">
+        <span className="text-xs text-[var(--color-text-secondary)]">
           {t(`sources.robotsPolicy.${s.robotsPolicy}`)}
         </span>
       ),
@@ -82,10 +84,8 @@ export const Sources: React.FC = () => {
       header: t('sources.fields.enabled'),
       accessor: (s) => (
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-            s.enabled
-              ? 'bg-[var(--color-success-bg)] text-[var(--color-success-400)]'
-              : 'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)]'
+          className={`text-xs ${
+            s.enabled ? 'text-[var(--color-success-400)]' : 'text-[var(--color-text-muted)]'
           }`}
         >
           {s.enabled ? t('common.enabled') : t('common.disabled')}
@@ -93,14 +93,12 @@ export const Sources: React.FC = () => {
       ),
     },
     {
-      header: t('common.actions'),
+      header: '',
+      className: 'text-right',
       accessor: (s) => (
-        <button
-          onClick={() => setSourceToDelete(s)}
-          className="p-1.5 rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-bg-elevated)] transition-colors"
-        >
+        <Button variant="danger" size="sm" iconOnly onClick={() => setSourceToDelete(s)}>
           <Trash2 className="w-4 h-4" />
-        </button>
+        </Button>
       ),
     },
   ];
@@ -109,18 +107,15 @@ export const Sources: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('sources.title')}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('sources.subtitle')}</p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--color-brand-600)] text-white text-sm font-medium rounded-[var(--radius-md)] hover:bg-[var(--color-brand-500)] transition-colors shadow-sm"
-        >
+        <Button onClick={() => setIsModalOpen(true)}>
           <Plus className="w-4 h-4" />
           {t('sources.create')}
-        </button>
+        </Button>
       </div>
 
       <DataTable
@@ -142,17 +137,17 @@ export const Sources: React.FC = () => {
 
       {/* Create Source Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-lg w-full shadow-[var(--shadow-elevated)]">
-            <h2 className="text-lg font-bold text-[var(--color-text-primary)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-md w-full">
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
               {t('sources.create')}
             </h2>
-            <form onSubmit={handleCreate} className="mt-4 space-y-4">
+            <form onSubmit={handleCreate} className="mt-5 space-y-5">
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('sources.fields.name')}
                 </label>
-                <input
+                <Input
                   type="text"
                   required
                   value={name}
@@ -168,80 +163,68 @@ export const Sources: React.FC = () => {
                     }
                   }}
                   placeholder="e.g. Kurdish Open Data"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('sources.fields.slug')}
                 </label>
-                <input
+                <Input
                   type="text"
                   required
                   pattern="^[a-z0-9\-]+$"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                   placeholder="kurdish-open-data"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('sources.fields.baseUrl')}
                 </label>
-                <input
+                <Input
                   type="url"
                   required
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://example.com"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('sources.fields.robotsPolicy')}
                 </label>
-                <select
+                <Select
                   value={robotsPolicy}
-                  onChange={(e) => setRobotsPolicy(e.target.value as 'RESPECT' | 'IGNORE')}
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
-                >
-                  <option value="RESPECT">Respect robots.txt</option>
-                  <option value="IGNORE">Ignore robots.txt</option>
-                </select>
+                  onValueChange={(v) => setRobotsPolicy(v as 'RESPECT' | 'IGNORE')}
+                  options={[
+                    { value: 'RESPECT', label: 'Respect robots.txt' },
+                    { value: 'IGNORE', label: 'Ignore robots.txt' },
+                  ]}
+                />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('sources.fields.description')}
                 </label>
-                <textarea
+                <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-overlay)] transition-colors"
-                >
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
                   {t('common.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={createSource.isPending}
-                  className="px-4 py-2 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-md)] text-sm font-medium hover:bg-[var(--color-brand-500)] transition-colors disabled:opacity-50"
-                >
+                </Button>
+                <Button type="submit" disabled={createSource.isPending}>
                   {createSource.isPending ? t('common.loading') : t('common.create')}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

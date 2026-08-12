@@ -9,8 +9,10 @@ import {
 } from '../hooks/useCollectors';
 import { useSources } from '../hooks/useSources';
 import { DataTable, Column } from '../components/DataTable';
+import { Button } from '../components/Button';
+import { Input, Select, Textarea } from '../components/Input';
 import { Collector } from '@odp/shared-types';
-import { Plus, Play, Power, ExternalLink } from 'lucide-react';
+import { Plus, Play, Power } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export const Collectors: React.FC = () => {
@@ -39,6 +41,7 @@ export const Collectors: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sourceId) return;
     const urls = startUrls
       .split('\n')
       .map((u) => u.trim())
@@ -84,22 +87,17 @@ export const Collectors: React.FC = () => {
       header: t('collectors.fields.name'),
       accessor: (c) => (
         <div>
-          <Link
-            to={`/collectors/${c.id}`}
-            className="font-semibold text-[var(--color-text-primary)] hover:underline"
-          >
+          <Link to={`/collectors/${c.id}`} className="text-[var(--color-text-primary)] hover:underline">
             {c.name}
           </Link>
-          <div className="text-xs text-[var(--color-text-muted)] font-mono">
-            {c.source?.name || '—'}
-          </div>
+          <div className="text-xs text-[var(--color-text-muted)]">{c.source?.name || '—'}</div>
         </div>
       ),
     },
     {
       header: t('collectors.fields.startUrls'),
       accessor: (c) => (
-        <span className="font-mono text-xs text-[var(--color-brand-400)] truncate max-w-xs block">
+        <span className="text-xs text-[var(--color-text-muted)] truncate max-w-xs block">
           {c.configuration.startUrls?.[0] || '—'}
         </span>
       ),
@@ -107,13 +105,9 @@ export const Collectors: React.FC = () => {
     {
       header: 'Limits',
       accessor: (c) => (
-        <div className="text-xs font-mono text-[var(--color-text-muted)]">
-          Depth: {c.configuration.maxDepth} | Conc: {c.configuration.concurrency}
-          {c.configuration.useBrowser && (
-            <span className="ml-1 px-1.5 py-0.5 bg-[var(--color-warning-bg)] text-[var(--color-warning-400)] rounded text-[10px]">
-              Browser
-            </span>
-          )}
+        <div className="text-xs text-[var(--color-text-muted)]">
+          Depth {c.configuration.maxDepth} · Conc {c.configuration.concurrency}
+          {c.configuration.useBrowser && <span className="ml-1.5">· Browser</span>}
         </div>
       ),
     },
@@ -124,10 +118,10 @@ export const Collectors: React.FC = () => {
           onClick={() =>
             c.enabled ? disableCollector.mutate(c.id) : enableCollector.mutate(c.id)
           }
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+          className={`inline-flex items-center gap-1.5 text-xs transition-colors ${
             c.enabled
-              ? 'bg-[var(--color-success-bg)] text-[var(--color-success-400)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-400)]'
-              : 'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] hover:bg-[var(--color-success-bg)] hover:text-[var(--color-success-400)]'
+              ? 'text-[var(--color-success-400)] hover:text-[var(--color-error-400)]'
+              : 'text-[var(--color-text-muted)] hover:text-[var(--color-success-400)]'
           }`}
         >
           <Power className="w-3 h-3" />
@@ -136,16 +130,18 @@ export const Collectors: React.FC = () => {
       ),
     },
     {
-      header: t('common.actions'),
+      header: '',
+      className: 'text-right',
       accessor: (c) => (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => handleRun(c.id)}
           disabled={!c.enabled || runCollector.isPending}
-          className="inline-flex items-center gap-1 px-3 py-1.5 bg-[var(--color-brand-600)] text-white text-xs font-medium rounded-[var(--radius-md)] hover:bg-[var(--color-brand-500)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Play className="w-3.5 h-3.5" />
           {t('collectors.run')}
-        </button>
+        </Button>
       ),
     },
   ];
@@ -154,18 +150,15 @@ export const Collectors: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('collectors.title')}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('collectors.subtitle')}</p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--color-brand-600)] text-white text-sm font-medium rounded-[var(--radius-md)] hover:bg-[var(--color-brand-500)] transition-colors"
-        >
+        <Button onClick={() => setIsModalOpen(true)}>
           <Plus className="w-4 h-4" />
           {t('collectors.create')}
-        </button>
+        </Button>
       </div>
 
       <DataTable
@@ -187,142 +180,123 @@ export const Collectors: React.FC = () => {
 
       {/* Create Collector Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-xl w-full shadow-[var(--shadow-elevated)] max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold text-[var(--color-text-primary)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
               {t('collectors.create')}
             </h2>
-            <form onSubmit={handleCreate} className="mt-4 space-y-4">
+            <form onSubmit={handleCreate} className="mt-5 space-y-5">
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('collectors.fields.source')}
                 </label>
-                <select
-                  required
+                <Select
                   value={sourceId}
-                  onChange={(e) => setSourceId(e.target.value)}
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
-                >
-                  <option value="">Select source website...</option>
-                  {sourcesData?.data.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.slug})
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setSourceId}
+                  placeholder="Select source website..."
+                  options={(sourcesData?.data || []).map((s) => ({
+                    value: s.id,
+                    label: `${s.name} (${s.slug})`,
+                  }))}
+                />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('collectors.fields.name')}
                 </label>
-                <input
+                <Input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Daily PDF Books Scraper"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('collectors.fields.startUrls')} (one per line)
                 </label>
-                <textarea
+                <Textarea
                   required
                   rows={3}
                   value={startUrls}
                   onChange={(e) => setStartUrls(e.target.value)}
                   placeholder="https://example.com/books&#10;https://example.com/archive"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('collectors.fields.allowedDomains')} (comma separated)
                 </label>
-                <input
+                <Input
                   type="text"
                   value={allowedDomains}
                   onChange={(e) => setAllowedDomains(e.target.value)}
                   placeholder="example.com, archive.example.com"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                     Max Depth
                   </label>
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     max={20}
                     value={maxDepth}
                     onChange={(e) => setMaxDepth(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                     Max Pages
                   </label>
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     max={100000}
                     value={maxPages}
                     onChange={(e) => setMaxPages(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                     Concurrency
                   </label>
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     max={16}
                     value={concurrency}
                     onChange={(e) => setConcurrency(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)]"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <label className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
-                  id="useBrowser"
                   checked={useBrowser}
                   onChange={(e) => setUseBrowser(e.target.checked)}
-                  className="rounded border-[var(--color-border)] bg-[var(--color-bg-base)] text-[var(--color-brand-600)]"
+                  className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
                 />
-                <label htmlFor="useBrowser" className="text-xs font-medium text-[var(--color-text-primary)]">
-                  Use Playwright Headless Browser (for JS-rendered pages)
-                </label>
-              </div>
+                <span className="text-xs text-[var(--color-text-secondary)]">
+                  Use Playwright headless browser (for JS-rendered pages)
+                </span>
+              </label>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-[var(--color-border)]">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-medium text-[var(--color-text-secondary)]"
-                >
+              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
                   {t('common.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={createCollector.isPending}
-                  className="px-4 py-2 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-md)] text-sm font-medium hover:bg-[var(--color-brand-500)] disabled:opacity-50"
-                >
+                </Button>
+                <Button type="submit" disabled={createCollector.isPending || !sourceId}>
                   {createCollector.isPending ? t('common.loading') : t('common.create')}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

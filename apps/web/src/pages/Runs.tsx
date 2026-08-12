@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useRuns, useCancelRun } from '../hooks/useRuns';
 import { DataTable, Column } from '../components/DataTable';
 import { RunStatusBadge } from '../components/RunStatusBadge';
+import { Button } from '../components/Button';
+import { Select } from '../components/Input';
 import { CollectionRun, RunStatus } from '@odp/shared-types';
 import { formatDuration } from '../lib/utils';
 import { Link } from 'react-router-dom';
@@ -71,14 +73,15 @@ export const Runs: React.FC = () => {
       header: t('common.actions'),
       accessor: (r) =>
         r.status === RunStatus.RUNNING || r.status === RunStatus.PENDING ? (
-          <button
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => cancelRun.mutate(r.id)}
             disabled={cancelRun.isPending}
-            className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-500)]/30 rounded-[var(--radius-md)] text-xs font-medium hover:bg-[var(--color-error-500)] hover:text-white transition-colors"
           >
             <XCircle className="w-3.5 h-3.5" />
             {t('runs.cancel')}
-          </button>
+          </Button>
         ) : null,
     },
   ];
@@ -87,25 +90,25 @@ export const Runs: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('runs.title')}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('runs.subtitle')}</p>
         </div>
 
-        {/* Filter dropdown */}
-        <select
+        <Select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-xs text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
-        >
-          <option value="">All Statuses</option>
-          <option value="RUNNING">Running</option>
-          <option value="PENDING">Pending</option>
-          <option value="COMPLETED">Completed</option>
-          <option value="FAILED">Failed</option>
-          <option value="CANCELLED">Cancelled</option>
-        </select>
+          onValueChange={setStatusFilter}
+          className="w-40"
+          options={[
+            { value: '', label: 'All Statuses' },
+            { value: 'RUNNING', label: 'Running' },
+            { value: 'PENDING', label: 'Pending' },
+            { value: 'COMPLETED', label: 'Completed' },
+            { value: 'FAILED', label: 'Failed' },
+            { value: 'CANCELLED', label: 'Cancelled' },
+          ]}
+        />
       </div>
 
       <DataTable

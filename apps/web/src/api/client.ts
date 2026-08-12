@@ -39,8 +39,14 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    // A failed login attempt returns 401 too, but it isn't a "session
+    // expired" event — it's an invalid-credentials error the login page's
+    // own form should handle inline. Without this guard, the redirect below
+    // fires a full page reload back to /login before the error message the
+    // catch block just set ever gets a chance to render.
+    const isLoginRequest = originalRequest?.url?.includes('/auth/login');
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !isLoginRequest) {
       if (error.response?.data?.code === 'TOKEN_EXPIRED') {
         if (isRefreshing) {
           return new Promise((resolve, reject) => {

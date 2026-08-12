@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useUsers, useCreateUser } from '../hooks/useUsers';
 import { useAuth } from '../hooks/useAuth';
 import { DataTable, Column } from '../components/DataTable';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
 import { User, UserRole } from '@odp/shared-types';
 import { Plus, ShieldCheck, ShieldAlert } from 'lucide-react';
 
@@ -59,12 +61,9 @@ export const Users: React.FC = () => {
     {
       header: 'Roles',
       accessor: (u) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-x-2 gap-y-1">
           {u.roles.map((r) => (
-            <span
-              key={r}
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--color-brand-900)]/40 text-[var(--color-brand-300)] border border-[var(--color-brand-500)]/30"
-            >
+            <span key={r} className="text-[10px] font-mono text-[var(--color-text-muted)]">
               {r}
             </span>
           ))}
@@ -75,10 +74,8 @@ export const Users: React.FC = () => {
       header: 'Status',
       accessor: (u) => (
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-            u.isActive
-              ? 'bg-[var(--color-success-bg)] text-[var(--color-success-400)]'
-              : 'bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)]'
+          className={`text-xs ${
+            u.isActive ? 'text-[var(--color-success-400)]' : 'text-[var(--color-text-muted)]'
           }`}
         >
           {u.isActive ? 'Active' : 'Disabled'}
@@ -103,8 +100,8 @@ export const Users: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)] flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-[var(--color-brand-400)]" />
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[var(--color-brand-400)]" />
             Users
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">
@@ -112,13 +109,10 @@ export const Users: React.FC = () => {
             (Data Manager), or full access (Admin).
           </p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--color-brand-600)] text-white text-sm font-medium rounded-[var(--radius-md)] hover:bg-[var(--color-brand-500)] transition-colors shadow-sm"
-        >
+        <Button onClick={() => setIsModalOpen(true)}>
           <Plus className="w-4 h-4" />
           Create User
-        </button>
+        </Button>
       </div>
 
       <DataTable
@@ -130,56 +124,45 @@ export const Users: React.FC = () => {
       />
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-lg w-full shadow-[var(--shadow-elevated)]">
-            <h2 className="text-lg font-bold text-[var(--color-text-primary)]">Create User</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-md w-full">
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Create User</h2>
 
-            {error && (
-              <div className="mt-3 p-3 bg-[var(--color-error-bg)] border border-[var(--color-error-500)]/30 rounded-[var(--radius-md)] text-xs text-[var(--color-error-400)]">
-                {error}
-              </div>
-            )}
+            {error && <div className="mt-3 text-xs text-[var(--color-error-400)]">{error}</div>}
 
-            <form onSubmit={handleCreate} className="mt-4 space-y-4">
+            <form onSubmit={handleCreate} className="mt-5 space-y-5">
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   Username
                 </label>
-                <input
+                <Input
                   type="text"
                   required
                   pattern="^[a-zA-Z0-9_\-]+$"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="jsmith"
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
+                  className="font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   Full name
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
-                />
+                <Input type="text" required value={name} onChange={(e) => setName(e.target.value)} />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   Password
                 </label>
-                <input
+                <Input
                   type="password"
                   required
                   minLength={8}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm text-[var(--color-text-primary)] focus:border-[var(--color-brand-500)] focus:outline-none"
                 />
               </div>
 
@@ -191,7 +174,7 @@ export const Users: React.FC = () => {
                   {ALL_ROLES.map((role) => (
                     <label
                       key={role}
-                      className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-base)] text-xs font-mono cursor-pointer hover:border-[var(--color-brand-500)]/50"
+                      className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-secondary)] cursor-pointer"
                     >
                       <input
                         type="checkbox"
@@ -205,21 +188,13 @@ export const Users: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-overlay)] transition-colors"
-                >
+              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createUser.isPending || roles.length === 0}
-                  className="px-4 py-2 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-md)] text-sm font-medium hover:bg-[var(--color-brand-500)] transition-colors disabled:opacity-50"
-                >
+                </Button>
+                <Button type="submit" disabled={createUser.isPending || roles.length === 0}>
                   {createUser.isPending ? 'Creating...' : 'Create User'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
