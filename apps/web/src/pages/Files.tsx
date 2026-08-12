@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFiles } from '../hooks/useFiles';
 import { filesApi } from '../api/files';
+import { apiClient } from '../api/client';
 import { DataTable, Column } from '../components/DataTable';
 import { FileStatusBadge } from '../components/FileStatusBadge';
 import { Button } from '../components/Button';
@@ -23,7 +24,19 @@ export const Files: React.FC = () => {
   const handleDownload = async (fileId: string) => {
     try {
       const res = await filesApi.getDownloadUrl(fileId);
-      window.open(res.url, '_blank');
+      if (res.url.startsWith('/api/')) {
+        // Local storage: this is our own auth-gated route, not a presigned
+        // link — plain browser navigation (window.open) never attaches the
+        // Authorization header, so it 401s. Fetch it through the
+        // authenticated client instead and open the resulting blob.
+        const fileRes = await apiClient.get(res.url.slice('/api'.length), {
+          responseType: 'blob',
+        });
+        window.open(URL.createObjectURL(fileRes.data), '_blank');
+      } else {
+        // R2 presigned URL — auth is already baked into the query string.
+        window.open(res.url, '_blank');
+      }
     } catch {
       alert('Could not generate signed download URL');
     }

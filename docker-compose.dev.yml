@@ -71,6 +71,7 @@ services:
       API_BASE_URL: http://api:4000
     volumes:
       - ./services/scraper/app:/app/app
+      - ./storage:/app/storage
     depends_on:
       redis:
         condition: service_healthy

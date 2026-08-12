@@ -7,7 +7,7 @@ Playwright is NOT launched here.
 import asyncio
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Set
+from typing import Awaitable, Callable, Optional, Set
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -48,6 +48,7 @@ class DiscoveredFile:
 class CrawlResult:
     pages_crawled: int = 0
     files_discovered: list[DiscoveredFile] = field(default_factory=list)
+    cancelled: bool = False
 
 
 # Common downloadable file extensions
@@ -137,7 +138,10 @@ async def is_private_address(url: str) -> bool:
     return any(_is_private_ip(info[4][0]) for info in resolved)
 
 
-async def crawl(config: CrawlConfig) -> CrawlResult:
+async def crawl(
+    config: CrawlConfig,
+    should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+) -> CrawlResult:
     """
     Perform an HTTP crawl using httpx.
     Returns all discovered downloadable file URLs.
@@ -252,6 +256,15 @@ async def crawl(config: CrawlConfig) -> CrawlResult:
 
         tasks = []
         while not queue.empty() or tasks:
+            # Crawls can run for a long time (many pages, no domain
+            # restriction, etc.) with no other checkpoint — without this,
+            # a cancelled run keeps crawling regardless, since the only
+            # other cancellation check (in collection_job.py) happens
+            # AFTER the whole crawl phase finishes.
+            if should_cancel is not None and await should_cancel():
+                result.cancelled = True
+                break
+
             while not queue.empty():
                 url, depth = await queue.get()
                 task = asyncio.create_task(process_url(url, depth))
@@ -266,9 +279,14 @@ async def crawl(config: CrawlConfig) -> CrawlResult:
             if queue.empty() and not tasks:
                 break
 
-    log.info(
-        "crawl_complete",
-        pages=result.pages_crawled,
-        files=len(result.files_discovered),
-    )
+        if result.cancelled:
+            for task in tasks:
+                task.cancel()
+            log.info("crawl_cancelled", pages=result.pages_crawled)
+        else:
+            log.info(
+                "crawl_complete",
+                pages=result.pages_crawled,
+                files=len(result.files_discovered),
+            )
     return result

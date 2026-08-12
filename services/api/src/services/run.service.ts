@@ -6,10 +6,8 @@ import { RunStatus } from '@odp/shared-types';
 import { logger } from '../utils/logger';
 import type { UpdateRunStatusInput, RecordErrorInput } from '../schemas/index';
 
-function generateRunId(seq: number): string {
-  const now = new Date();
-  const date = now.toISOString().slice(0, 10); // YYYY-MM-DD
-  return `${date}_run_${String(seq).padStart(6, '0')}`;
+function generateRunId(datePrefix: string, seq: number): string {
+  return `${datePrefix}_run_${String(seq).padStart(6, '0')}`;
 }
 
 export async function listRuns(query: {
@@ -66,11 +64,19 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   if (!collector) throw new AppError(404, 'Collector not found', 'COLLECTOR_NOT_FOUND');
   if (!collector.enabled) throw new AppError(400, 'Collector is disabled', 'COLLECTOR_DISABLED');
 
-  // Count existing runs to generate a sequential run ID
-  const existingCount = await prisma.collectionRun.count({
-    where: { collectorId },
+  // Sequence numbers are derived from the highest existing runId for today,
+  // never from a row count — count() breaks the moment any run is deleted
+  // (deleteRun makes that possible now), since the next "count + 1" can
+  // collide with a runId that still exists. runId's numeric suffix is
+  // zero-padded, so string-descending order matches numeric order.
+  const datePrefix = new Date().toISOString().slice(0, 10);
+  const latestRun = await prisma.collectionRun.findFirst({
+    where: { collectorId, runId: { startsWith: `${datePrefix}_run_` } },
+    orderBy: { runId: 'desc' },
+    select: { runId: true },
   });
-  const runId = generateRunId(existingCount + 1);
+  const nextSeq = latestRun ? parseInt(latestRun.runId.split('_run_')[1], 10) + 1 : 1;
+  const runId = generateRunId(datePrefix, nextSeq);
 
   // Create the run record
   const run = await prisma.collectionRun.create({
@@ -124,6 +130,26 @@ export async function startCollectionRun(collectorId: string, userId: string) {
     collectionRunId: run.id,
     status: run.status,
   };
+}
+
+const ACTIVE_STATUSES: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
+
+// Deleting a run only ever removes the run record + its own error log rows
+// (CollectionError cascades). CollectedFile.collectionRunId is ON DELETE SET
+// NULL, never a cascade delete — a run being cleared out of the list can
+// never take a genuinely collected file down with it.
+export async function deleteRun(id: string) {
+  const run = await getRunById(id);
+
+  if (ACTIVE_STATUSES.includes(run.status as RunStatus)) {
+    throw new AppError(
+      400,
+      `Cannot delete an active run (status: ${run.status}). Cancel it first.`,
+      'RUN_ACTIVE'
+    );
+  }
+
+  await prisma.collectionRun.delete({ where: { id } });
 }
 
 export async function cancelRun(id: string, userId: string) {

@@ -76,6 +76,8 @@
       "subtitle": "Monitor collection job progress",
       "cancel": "Cancel Run",
       "cancelConfirm": "Cancel this collection run? The worker will stop after completing the current file.",
+      "delete": "Delete Run",
+      "deleteConfirm": "Delete this run record? Any files it already collected are kept — only the run's own history and error log are removed.",
       "status": {
         "PENDING": "Pending",
         "RUNNING": "Running",

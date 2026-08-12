@@ -5,7 +5,7 @@ Only launched when collector configuration has use_browser = True.
 Chromium is NOT started for normal HTTP pages.
 """
 import asyncio
-from typing import Optional, Set
+from typing import Awaitable, Callable, Optional, Set
 from urllib.parse import urlparse
 
 import structlog
@@ -26,7 +26,10 @@ from app.normalize.url_normalizer import normalize_url
 log = structlog.get_logger(__name__)
 
 
-async def crawl_with_browser(config: CrawlConfig) -> CrawlResult:
+async def crawl_with_browser(
+    config: CrawlConfig,
+    should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+) -> CrawlResult:
     """
     Playwright-based crawl for JavaScript-heavy pages.
 
@@ -159,6 +162,14 @@ async def crawl_with_browser(config: CrawlConfig) -> CrawlResult:
 
             tasks = []
             while not queue.empty() or tasks:
+                # Same cancellation checkpoint as the HTTP crawler — a
+                # browser crawl can wander for a long time (many pages, no
+                # domain restriction, slow JS-heavy sites), with no other
+                # way to stop it short of killing the whole worker process.
+                if should_cancel is not None and await should_cancel():
+                    result.cancelled = True
+                    break
+
                 while not queue.empty():
                     url, depth = await queue.get()
                     task = asyncio.create_task(process_page(url, depth))
@@ -175,13 +186,20 @@ async def crawl_with_browser(config: CrawlConfig) -> CrawlResult:
                 if queue.empty() and not tasks:
                     break
 
+            if result.cancelled:
+                for task in tasks:
+                    task.cancel()
+
         finally:
             await browser.close()
             log.info("browser_closed")
 
-    log.info(
-        "browser_crawl_complete",
-        pages=result.pages_crawled,
-        files=len(result.files_discovered),
-    )
+    if result.cancelled:
+        log.info("browser_crawl_cancelled", pages=result.pages_crawled)
+    else:
+        log.info(
+            "browser_crawl_complete",
+            pages=result.pages_crawled,
+            files=len(result.files_discovered),
+        )
     return result

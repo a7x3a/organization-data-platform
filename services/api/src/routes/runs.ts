@@ -1,9 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
+import { requireDataManager } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import {
   idParamSchema,
-  paginationSchema,
+  listRunsQuerySchema,
   updateRunStatusSchema,
   recordFileSchema,
   recordErrorSchema,
@@ -18,7 +19,7 @@ router.use(requireAuth);
 // GET /api/runs
 router.get(
   '/',
-  validate(paginationSchema, 'query'),
+  validate(listRunsQuerySchema, 'query'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await runService.listRuns(req.query as Record<string, string>);
@@ -37,6 +38,23 @@ router.get(
     try {
       const run = await runService.getRunById(req.params.id);
       res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// DELETE /api/runs/:id — Data Manager+. Only terminal-status runs (not
+// PENDING/RUNNING/CANCEL_REQUESTED) can be cleared — never deletes any
+// CollectedFile, only the run record and its own error log rows.
+router.delete(
+  '/:id',
+  requireDataManager,
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await runService.deleteRun(req.params.id);
+      res.status(204).send();
     } catch (err) {
       next(err);
     }

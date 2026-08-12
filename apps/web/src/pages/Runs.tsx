@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRuns, useCancelRun } from '../hooks/useRuns';
+import { useRuns, useCancelRun, useDeleteRun } from '../hooks/useRuns';
 import { DataTable, Column } from '../components/DataTable';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
 import { Select } from '../components/Input';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CollectionRun, RunStatus } from '@odp/shared-types';
 import { formatDuration } from '../lib/utils';
 import { Link } from 'react-router-dom';
-import { XCircle } from 'lucide-react';
+import { XCircle, Trash2 } from 'lucide-react';
+
+const ACTIVE_STATUSES = new Set([RunStatus.PENDING, RunStatus.RUNNING, 'CANCEL_REQUESTED']);
 
 export const Runs: React.FC = () => {
   const { t } = useTranslation();
@@ -20,6 +23,14 @@ export const Runs: React.FC = () => {
     status: statusFilter || undefined,
   });
   const cancelRun = useCancelRun();
+  const deleteRun = useDeleteRun();
+  const [runToDelete, setRunToDelete] = useState<CollectionRun | null>(null);
+
+  const handleDeleteConfirmed = async () => {
+    if (!runToDelete) return;
+    await deleteRun.mutateAsync(runToDelete.id);
+    setRunToDelete(null);
+  };
 
   const columns: Column<CollectionRun>[] = [
     {
@@ -72,7 +83,7 @@ export const Runs: React.FC = () => {
     {
       header: t('common.actions'),
       accessor: (r) =>
-        r.status === RunStatus.RUNNING || r.status === RunStatus.PENDING ? (
+        ACTIVE_STATUSES.has(r.status) ? (
           <Button
             variant="danger"
             size="sm"
@@ -82,7 +93,16 @@ export const Runs: React.FC = () => {
             <XCircle className="w-3.5 h-3.5" />
             {t('runs.cancel')}
           </Button>
-        ) : null,
+        ) : (
+          <Button
+            variant="danger"
+            size="sm"
+            iconOnly
+            onClick={() => setRunToDelete(r)}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        ),
     },
   ];
 
@@ -126,6 +146,15 @@ export const Runs: React.FC = () => {
               }
             : undefined
         }
+      />
+
+      <ConfirmDialog
+        isOpen={!!runToDelete}
+        title={t('runs.delete')}
+        message={t('runs.deleteConfirm')}
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setRunToDelete(null)}
+        isLoading={deleteRun.isPending}
       />
     </div>
   );

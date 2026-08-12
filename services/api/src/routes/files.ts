@@ -6,7 +6,7 @@ import { validate } from '../middleware/validate';
 import { AppError } from '../middleware/errorHandler';
 import {
   idParamSchema,
-  paginationSchema,
+  listFilesQuerySchema,
   manualUploadBodySchema,
   manualEntrySchema,
 } from '../schemas/index';
@@ -81,7 +81,7 @@ router.post(
 // GET /api/files
 router.get(
   '/',
-  validate(paginationSchema, 'query'),
+  validate(listFilesQuerySchema, 'query'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await fileService.listFiles(req.query as Record<string, string>);

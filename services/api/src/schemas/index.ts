@@ -40,6 +40,34 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
 
+// zod strips unrecognized keys by default (not an error), and `validate()`
+// replaces req.query with the parsed result — so any list route validated
+// against bare paginationSchema silently drops every filter param it's
+// given. listFiles/listRuns/listCollectors each support extra filters
+// (sourceId, status, sha256, ...); the schema each route validates against
+// must extend paginationSchema with those same fields or they never survive
+// past the middleware. This is what broke duplicate detection: the scraper's
+// GET /api/files?sha256=X was silently becoming GET /api/files (unfiltered),
+// so total > 0 as soon as ANY file existed anywhere — every newly scraped
+// file looked like a duplicate of something, and nothing new ever got saved.
+export const listCollectorsQuerySchema = paginationSchema.extend({
+  sourceId: z.string().optional(),
+});
+
+export const listRunsQuerySchema = paginationSchema.extend({
+  collectorId: z.string().optional(),
+  sourceId: z.string().optional(),
+  status: z.string().optional(),
+});
+
+export const listFilesQuerySchema = paginationSchema.extend({
+  collectionRunId: z.string().optional(),
+  sourceId: z.string().optional(),
+  status: z.string().optional(),
+  sha256: z.string().optional(),
+  sourceUrl: z.string().optional(),
+});
+
 // ─── Source ───────────────────────────────────────────────────
 
 export const createSourceSchema = z.object({

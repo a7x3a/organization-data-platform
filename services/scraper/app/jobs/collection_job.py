@@ -21,7 +21,14 @@ import httpx
 import structlog
 
 from app.config.settings import settings
-from app.downloader.downloader import download_file, DownloadError, FileTooLargeError
+from app.downloader.downloader import (
+    download_file,
+    extract_filename,
+    categorize_file,
+    DownloadCancelled,
+    DownloadError,
+    FileTooLargeError,
+)
 from app.spiders.http_spider import crawl, CrawlConfig
 from app.spiders.browser_spider import crawl_with_browser
 from app.storage import storage
@@ -94,33 +101,70 @@ class CollectionJob:
             use_browser = self._cfg.get("useBrowser", False)
             if use_browser:
                 log.info("using_playwright_browser", run_id=self._run_db_id)
-                crawl_result = await crawl_with_browser(crawl_config)
+                crawl_result = await crawl_with_browser(crawl_config, should_cancel=self._is_cancelled)
             else:
-                crawl_result = await crawl(crawl_config)
+                crawl_result = await crawl(crawl_config, should_cancel=self._is_cancelled)
 
             for _ in range(crawl_result.pages_crawled):
                 manifest.record_page_crawled()
 
-            # 2. Download and upload each file
-            async with httpx.AsyncClient(
-                timeout=self._cfg.get("requestTimeoutSeconds", 30),
-                follow_redirects=True,
-            ) as http_client:
-                for discovered in crawl_result.files_discovered:
-                    # Check for cancellation
-                    if await self._is_cancelled():
-                        log.info("collection_cancelled", run_id=self._run_db_id)
-                        await self._finalize(
-                            manifest, metadata, status="CANCELLED"
-                        )
-                        return
+            if crawl_result.cancelled:
+                # Cancelled during the crawl phase itself — before this,
+                # cancellation was only checked between crawl and download,
+                # so a run stuck crawling (many pages, unrestricted domains,
+                # a slow JS-heavy site) couldn't be stopped short of killing
+                # the worker process.
+                log.info("collection_cancelled", run_id=self._run_db_id)
+                await self._finalize(manifest, metadata, status="CANCELLED")
+                return
 
+            # 2. Download and upload files concurrently, bounded by the
+            # collector's configured concurrency. This used to be a plain
+            # sequential `for` loop — one file at a time regardless of the
+            # concurrency setting — which made runs with many/large files
+            # far slower than the config implied.
+            concurrency = max(1, self._cfg.get("concurrency", 4))
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def bounded_process(discovered) -> None:
+                async with semaphore:
+                    # Checked again here (not just at the top of run()) so a
+                    # cancellation mid-run stops new downloads from starting
+                    # as soon as a semaphore slot frees up, rather than only
+                    # between whole crawl batches.
+                    if await self._is_cancelled():
+                        raise DownloadCancelled(f"Cancelled before starting {discovered.url}")
                     await self._process_file(
                         discovered.url,
                         http_client=http_client,
                         manifest=manifest,
                         metadata=metadata,
                     )
+
+            # Same identifying User-Agent as http_spider/browser_spider — without
+            # it this client falls back to httpx's default UA, which WordPress-style
+            # hotlink/bot protection on media paths (wp-content/uploads/...) 403s,
+            # even though the same site's HTML pages crawled fine moments earlier.
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "ODP-Collector/1.0 (+https://github.com/org/data-platform)"},
+                timeout=self._cfg.get("requestTimeoutSeconds", 30),
+                follow_redirects=True,
+            ) as http_client:
+                results = await asyncio.gather(
+                    *(bounded_process(d) for d in crawl_result.files_discovered),
+                    return_exceptions=True,
+                )
+
+            cancelled = any(isinstance(r, DownloadCancelled) for r in results)
+            other_errors = [r for r in results if isinstance(r, BaseException) and not isinstance(r, DownloadCancelled)]
+
+            if cancelled:
+                log.info("collection_cancelled", run_id=self._run_db_id)
+                await self._finalize(manifest, metadata, status="CANCELLED")
+                return
+
+            if other_errors:
+                raise other_errors[0]
 
             await self._finalize(manifest, metadata, status="COMPLETED")
 
@@ -138,21 +182,43 @@ class CollectionJob:
         metadata: MetadataWriter,
     ) -> None:
         """Download, hash, deduplicate, upload one file."""
+        if await self._is_known_url(url):
+            # Cheap pre-check: this exact URL was already collected (or
+            # already resolved as a duplicate) in a previous run. Skip the
+            # full download entirely — re-fetching tens of megabytes of an
+            # mp3/pdf against a slow, possibly-throttled real site just to
+            # recompute an already-known hash is pure waste. Content-hash
+            # dedup below still runs for any URL not seen before, so a
+            # renamed/moved copy of the same content is still caught.
+            log.info("skipped_known_url", url=url)
+            manifest.record_file_duplicate()
+            await self._report_file_status(url, extract_filename(url), "", "DUPLICATE")
+            await self._report_progress(manifest)
+            return
+
         try:
             result = await download_file(
                 url,
                 client=http_client,
                 max_size_bytes=settings.max_file_size_bytes,
+                should_cancel=self._is_cancelled,
             )
+        except DownloadCancelled:
+            # Not a per-file failure — the whole run is being torn down.
+            # Let it propagate so the caller stops immediately instead of
+            # waiting for the next file-boundary cancellation check.
+            raise
         except FileTooLargeError as e:
             log.warning("file_too_large", url=url, error=str(e))
             manifest.record_file_skipped()
             await self._report_file_error(url, "FILE_TOO_LARGE", str(e))
+            await self._report_progress(manifest)
             return
         except DownloadError as e:
             log.warning("download_failed", url=url, error=str(e))
             manifest.record_file_failed()
             await self._report_file_error(url, "NETWORK_ERROR", str(e))
+            await self._report_progress(manifest)
             return
 
         # Check for exact duplicate via SHA-256
@@ -162,10 +228,14 @@ class CollectionJob:
             manifest.record_file_duplicate()
             os.unlink(result.temp_path)
             await self._report_file_status(url, result.file_name, result.sha256, "DUPLICATE")
+            await self._report_progress(manifest)
             return
 
-        # Build R2 key
-        r2_key = f"{self._run_folder_key}/files/{result.file_name}"
+        # Build R2 key — one subfolder per file type (pdf/audio/video/images/
+        # documents/...) so 00_raw doesn't become a single bucket mixing
+        # every format together.
+        category = categorize_file(result.mime_type, result.extension)
+        r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
 
         # Upload to R2
         try:
@@ -178,6 +248,7 @@ class CollectionJob:
             log.error("r2_upload_failed", url=url, key=r2_key, error=str(e))
             manifest.record_file_failed()
             await self._report_file_error(url, "R2_UPLOAD_ERROR", str(e))
+            await self._report_progress(manifest)
             os.unlink(result.temp_path)
             return
         finally:
@@ -213,6 +284,7 @@ class CollectionJob:
 
         manifest.record_file_downloaded()
         log.info("file_collected", url=url, sha256=result.sha256, r2_key=r2_key)
+        await self._report_progress(manifest)
 
     async def _finalize(
         self,
@@ -263,6 +335,27 @@ class CollectionJob:
             **stats,
         )
 
+    async def _report_progress(self, manifest: ManifestWriter) -> None:
+        """
+        Push incremental stats after each file, not just at the end.
+        Without this the Runs table shows 0/0/0 for the run's entire
+        duration — filesFound/filesDownloaded/etc only ever got written
+        once, in _finalize() — so an actively-working run looked frozen.
+        """
+        # manifest.stats is snake_case to match the on-disk manifest.json
+        # format — translate to the camelCase the API/Prisma schema expects
+        # (same translation _finalize does for the terminal update).
+        stats = manifest.stats
+        await self._update_run_status(
+            "RUNNING",
+            filesFound=stats["files_found"],
+            filesDownloaded=stats["files_downloaded"],
+            filesSkipped=stats["files_skipped"],
+            filesDuplicate=stats["files_duplicate"],
+            filesFailed=stats["files_failed"],
+            pagesCrawled=stats["pages_crawled"],
+        )
+
     async def _update_run_status(self, status: str, **kwargs) -> None:
         """Callback to API to update run status."""
         try:
@@ -286,6 +379,23 @@ class CollectionJob:
         """Ask the API if this SHA-256 already exists."""
         try:
             r = await self._api.get(f"/api/files?sha256={sha256}&pageSize=1")
+            data = r.json()
+            return data.get("total", 0) > 0
+        except Exception:
+            return False
+
+    async def _is_known_url(self, url: str) -> bool:
+        """
+        Ask the API if this exact source URL was already recorded for this
+        source (as UPLOADED or DUPLICATE) — a cheap metadata check, done
+        before spending a full download on a file we already have a
+        definitive answer for.
+        """
+        try:
+            r = await self._api.get(
+                "/api/files",
+                params={"sourceId": self._data["sourceId"], "sourceUrl": url, "pageSize": 1},
+            )
             data = r.json()
             return data.get("total", 0) > 0
         except Exception:

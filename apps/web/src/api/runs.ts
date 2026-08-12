@@ -22,4 +22,8 @@ export const runsApi = {
     const res = await apiClient.post<CollectionRun>(`/runs/${id}/cancel`);
     return res.data;
   },
+
+  delete: async (id: string) => {
+    await apiClient.delete(`/runs/${id}`);
+  },
 };

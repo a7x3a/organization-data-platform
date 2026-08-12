@@ -41,3 +41,14 @@ export function useCancelRun() {
     },
   });
 }
+
+export function useDeleteRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.delete,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}

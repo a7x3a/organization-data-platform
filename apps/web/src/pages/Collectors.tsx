@@ -42,8 +42,12 @@ export const Collectors: React.FC = () => {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sourceId) return;
+    // Accept commas as well as newlines — "Allowed Domains" right below
+    // this field is comma-separated, so a user typing all URLs on one
+    // line separated by commas (an easy, natural mistake) previously
+    // produced a single malformed URL instead of being split apart.
     const urls = startUrls
-      .split('\n')
+      .split(/[\n,]+/)
       .map((u) => u.trim())
       .filter(Boolean);
     const domains = allowedDomains

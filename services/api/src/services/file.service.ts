@@ -4,7 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { parsePagination, toPrismaSkipTake, buildPaginatedResult } from '../utils/pagination';
 import { storageProvider } from './storage';
 import { formatFileId } from '../utils/fileId';
-import { canonicalFilename } from '../utils/naming';
+import { canonicalFilename, categorizeFile } from '../utils/naming';
 import type { RecordFileInput, ManualEntryInput } from '../schemas/index';
 
 // Prisma maps CollectedFile.fileSize to BigInt, which JSON.stringify (and
@@ -24,6 +24,7 @@ export async function listFiles(query: {
   sourceId?: string;
   status?: string;
   sha256?: string;
+  sourceUrl?: string;
 }) {
   const pagination = parsePagination(query);
   const { skip, take } = toPrismaSkipTake(pagination);
@@ -32,6 +33,7 @@ export async function listFiles(query: {
   if (query.collectionRunId) where.collectionRunId = query.collectionRunId;
   if (query.sourceId) where.sourceId = query.sourceId;
   if (query.status) where.status = query.status;
+  if (query.sourceUrl) where.sourceUrl = query.sourceUrl;
   if (query.sha256) where.sha256 = query.sha256;
 
   const [data, total] = await prisma.$transaction([
@@ -155,7 +157,8 @@ export async function createManualUpload(input: {
     return serializeFile(file);
   }
 
-  const r2Key = `00_raw/manual/${source.slug}/${canonical}`;
+  const category = categorizeFile(input.mimeType, extension);
+  const r2Key = `00_raw/manual/${source.slug}/${category}/${canonical}`;
   await storageProvider.upload(r2Key, input.buffer, input.mimeType || 'application/octet-stream');
 
   const file = await prisma.collectedFile.create({

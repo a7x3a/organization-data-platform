@@ -6,7 +6,7 @@ import {
   createCollectorSchema,
   updateCollectorSchema,
   idParamSchema,
-  paginationSchema,
+  listCollectorsQuerySchema,
 } from '../schemas/index';
 import * as collectorService from '../services/collector.service';
 import * as runService from '../services/run.service';
@@ -18,7 +18,7 @@ router.use(requireAuth);
 // GET /api/collectors
 router.get(
   '/',
-  validate(paginationSchema, 'query'),
+  validate(listCollectorsQuerySchema, 'query'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await collectorService.listCollectors(
