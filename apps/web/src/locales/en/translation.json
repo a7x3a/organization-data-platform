@@ -1,0 +1,144 @@
+{
+  "translation": {
+    "nav": {
+      "dashboard": "Dashboard",
+      "sources": "Sources",
+      "collectors": "Collectors",
+      "runs": "Runs",
+      "files": "Files",
+      "upload": "Upload",
+      "users": "Users",
+      "settings": "Settings",
+      "logout": "Log out"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Overview of your data collection activity",
+      "stats": {
+        "totalSources": "Total Sources",
+        "activeCollectors": "Active Collectors",
+        "runningRuns": "Running Runs",
+        "filesCollected": "Files Collected",
+        "duplicates": "Duplicates",
+        "failedFiles": "Failed Files"
+      },
+      "recentRuns": "Recent Runs"
+    },
+    "sources": {
+      "title": "Sources",
+      "subtitle": "Manage data source websites",
+      "create": "Create Source",
+      "edit": "Edit Source",
+      "delete": "Delete Source",
+      "deleteConfirm": "Are you sure you want to delete this source? This action cannot be undone.",
+      "fields": {
+        "name": "Name",
+        "slug": "Slug",
+        "baseUrl": "Base URL",
+        "description": "Description",
+        "enabled": "Enabled",
+        "robotsPolicy": "Robots Policy"
+      },
+      "robotsPolicy": {
+        "RESPECT": "Respect robots.txt",
+        "IGNORE": "Ignore robots.txt"
+      }
+    },
+    "collectors": {
+      "title": "Collectors",
+      "subtitle": "Configure and manage web collectors",
+      "create": "Create Collector",
+      "edit": "Edit Collector",
+      "run": "Run Now",
+      "enable": "Enable",
+      "disable": "Disable",
+      "fields": {
+        "name": "Name",
+        "source": "Source",
+        "type": "Type",
+        "enabled": "Enabled",
+        "schedule": "Schedule",
+        "startUrls": "Start URLs",
+        "allowedDomains": "Allowed Domains",
+        "maxDepth": "Max Depth",
+        "maxPages": "Max Pages",
+        "maxFiles": "Max Files",
+        "concurrency": "Concurrency",
+        "requestDelayMs": "Request Delay (ms)",
+        "requestTimeoutSeconds": "Timeout (seconds)",
+        "maxRetries": "Max Retries",
+        "useBrowser": "Use Browser (Playwright)",
+        "robotsEnabled": "Respect Robots"
+      }
+    },
+    "runs": {
+      "title": "Collection Runs",
+      "subtitle": "Monitor collection job progress",
+      "cancel": "Cancel Run",
+      "cancelConfirm": "Cancel this collection run? The worker will stop after completing the current file.",
+      "status": {
+        "PENDING": "Pending",
+        "RUNNING": "Running",
+        "COMPLETED": "Completed",
+        "FAILED": "Failed",
+        "CANCEL_REQUESTED": "Cancelling...",
+        "CANCELLED": "Cancelled"
+      },
+      "fields": {
+        "runId": "Run ID",
+        "source": "Source",
+        "collector": "Collector",
+        "status": "Status",
+        "startedAt": "Started",
+        "completedAt": "Completed",
+        "duration": "Duration",
+        "filesFound": "Found",
+        "filesDownloaded": "Downloaded",
+        "filesDuplicate": "Duplicates",
+        "filesSkipped": "Skipped",
+        "filesFailed": "Failed",
+        "pagesCrawled": "Pages Crawled"
+      }
+    },
+    "files": {
+      "title": "Collected Files",
+      "subtitle": "Browse all collected raw files",
+      "download": "Download",
+      "status": {
+        "DISCOVERED": "Discovered",
+        "DOWNLOADING": "Downloading",
+        "UPLOADED": "Uploaded",
+        "DUPLICATE": "Duplicate",
+        "SKIPPED": "Skipped",
+        "FAILED": "Failed"
+      }
+    },
+    "auth": {
+      "login": "Sign In",
+      "username": "Username",
+      "password": "Password",
+      "loginButton": "Sign in",
+      "loginError": "Invalid username or password",
+      "platformTitle": "Organization Data Platform",
+      "platformSubtitle": "Web Collection System"
+    },
+    "common": {
+      "loading": "Loading...",
+      "error": "An error occurred",
+      "retry": "Retry",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "edit": "Edit",
+      "create": "Create",
+      "back": "Back",
+      "notFound": "Page not found",
+      "noData": "No data available",
+      "actions": "Actions",
+      "createdAt": "Created",
+      "updatedAt": "Updated",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    }
+  }
+}

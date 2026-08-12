@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: odp-postgres-dev
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: odp_user
+      POSTGRES_PASSWORD: odp_password
+      POSTGRES_DB: odp_db
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odp_user -d odp_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - odp-dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: odp-redis-dev
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - odp-dev-network
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: odp-api-dev
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://odp_user:odp_password@postgres:5432/odp_db?schema=public
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./services/api/src:/app/services/api/src
+      - ./packages/shared-types/src:/app/packages/shared-types/src
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - odp-dev-network
+
+  scraper:
+    build:
+      context: .
+      dockerfile: services/scraper/Dockerfile
+    container_name: odp-scraper-dev
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      API_BASE_URL: http://api:4000
+    volumes:
+      - ./services/scraper/app:/app/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - odp-dev-network
+
+volumes:
+  postgres_dev_data:
+
+networks:
+  odp-dev-network:
+    driver: bridge

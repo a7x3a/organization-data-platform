@@ -1,0 +1,26 @@
+{
+  "name": "organization-data-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Organization Data Platform — Web Collection System",
+  "workspaces": [
+    "apps/*",
+    "services/api",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "docker compose -f docker-compose.dev.yml up",
+    "dev:down": "docker compose -f docker-compose.dev.yml down",
+    "build": "docker compose build",
+    "db:generate": "npm run prisma:generate --workspace=packages/database",
+    "db:migrate": "npm run prisma:migrate --workspace=packages/database",
+    "db:studio": "npm run prisma:studio --workspace=packages/database"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

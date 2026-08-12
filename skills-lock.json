@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "skills": {
+    "data-quality-audit": {
+      "source": "nimrodfisher/data-analytics-skills",
+      "sourceType": "github",
+      "skillPath": "01-data-quality-validation/data-quality-audit/SKILL.md",
+      "computedHash": "829f1ff7dd50780b8649011595025c776305c5a81b29be7ce00e3b17a0a5889a"
+    },
+    "design-system": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/design-system/SKILL.md",
+      "computedHash": "5a3dbae4a3c2ad9f96323d9bfae926b3c21bb1e3b066aa067906f577a2ff2545"
+    },
+    "firecrawl-scrape": {
+      "source": "firecrawl/cli",
+      "sourceType": "github",
+      "skillPath": "skills/firecrawl-scrape/SKILL.md",
+      "computedHash": "851411c4e6731b750128a7420dbfb57c3dc92f3b582eb47959deb0999e6326d9"
+    },
+    "postgres": {
+      "source": "sanjay3290/ai-skills",
+      "sourceType": "github",
+      "skillPath": "skills/postgres/SKILL.md",
+      "computedHash": "a20af7913049c0e16eb9237589c4baf4ce95245955d375cb809e1d7afd794477"
+    },
+    "programmatic-eda": {
+      "source": "nimrodfisher/data-analytics-skills",
+      "sourceType": "github",
+      "skillPath": "01-data-quality-validation/programmatic-eda/SKILL.md",
+      "computedHash": "272bd1a0bd8389c37493b6f9cb06db5d6cfafe4fd7eade66bef429cc97bed1fa"
+    },
+    "scrapy-web-scraping": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "scrapy-web-scraping/SKILL.md",
+      "computedHash": "f295a7b58c71387e9824161b6a4206d6cbca3fc93805fb51389af6ef04b03d9c"
+    },
+    "webapp-testing": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/webapp-testing/SKILL.md",
+      "computedHash": "3f14af7f5690695209c22fbf8c8d133769a86d64892602c09bb13f135e14e857"
+    }
+  }
+}

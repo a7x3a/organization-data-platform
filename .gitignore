@@ -1,0 +1,67 @@
+# =============================================================
+# .gitignore — Organization Data Platform
+# =============================================================
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+**/node_modules/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Docker
+*.tar
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Local storage (STORAGE_PROVIDER=local) — keep directory structure, not contents
+storage/**
+!storage/**/
+!storage/**/.gitkeep

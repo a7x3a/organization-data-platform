@@ -1,0 +1,263 @@
+// =============================================================
+// Prisma Schema — Organization Data Platform
+// Web Collection System — Phase 1 Foundation
+// =============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  DATA_MANAGER
+  COLLECTOR
+  REVIEWER
+  ML_ENGINEER
+  RESEARCHER
+  SERVICE_ACCOUNT
+}
+
+enum RobotsPolicy {
+  RESPECT
+  IGNORE
+}
+
+enum CollectorType {
+  WEB
+  TELEGRAM
+  API
+  APP
+  MANUAL
+  EXTERNAL
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCEL_REQUESTED
+  CANCELLED
+}
+
+enum FileStatus {
+  DISCOVERED
+  DOWNLOADING
+  UPLOADED
+  DUPLICATE
+  SKIPPED
+  FAILED
+}
+
+enum FileOrigin {
+  SCRAPED
+  MANUAL_UPLOAD
+  MANUAL_ENTRY
+}
+
+enum ErrorCode {
+  NETWORK_ERROR
+  TIMEOUT
+  HTTP_ERROR
+  RATE_LIMITED
+  FORBIDDEN
+  NOT_FOUND
+  INVALID_CONTENT
+  FILE_TOO_LARGE
+  UNSUPPORTED_TYPE
+  HASH_ERROR
+  R2_UPLOAD_ERROR
+  DATABASE_ERROR
+  CANCELLED
+  UNKNOWN
+}
+
+// ─── User & Auth ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String?  @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  roles         UserRole[]
+  auditLogs     AuditLog[]
+  uploadedFiles CollectedFile[]
+
+  @@index([username])
+  @@map("users")
+}
+
+// ─── Source ──────────────────────────────────────────────────
+
+model Source {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  baseUrl      String
+  description  String?
+  enabled      Boolean      @default(true)
+  robotsPolicy RobotsPolicy @default(RESPECT)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  collectors     Collector[]
+  collectionRuns CollectionRun[]
+  collectedFiles CollectedFile[]
+
+  @@index([slug])
+  @@index([enabled])
+  @@map("sources")
+}
+
+// ─── Collector ───────────────────────────────────────────────
+
+model Collector {
+  id            String        @id @default(cuid())
+  sourceId      String
+  name          String
+  type          CollectorType @default(WEB)
+  version       String        @default("1.0.0")
+  enabled       Boolean       @default(true)
+  schedule      String? // cron expression or null for manual
+  configuration Json // CollectorConfiguration JSON
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // No onDelete: Cascade here — CollectionRun.collectorId/sourceId default to
+  // Restrict, so a cascading Source delete would reach a Collector that still
+  // has runs and fail mid-cascade with a raw FK violation. Deletion is
+  // guarded at the service layer instead (see deleteSource/deleteCollector).
+  source         Source          @relation(fields: [sourceId], references: [id])
+  collectionRuns CollectionRun[]
+
+  @@index([sourceId])
+  @@index([enabled])
+  @@map("collectors")
+}
+
+// ─── Collection Run ───────────────────────────────────────────
+
+model CollectionRun {
+  id               String    @id @default(cuid())
+  collectorId      String
+  sourceId         String
+  runId            String    @unique // e.g. "2026-08-12_run_000001"
+  status           RunStatus @default(PENDING)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  filesFound       Int       @default(0)
+  filesDownloaded  Int       @default(0)
+  filesSkipped     Int       @default(0)
+  filesDuplicate   Int       @default(0)
+  filesFailed      Int       @default(0)
+  pagesCrawled     Int       @default(0)
+  errorCount       Int       @default(0)
+  collectorVersion String    @default("1.0.0")
+  manifestR2Key    String?
+  createdAt        DateTime  @default(now())
+
+  collector      Collector         @relation(fields: [collectorId], references: [id])
+  source         Source            @relation(fields: [sourceId], references: [id])
+  collectedFiles CollectedFile[]
+  errors         CollectionError[]
+
+  @@index([collectorId])
+  @@index([sourceId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([createdAt])
+  @@map("collection_runs")
+}
+
+// ─── Collected File ───────────────────────────────────────────
+
+model CollectedFile {
+  id                String      @id @default(cuid())
+  fileId            String      @unique // RAW-XXXXXXXXX
+  collectionRunId   String? // null for manual uploads/entries (no scrape run)
+  sourceId          String
+  sourceUrl         String? // null when there is no originating URL (manual entry)
+  finalUrl          String?
+  fileName          String
+  originalFilename  String? // preserves the original title exactly as given (e.g. non-Latin scripts)
+  canonicalFilename String? // deterministic machine-safe generated name
+  extension         String?
+  mimeType          String?
+  fileSize          BigInt? // bytes
+  sha256            String?
+  r2Key             String?
+  status            FileStatus  @default(DISCOVERED)
+  origin            FileOrigin  @default(SCRAPED)
+  metadata          Json? // optional semantic metadata (language, subject, grade, ...) — user-supplied only, never AI-inferred
+  uploadedByUserId  String? // set for MANUAL_UPLOAD / MANUAL_ENTRY
+  etag              String?
+  lastModified      String?
+  discoveredAt      DateTime    @default(now())
+  downloadedAt      DateTime?
+  createdAt         DateTime    @default(now())
+
+  collectionRun CollectionRun?    @relation(fields: [collectionRunId], references: [id])
+  source        Source            @relation(fields: [sourceId], references: [id])
+  uploadedBy    User?             @relation(fields: [uploadedByUserId], references: [id])
+  errors        CollectionError[]
+
+  @@index([sha256])
+  @@index([sourceUrl])
+  @@index([collectionRunId])
+  @@index([sourceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("collected_files")
+}
+
+// ─── Collection Error ─────────────────────────────────────────
+
+model CollectionError {
+  id              String    @id @default(cuid())
+  collectionRunId String
+  collectedFileId String?
+  errorCode       ErrorCode @default(UNKNOWN)
+  message         String
+  url             String?
+  retryCount      Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  collectionRun CollectionRun  @relation(fields: [collectionRunId], references: [id], onDelete: Cascade)
+  collectedFile CollectedFile? @relation(fields: [collectedFileId], references: [id], onDelete: SetNull)
+
+  @@index([collectionRunId])
+  @@index([collectedFileId])
+  @@index([errorCode])
+  @@map("collection_errors")
+}
+
+// ─── Audit Log ────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g. "source.created", "run.cancelled"
+  entityType String // "Source", "Collector", "CollectionRun"
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

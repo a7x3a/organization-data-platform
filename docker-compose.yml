@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: odp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-odp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-odp_password}
+      POSTGRES_DB: ${POSTGRES_DB:-odp_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-odp_user} -d ${POSTGRES_DB:-odp_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - odp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: odp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - odp-network
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: odp-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-odp_user}:${POSTGRES_PASSWORD:-odp_password}@postgres:5432/${POSTGRES_DB:-odp_db}?schema=public
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - odp-network
+
+  scraper:
+    build:
+      context: .
+      dockerfile: services/scraper/Dockerfile
+    container_name: odp-scraper
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      API_BASE_URL: http://api:4000
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - odp-network
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: odp-web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - odp-network
+
+volumes:
+  postgres_data:
+    name: odp-postgres-data
+  redis_data:
+    name: odp-redis-data
+
+networks:
+  odp-network:
+    name: odp-network
+    driver: bridge

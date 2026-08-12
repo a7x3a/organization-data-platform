@@ -1,0 +1,27 @@
+# .dockerignore — applied to all Docker builds from this root
+node_modules
+**/node_modules
+npm-debug.log
+yarn-error.log
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+dist
+build
+*.log
+logs
+tmp
+temp
+.vscode
+.idea
+**/__pycache__
+**/*.pyc
+.venv
+venv
+env
+.pytest_cache
+htmlcov
+.coverage
+*.tsbuildinfo
