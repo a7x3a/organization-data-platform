@@ -32,6 +32,21 @@ class Settings(BaseSettings):
     api_base_url: str = "http://api:4000"
     api_service_token: Optional[str] = None  # SERVICE_ACCOUNT JWT
 
+    # ── Telegram (account-level credentials, shared by every TELEGRAM
+    # collector — never stored per-collector, never sent to the frontend) ──
+    telegram_api_id: Optional[int] = None
+    telegram_api_hash: Optional[str] = None
+    telegram_session_string: Optional[str] = None
+
+    # docker-compose's `${TELEGRAM_API_ID:-}` passes an empty string, not an
+    # unset variable, when a collector doesn't use Telegram — pydantic would
+    # otherwise reject "" as "not a valid integer" instead of treating it the
+    # same as "not configured".
+    @field_validator("telegram_api_id", mode="before")
+    @classmethod
+    def blank_telegram_api_id_is_unset(cls, v):
+        return None if v == "" else v
+
     # ── Worker ────────────────────────────────────────────────
     worker_concurrency: int = 4
     max_file_size_mb: int = 500

@@ -17,9 +17,10 @@ class MetadataWriter:
     then uploads the final metadata.jsonl to R2.
     """
 
-    def __init__(self, run_folder_key: str, source_name: str) -> None:
+    def __init__(self, run_folder_key: str, source_name: str, source_type: str = "web") -> None:
         self._run_folder_key = run_folder_key
         self._source_name = source_name
+        self._source_type = source_type
         self._records: list[dict] = []
         self._tmp = tempfile.NamedTemporaryFile(
             mode="w",
@@ -43,7 +44,7 @@ class MetadataWriter:
     ) -> None:
         record = {
             "file_id": file_id,
-            "source": "web",
+            "source": self._source_type,
             "source_name": self._source_name,
             "file_name": file_name,
             "file_type": file_type,

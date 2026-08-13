@@ -17,12 +17,14 @@ class ManifestWriter:
         run_folder_key: str,
         collector_version: str,
         started_at: datetime,
+        source_type: str = "web",
     ) -> None:
         self._run_id = run_id
         self._source_name = source_name
         self._run_folder_key = run_folder_key
         self._collector_version = collector_version
         self._started_at = started_at
+        self._source_type = source_type
 
         self._files_found = 0
         self._files_downloaded = 0
@@ -53,7 +55,7 @@ class ManifestWriter:
     def build(self, *, status: str, completed_at: Optional[datetime] = None) -> dict:
         return {
             "run_id": self._run_id,
-            "source": "web",
+            "source": self._source_type,
             "source_name": self._source_name,
             "started_at": self._started_at.isoformat(),
             "completed_at": (completed_at or datetime.now(timezone.utc)).isoformat(),

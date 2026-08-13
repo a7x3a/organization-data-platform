@@ -47,9 +47,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy application
 COPY services/scraper/app ./app
+COPY services/scraper/scripts ./scripts
 
-# Create temp dir
-RUN mkdir -p /tmp/scraper
+# Non-root user for security — matches the api image's pattern. Playwright's
+# browser cache and the `pip install --user` packages both landed under
+# /root at build time (root); /root itself defaults to 0700, so a non-root
+# user can't even traverse into it without the chmod — chown alone on the
+# subdirectories is not enough.
+#
+# HOME=/root (below), kept even after USER switches away from root, is not
+# just about traversal though — Python's "user site-packages" is resolved
+# from $HOME at *import* time (site.getusersitepackages() ~ $HOME/.local),
+# not from the OS user's real home directory. Without it, running this same
+# image as `scraper` silently looks in /home/scraper/.local — empty — and
+# every third-party import (starting with httpx) fails at startup, even
+# though the packages are sitting right there in /root/.local.
+RUN groupadd --gid 1001 scraper && \
+    useradd --uid 1001 --gid scraper --shell /bin/bash --create-home scraper && \
+    mkdir -p /tmp/scraper && \
+    chmod 755 /root && \
+    chown -R scraper:scraper /tmp/scraper /root/.cache/ms-playwright /root/.local
+ENV HOME=/root
+USER scraper
 
 # Health check — verify the worker process is alive
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \

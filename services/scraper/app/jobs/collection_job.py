@@ -11,9 +11,13 @@ Pipeline:
      d. Record metadata
   4. Upload metadata.jsonl and manifest.json to R2
   5. Update run status → COMPLETED / FAILED
+
+Steps 3c/3d/4's dedup-upload-record logic is shared with the Telegram
+collector via app.pipeline.file_pipeline.FilePipeline — only discovery
+(this file's crawl step) and the download mechanics (streaming HTTP here,
+Telethon media download there) differ between collector types.
 """
 import asyncio
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,11 +28,11 @@ from app.config.settings import settings
 from app.downloader.downloader import (
     download_file,
     extract_filename,
-    categorize_file,
     DownloadCancelled,
     DownloadError,
     FileTooLargeError,
 )
+from app.pipeline.file_pipeline import FilePipeline
 from app.spiders.http_spider import crawl, CrawlConfig
 from app.spiders.browser_spider import crawl_with_browser
 from app.storage import storage
@@ -40,15 +44,15 @@ log = structlog.get_logger(__name__)
 
 class CollectionJob:
     """
-    Executes one collection run end-to-end.
+    Executes one WEB collection run end-to-end.
 
     job_data keys (from BullMQ):
-        run_id          — CollectionRun database ID
-        collector_id
-        source_id
-        source_slug
+        runId           — CollectionRun database ID
+        collectorId
+        sourceId
+        sourceSlug
         configuration   — CollectorConfiguration dict
-        run_folder_key  — R2 prefix: 00_raw/web/{slug}/{run_id}
+        runFolderKey    — R2 prefix: 00_raw/web/{slug}/{run_id}
     """
 
     def __init__(self, job_data: dict[str, Any], api_client: httpx.AsyncClient) -> None:
@@ -58,7 +62,12 @@ class CollectionJob:
         self._cfg: dict = job_data["configuration"]
         self._run_folder_key: str = job_data["runFolderKey"]
         self._source_slug: str = job_data["sourceSlug"]
-        self._cancelled = False
+        self._pipeline = FilePipeline(
+            api_client=api_client,
+            run_db_id=self._run_db_id,
+            source_id=job_data["sourceId"],
+            run_folder_key=self._run_folder_key,
+        )
 
     async def run(self) -> None:
         started_at = datetime.now(timezone.utc)
@@ -68,7 +77,7 @@ class CollectionJob:
             source=self._source_slug,
         )
 
-        await self._update_run_status("RUNNING", startedAt=started_at.isoformat())
+        await self._pipeline.update_run_status("RUNNING", startedAt=started_at.isoformat())
 
         manifest = ManifestWriter(
             run_id=self._run_db_id,
@@ -101,9 +110,9 @@ class CollectionJob:
             use_browser = self._cfg.get("useBrowser", False)
             if use_browser:
                 log.info("using_playwright_browser", run_id=self._run_db_id)
-                crawl_result = await crawl_with_browser(crawl_config, should_cancel=self._is_cancelled)
+                crawl_result = await crawl_with_browser(crawl_config, should_cancel=self._pipeline.is_cancelled)
             else:
-                crawl_result = await crawl(crawl_config, should_cancel=self._is_cancelled)
+                crawl_result = await crawl(crawl_config, should_cancel=self._pipeline.is_cancelled)
 
             for _ in range(crawl_result.pages_crawled):
                 manifest.record_page_crawled()
@@ -132,7 +141,7 @@ class CollectionJob:
                     # cancellation mid-run stops new downloads from starting
                     # as soon as a semaphore slot frees up, rather than only
                     # between whole crawl batches.
-                    if await self._is_cancelled():
+                    if await self._pipeline.is_cancelled():
                         raise DownloadCancelled(f"Cancelled before starting {discovered.url}")
                     await self._process_file(
                         discovered.url,
@@ -170,6 +179,13 @@ class CollectionJob:
 
         except Exception as exc:
             log.error("collection_failed", run_id=self._run_db_id, error=str(exc))
+            # Without this, a run that fails before/outside per-file error
+            # reporting (a bad collector config, a crawl-phase crash) shows
+            # up in the UI as "FAILED" with no visible reason at all — the
+            # only trace was this container's own stdout log.
+            await self._pipeline.report_file_error(
+                None, "UNKNOWN", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            )
             await self._finalize(manifest, metadata, status="FAILED")
             raise
 
@@ -182,18 +198,7 @@ class CollectionJob:
         metadata: MetadataWriter,
     ) -> None:
         """Download, hash, deduplicate, upload one file."""
-        if await self._is_known_url(url):
-            # Cheap pre-check: this exact URL was already collected (or
-            # already resolved as a duplicate) in a previous run. Skip the
-            # full download entirely — re-fetching tens of megabytes of an
-            # mp3/pdf against a slow, possibly-throttled real site just to
-            # recompute an already-known hash is pure waste. Content-hash
-            # dedup below still runs for any URL not seen before, so a
-            # renamed/moved copy of the same content is still caught.
-            log.info("skipped_known_url", url=url)
-            manifest.record_file_duplicate()
-            await self._report_file_status(url, extract_filename(url), "", "DUPLICATE")
-            await self._report_progress(manifest)
+        if await self._pipeline.skip_if_known_url(url, extract_filename(url), manifest):
             return
 
         try:
@@ -201,7 +206,7 @@ class CollectionJob:
                 url,
                 client=http_client,
                 max_size_bytes=settings.max_file_size_bytes,
-                should_cancel=self._is_cancelled,
+                should_cancel=self._pipeline.is_cancelled,
             )
         except DownloadCancelled:
             # Not a per-file failure — the whole run is being torn down.
@@ -211,80 +216,17 @@ class CollectionJob:
         except FileTooLargeError as e:
             log.warning("file_too_large", url=url, error=str(e))
             manifest.record_file_skipped()
-            await self._report_file_error(url, "FILE_TOO_LARGE", str(e))
-            await self._report_progress(manifest)
+            await self._pipeline.report_file_error(url, "FILE_TOO_LARGE", str(e))
+            await self._pipeline.report_progress(manifest)
             return
         except DownloadError as e:
             log.warning("download_failed", url=url, error=str(e))
             manifest.record_file_failed()
-            await self._report_file_error(url, "NETWORK_ERROR", str(e))
-            await self._report_progress(manifest)
+            await self._pipeline.report_file_error(url, "NETWORK_ERROR", str(e))
+            await self._pipeline.report_progress(manifest)
             return
 
-        # Check for exact duplicate via SHA-256
-        is_dup = await self._is_duplicate(result.sha256)
-        if is_dup:
-            log.info("duplicate_detected", url=url, sha256=result.sha256)
-            manifest.record_file_duplicate()
-            os.unlink(result.temp_path)
-            await self._report_file_status(url, result.file_name, result.sha256, "DUPLICATE")
-            await self._report_progress(manifest)
-            return
-
-        # Build R2 key — one subfolder per file type (pdf/audio/video/images/
-        # documents/...) so 00_raw doesn't become a single bucket mixing
-        # every format together.
-        category = categorize_file(result.mime_type, result.extension)
-        r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
-
-        # Upload to R2
-        try:
-            storage.upload_file(
-                result.temp_path,
-                r2_key,
-                content_type=result.mime_type,
-            )
-        except Exception as e:
-            log.error("r2_upload_failed", url=url, key=r2_key, error=str(e))
-            manifest.record_file_failed()
-            await self._report_file_error(url, "R2_UPLOAD_ERROR", str(e))
-            await self._report_progress(manifest)
-            os.unlink(result.temp_path)
-            return
-        finally:
-            # Always clean up temp file
-            try:
-                os.unlink(result.temp_path)
-            except FileNotFoundError:
-                pass
-
-        # Reserve a file_id from the API
-        file_id = await self._reserve_file_id(
-            sourceUrl=url,
-            finalUrl=result.final_url,
-            fileName=result.file_name,
-            extension=result.extension,
-            mimeType=result.mime_type,
-            fileSize=result.file_size,
-            sha256=result.sha256,
-            r2Key=r2_key,
-        )
-
-        metadata.add(
-            file_id=file_id,
-            file_name=result.file_name,
-            file_type=result.extension or "",
-            mime_type=result.mime_type,
-            file_size=result.file_size,
-            sha256=result.sha256,
-            source_url=url,
-            final_url=result.final_url,
-            r2_key=r2_key,
-        )
-
-        manifest.record_file_downloaded()
-        log.info("file_collected", url=url, sha256=result.sha256, r2_key=r2_key)
-        await self._report_progress(manifest)
+        await self._pipeline.process_downloaded_file(result, manifest=manifest, metadata=metadata)
 
     async def _finalize(
         self,
@@ -316,7 +258,7 @@ class CollectionJob:
         # manifest.stats is snake_case to match the on-disk manifest.json
         # format — translate to the camelCase the API/Prisma schema expects.
         stats = manifest.stats
-        await self._update_run_status(
+        await self._pipeline.update_run_status(
             status,
             completedAt=completed_at.isoformat(),
             manifestR2Key=manifest.r2_key,
@@ -334,113 +276,3 @@ class CollectionJob:
             status=status,
             **stats,
         )
-
-    async def _report_progress(self, manifest: ManifestWriter) -> None:
-        """
-        Push incremental stats after each file, not just at the end.
-        Without this the Runs table shows 0/0/0 for the run's entire
-        duration — filesFound/filesDownloaded/etc only ever got written
-        once, in _finalize() — so an actively-working run looked frozen.
-        """
-        # manifest.stats is snake_case to match the on-disk manifest.json
-        # format — translate to the camelCase the API/Prisma schema expects
-        # (same translation _finalize does for the terminal update).
-        stats = manifest.stats
-        await self._update_run_status(
-            "RUNNING",
-            filesFound=stats["files_found"],
-            filesDownloaded=stats["files_downloaded"],
-            filesSkipped=stats["files_skipped"],
-            filesDuplicate=stats["files_duplicate"],
-            filesFailed=stats["files_failed"],
-            pagesCrawled=stats["pages_crawled"],
-        )
-
-    async def _update_run_status(self, status: str, **kwargs) -> None:
-        """Callback to API to update run status."""
-        try:
-            await self._api.patch(
-                f"/api/runs/{self._run_db_id}/status",
-                json={"status": status, **kwargs},
-            )
-        except Exception as e:
-            log.error("run_status_update_failed", run_id=self._run_db_id, error=str(e))
-
-    async def _is_cancelled(self) -> bool:
-        """Check if the run has been marked for cancellation."""
-        try:
-            r = await self._api.get(f"/api/runs/{self._run_db_id}")
-            data = r.json()
-            return data.get("status") == "CANCEL_REQUESTED"
-        except Exception:
-            return False
-
-    async def _is_duplicate(self, sha256: str) -> bool:
-        """Ask the API if this SHA-256 already exists."""
-        try:
-            r = await self._api.get(f"/api/files?sha256={sha256}&pageSize=1")
-            data = r.json()
-            return data.get("total", 0) > 0
-        except Exception:
-            return False
-
-    async def _is_known_url(self, url: str) -> bool:
-        """
-        Ask the API if this exact source URL was already recorded for this
-        source (as UPLOADED or DUPLICATE) — a cheap metadata check, done
-        before spending a full download on a file we already have a
-        definitive answer for.
-        """
-        try:
-            r = await self._api.get(
-                "/api/files",
-                params={"sourceId": self._data["sourceId"], "sourceUrl": url, "pageSize": 1},
-            )
-            data = r.json()
-            return data.get("total", 0) > 0
-        except Exception:
-            return False
-
-    async def _reserve_file_id(self, **kwargs) -> str:
-        """Create a CollectedFile record via API and return its file_id."""
-        try:
-            r = await self._api.post(
-                f"/api/runs/{self._run_db_id}/files",
-                json={
-                    "collectionRunId": self._run_db_id,
-                    "sourceId": self._data["sourceId"],
-                    "status": "UPLOADED",
-                    **kwargs,
-                },
-            )
-            return r.json().get("fileId", "RAW-UNKNOWN")
-        except Exception as e:
-            log.error("file_id_reservation_failed", error=str(e))
-            return "RAW-UNKNOWN"
-
-    async def _report_file_error(self, url: str, code: str, message: str) -> None:
-        try:
-            await self._api.post(
-                f"/api/runs/{self._run_db_id}/errors",
-                json={"url": url, "errorCode": code, "message": message},
-            )
-        except Exception:
-            pass
-
-    async def _report_file_status(
-        self, url: str, file_name: str, sha256: str, status: str
-    ) -> None:
-        try:
-            await self._api.post(
-                f"/api/runs/{self._run_db_id}/files",
-                json={
-                    "collectionRunId": self._run_db_id,
-                    "sourceId": self._data["sourceId"],
-                    "sourceUrl": url,
-                    "fileName": file_name,
-                    "sha256": sha256,
-                    "status": status,
-                },
-            )
-        except Exception:
-            pass

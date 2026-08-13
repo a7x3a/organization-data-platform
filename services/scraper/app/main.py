@@ -16,6 +16,7 @@ import redis.asyncio as aioredis
 
 from app.config.settings import settings
 from app.jobs.collection_job import CollectionJob
+from app.jobs.telegram_collection_job import TelegramCollectionJob
 
 # Configure structlog
 structlog.configure(
@@ -41,8 +42,17 @@ def handle_signal(sig: int, frame) -> None:  # type: ignore
 
 
 async def process_job(job_data: dict, api_client: httpx.AsyncClient) -> None:
-    """Process a single BullMQ job."""
-    job = CollectionJob(job_data, api_client)
+    """
+    Process a single BullMQ job — dispatched to the collector-type-specific
+    job class. `collectorType` is set by the API when it enqueues the job
+    (services/api/src/services/run.service.ts); defaults to WEB so any job
+    enqueued before this field existed still runs the way it always did.
+    """
+    collector_type = job_data.get("collectorType", "WEB")
+    if collector_type == "TELEGRAM":
+        job = TelegramCollectionJob(job_data, api_client)
+    else:
+        job = CollectionJob(job_data, api_client)
     await job.run()
 
 

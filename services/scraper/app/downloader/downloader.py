@@ -121,10 +121,15 @@ def extract_pdf_title(file_path: str) -> Optional[str]:
 _CATEGORY_BY_EXTENSION = {
     ".pdf": "pdf",
     ".doc": "documents", ".docx": "documents", ".odt": "documents", ".rtf": "documents",
-    ".xls": "spreadsheets", ".xlsx": "spreadsheets", ".ods": "spreadsheets", ".csv": "spreadsheets",
+    ".xls": "spreadsheets", ".xlsx": "spreadsheets", ".ods": "spreadsheets",
+    ".csv": "spreadsheets", ".tsv": "spreadsheets",
     ".ppt": "presentations", ".pptx": "presentations", ".odp": "presentations",
-    ".zip": "archives", ".rar": "archives", ".7z": "archives", ".tar": "archives", ".gz": "archives",
+    ".zip": "archives", ".rar": "archives", ".7z": "archives", ".tar": "archives",
+    ".gz": "archives", ".bz2": "archives", ".xz": "archives",
     ".txt": "text", ".md": "text",
+    ".epub": "ebooks", ".mobi": "ebooks", ".azw3": "ebooks", ".fb2": "ebooks",
+    ".srt": "subtitles", ".vtt": "subtitles",
+    ".json": "data", ".jsonl": "data", ".xml": "data", ".parquet": "data",
 }
 
 
