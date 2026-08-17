@@ -109,7 +109,7 @@ export const Runs: React.FC = () => {
                 iconOnly
                 title="Pause Run"
                 onClick={() => pauseRun.mutate(r.id)}
-                disabled={pauseRun.isPending || r.status === 'CANCEL_REQUESTED'}
+                disabled={pauseRun.isPending}
               >
                 <Pause className="w-3.5 h-3.5 text-amber-400" />
               </Button>
@@ -118,9 +118,9 @@ export const Runs: React.FC = () => {
               variant="warning"
               size="sm"
               iconOnly
-              title={r.status === 'CANCEL_REQUESTED' ? 'Cancelling...' : 'Cancel Run'}
+              title={r.status === 'CANCEL_REQUESTED' ? 'Request Cancel Again' : 'Cancel Run'}
               onClick={() => cancelRun.mutate(r.id)}
-              disabled={cancelRun.isPending || r.status === 'CANCEL_REQUESTED'}
+              disabled={cancelRun.isPending}
             >
               <XCircle className="w-3.5 h-3.5" />
             </Button>
@@ -192,14 +192,69 @@ export const Runs: React.FC = () => {
         />
       </div>
 
-      <ConfirmDialog
-        isOpen={!!runToDelete}
-        title={t('runs.delete')}
-        message={t('runs.deleteConfirm')}
-        onConfirm={handleDeleteConfirmed}
-        onCancel={() => setRunToDelete(null)}
-        isLoading={deleteRun.isPending}
-      />
+      {/* Run Delete Options Modal */}
+      {runToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-sans">
+          <div className="relative w-full max-w-md bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <Trash2 className="w-5 h-5 shrink-0" />
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+                Delete Collection Run
+              </h2>
+            </div>
+
+            <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+              Choose how you want to delete <strong className="font-mono text-[var(--color-text-primary)]">{runToDelete.runId}</strong>:
+            </p>
+
+            <div className="p-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] text-xs space-y-1 font-mono">
+              <div>Source: <span className="text-[var(--color-text-primary)]">{runToDelete.source?.name || '—'}</span></div>
+              <div>Files Downloaded: <span className="text-emerald-400">{runToDelete.filesDownloaded}</span></div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full justify-center"
+                disabled={deleteRun.isPending}
+                onClick={async () => {
+                  await deleteRun.mutateAsync({ id: runToDelete.id, deleteFiles: false });
+                  setRunToDelete(null);
+                }}
+              >
+                Delete Run Only (Keep Files)
+              </Button>
+
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                className="w-full justify-center"
+                disabled={deleteRun.isPending}
+                onClick={async () => {
+                  await deleteRun.mutateAsync({ id: runToDelete.id, deleteFiles: true });
+                  setRunToDelete(null);
+                }}
+              >
+                Delete Run & All Downloaded Files
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full justify-center mt-1 text-[var(--color-text-muted)]"
+                onClick={() => setRunToDelete(null)}
+                disabled={deleteRun.isPending}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

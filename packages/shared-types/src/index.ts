@@ -119,6 +119,8 @@ export interface TelegramCollectorConfiguration {
   sinceDate?: string;
   downloadMedia: boolean;
   includeMediaTypes?: Array<'photo' | 'video' | 'audio' | 'document'>;
+  allowedExtensions?: string[];
+  saveMessageJson?: boolean;
 }
 
 export interface MediaCollectorConfiguration {

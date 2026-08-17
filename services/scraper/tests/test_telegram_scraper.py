@@ -209,6 +209,27 @@ async def test_scrape_channel_filters_by_include_media_types(temp_dir):
         os.unlink(r.temp_path)
 
 
+async def test_scrape_channel_filters_by_allowed_extensions(temp_dir):
+    messages = [
+        FakeMessage(1, document=True, file_name="book.pdf"),
+        FakeMessage(2, document=True, file_name="archive.zip"),
+    ]
+    client = FakeClient(messages)
+    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, allowed_extensions=[".pdf"])
+
+    results = [r async for r in scrape_channel(client, "chan", cfg)]
+
+    # message 1 (.pdf, allowed): media artifact yielded
+    # message 2 (.zip, disallowed): skipped completely, no message.json yielded
+    urls = [r.source_url for r in results]
+    assert len(results) == 1
+    assert "https://t.me/chan/1" in urls
+    assert "https://t.me/chan/2" not in urls
+    assert results[0].extension == ".pdf"
+    for r in results:
+        os.unlink(r.temp_path)
+
+
 async def test_scrape_channel_stops_at_since_date(temp_dir):
     from datetime import datetime, timezone
 

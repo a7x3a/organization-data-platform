@@ -89,6 +89,16 @@ class TelegramCollectionJob:
                 since_date=self._cfg.get("sinceDate"),
                 download_media=self._cfg.get("downloadMedia", True),
                 include_media_types=self._cfg.get("includeMediaTypes") or None,
+                allowed_extensions=self._cfg.get("allowedExtensions") or None,
+                save_message_json=self._cfg.get("saveMessageJson", False),
+            )
+            log.info(
+                "telegram_job_config_parsed",
+                channels=channels,
+                include_media_types=telegram_cfg.include_media_types,
+                allowed_extensions=telegram_cfg.allowed_extensions,
+                download_media=telegram_cfg.download_media,
+                save_message_json=telegram_cfg.save_message_json,
             )
 
             try:

@@ -76,7 +76,7 @@ export const createSourceSchema = z.object({
     .string()
     .min(1)
     .max(100)
-    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase letters, numbers, and hyphens only'),
+    .regex(/^[a-z0-9-_]+$/, 'Slug must be lowercase letters, numbers, hyphens, and underscores only'),
   baseUrl: z.string().url(),
   description: z.string().max(2000).optional().nullable(),
   enabled: z.boolean().default(true),
@@ -115,6 +115,8 @@ const telegramCollectorConfigSchema = z.object({
   sinceDate: z.string().datetime({ offset: true }).optional(),
   downloadMedia: z.boolean().default(true),
   includeMediaTypes: z.array(z.enum(['photo', 'video', 'audio', 'document'])).default([]),
+  allowedExtensions: z.array(z.string()).default([]),
+  saveMessageJson: z.boolean().default(false),
 });
 
 const mediaCollectorConfigSchema = z.object({

@@ -79,26 +79,77 @@ def update_env_file(key_values: dict[str, str]) -> None:
                 f.writelines(new_lines)
             log.info("env_file_updated", path=str(env_path))
         except Exception as e:
-            log.warning("env_file_write_failed", path=str(env_path), error=str(e))
+            log.warning("env_file_update_failed", path=str(env_path), error=str(e))
+def get_storage_session_file() -> Path:
+    storage_dir = Path(settings.local_storage_dir)
+    if not storage_dir.exists():
+        try:
+            storage_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    return storage_dir / "telegram_session.json"
+
+
+def save_persistent_telegram_session(api_id: int, api_hash: str, session_string: str) -> None:
+    try:
+        session_file = get_storage_session_file()
+        payload = {
+            "telegram_api_id": api_id,
+            "telegram_api_hash": api_hash,
+            "telegram_session_string": session_string,
+        }
+        with open(session_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        log.info("persistent_telegram_session_saved", path=str(session_file))
+    except Exception as e:
+        log.warning("persistent_telegram_session_save_failed", error=str(e))
+
+
+def load_persistent_telegram_session() -> None:
+    try:
+        session_file = get_storage_session_file()
+        if session_file.exists():
+            with open(session_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("telegram_session_string"):
+                settings.telegram_session_string = data["telegram_session_string"]
+                os.environ["TELEGRAM_SESSION_STRING"] = data["telegram_session_string"]
+            if data.get("telegram_api_id"):
+                settings.telegram_api_id = int(data["telegram_api_id"])
+                os.environ["TELEGRAM_API_ID"] = str(data["telegram_api_id"])
+            if data.get("telegram_api_hash"):
+                settings.telegram_api_hash = data["telegram_api_hash"]
+                os.environ["TELEGRAM_API_HASH"] = data["telegram_api_hash"]
+            log.info("persistent_telegram_session_loaded", path=str(session_file))
+    except Exception as e:
+        log.warning("persistent_telegram_session_load_failed", error=str(e))
 
 
 async def check_telegram_status() -> dict:
     """Check whether Telegram is configured and authorized."""
+    load_persistent_telegram_session()
     api_id = settings.telegram_api_id
     api_hash = settings.telegram_api_hash
     session_str = settings.telegram_session_string
+
+    api_id_str = str(api_id) if api_id else ""
+    api_hash_set = bool(api_hash)
 
     if not api_id or not api_hash:
         return {
             "is_configured": False,
             "is_authorized": False,
+            "api_id": api_id_str,
+            "api_hash_set": api_hash_set,
             "reason": "TELEGRAM_API_ID or TELEGRAM_API_HASH not set",
         }
 
     if not session_str:
         return {
-            "is_configured": False,
+            "is_configured": True,
             "is_authorized": False,
+            "api_id": api_id_str,
+            "api_hash_set": api_hash_set,
             "reason": "TELEGRAM_SESSION_STRING not generated",
         }
 
@@ -106,9 +157,19 @@ async def check_telegram_status() -> dict:
     try:
         await client.connect()
         if not await client.is_user_authorized():
+            settings.telegram_session_string = ""
+            os.environ["TELEGRAM_SESSION_STRING"] = ""
+            session_file = get_storage_session_file()
+            if session_file.exists():
+                try:
+                    session_file.unlink()
+                except Exception:
+                    pass
             return {
                 "is_configured": True,
                 "is_authorized": False,
+                "api_id": api_id_str,
+                "api_hash_set": api_hash_set,
                 "reason": "Telegram session is expired or unauthorized",
             }
 
@@ -122,6 +183,8 @@ async def check_telegram_status() -> dict:
         return {
             "is_configured": True,
             "is_authorized": True,
+            "api_id": api_id_str,
+            "api_hash_set": api_hash_set,
             "user": user_info,
         }
     except Exception as e:
@@ -129,6 +192,8 @@ async def check_telegram_status() -> dict:
         return {
             "is_configured": True,
             "is_authorized": False,
+            "api_id": api_id_str,
+            "api_hash_set": api_hash_set,
             "reason": f"Connection error: {str(e)}",
         }
     finally:
@@ -145,27 +210,32 @@ _pending_sessions: dict[str, str] = {}
 
 async def send_verification_code(phone_number: str, api_id: str, api_hash: str) -> dict:
     """Send Telegram OTP login code to the user's phone or Telegram app."""
-    if not api_id or not api_hash:
-        raise ValueError("API ID and API Hash are required")
+    api_id_str = str(api_id or settings.telegram_api_id or "").strip()
+    api_hash_str = (api_hash or settings.telegram_api_hash or "").strip()
+
+    if not api_id_str or not api_hash_str:
+        raise ValueError("API ID and API Hash are required (get them from https://my.telegram.org)")
 
     try:
-        api_id_int = int(api_id)
+        api_id_int = int(api_id_str)
     except ValueError:
-        raise ValueError("API ID must be a valid integer")
+        raise ValueError(f"API ID must be a valid integer (e.g. 37579496), got: '{api_id_str}'")
 
     if not phone_number or not phone_number.strip():
-        raise ValueError("Phone number is required (e.g. +1234567890)")
+        raise ValueError("Phone number is required (e.g. +964777777777)")
 
-    phone_clean = phone_number.strip()
+    phone_clean = phone_number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if not phone_clean.startswith("+"):
+        phone_clean = f"+{phone_clean}"
 
     # Save credentials in memory & .env
     settings.telegram_api_id = api_id_int
-    settings.telegram_api_hash = api_hash
+    settings.telegram_api_hash = api_hash_str
     os.environ["TELEGRAM_API_ID"] = str(api_id_int)
-    os.environ["TELEGRAM_API_HASH"] = api_hash
-    update_env_file({"TELEGRAM_API_ID": str(api_id_int), "TELEGRAM_API_HASH": api_hash})
+    os.environ["TELEGRAM_API_HASH"] = api_hash_str
+    update_env_file({"TELEGRAM_API_ID": str(api_id_int), "TELEGRAM_API_HASH": api_hash_str})
 
-    client = TelegramClient(StringSession(""), api_id_int, api_hash)
+    client = TelegramClient(StringSession(""), api_id_int, api_hash_str)
     await client.connect()
     try:
         res = await client.send_code_request(phone_clean)
@@ -181,7 +251,7 @@ async def send_verification_code(phone_number: str, api_id: str, api_hash: str) 
             "success": True,
             "phone_code_hash": res.phone_code_hash,
             "temp_session": temp_session,
-            "message": f"Verification code sent to {phone_number}",
+            "message": f"Verification code sent to {phone_clean}",
         }
     finally:
         try:
@@ -202,17 +272,20 @@ async def verify_code_and_login(
     temp_session: str = "",
 ) -> dict:
     """Verify Telegram OTP code and optional 2FA password, saving session string."""
-    phone_clean = phone_number.strip()
-    target_api_id = api_id or settings.telegram_api_id
-    target_api_hash = api_hash or settings.telegram_api_hash
+    phone_clean = phone_number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if not phone_clean.startswith("+"):
+        phone_clean = f"+{phone_clean}"
 
-    if not target_api_id or not target_api_hash:
+    target_api_id_str = str(api_id or settings.telegram_api_id or "").strip()
+    target_api_hash = str(api_hash or settings.telegram_api_hash or "").strip()
+
+    if not target_api_id_str or not target_api_hash:
         raise ValueError("API ID and API Hash must be set")
 
     try:
-        target_api_id_int = int(target_api_id)
+        target_api_id_int = int(target_api_id_str)
     except ValueError:
-        raise ValueError("API ID must be a valid integer")
+        raise ValueError("API ID must be a valid integer (e.g. 37579496)")
 
     target_temp = temp_session or _pending_sessions.get(phone_clean, "")
 
@@ -250,6 +323,8 @@ async def verify_code_and_login(
         settings.telegram_api_id = target_api_id_int
         settings.telegram_api_hash = target_api_hash
         os.environ["TELEGRAM_SESSION_STRING"] = session_str
+
+        save_persistent_telegram_session(target_api_id_int, target_api_hash, session_str)
 
         update_env_file({
             "TELEGRAM_API_ID": str(target_api_id_int),

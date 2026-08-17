@@ -25,8 +25,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-sm w-full shadow-2xl my-auto max-h-[calc(100vh-2rem)] overflow-y-auto">
         <h3 className="text-base font-semibold text-[var(--color-text-primary)]">{title}</h3>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">{message}</p>
         <div className="mt-6 flex justify-end gap-2">

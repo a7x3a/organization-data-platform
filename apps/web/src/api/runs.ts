@@ -38,7 +38,9 @@ export const runsApi = {
     return res.data;
   },
 
-  delete: async (id: string) => {
-    await apiClient.delete(`/runs/${id}`);
+  delete: async (payload: { id: string; deleteFiles?: boolean } | string) => {
+    const id = typeof payload === 'string' ? payload : payload.id;
+    const deleteFiles = typeof payload === 'object' ? payload.deleteFiles : false;
+    await apiClient.delete(`/runs/${id}`, { params: { deleteFiles } });
   },
 };

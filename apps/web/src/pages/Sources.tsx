@@ -6,7 +6,16 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Source } from '@odp/shared-types';
-import { Plus, Pencil, Trash2, ExternalLink, Globe } from 'lucide-react';
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Globe,
+  ShieldCheck,
+  X,
+  Power,
+} from 'lucide-react';
 
 export const Sources: React.FC = () => {
   const { t } = useTranslation();
@@ -86,9 +95,14 @@ export const Sources: React.FC = () => {
     {
       header: t('sources.fields.name'),
       accessor: (s) => (
-        <div>
-          <div className="font-semibold text-xs text-[var(--color-text-primary)]">{s.name}</div>
-          <div className="text-[10px] text-[var(--color-text-muted)] font-mono">{s.slug}</div>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center shrink-0 border border-[var(--color-brand-500)]/20">
+            <Globe className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="font-semibold text-xs text-[var(--color-text-primary)]">{s.name}</div>
+            <div className="text-[10px] text-[var(--color-text-muted)] font-mono">{s.slug}</div>
+          </div>
         </div>
       ),
     },
@@ -107,9 +121,18 @@ export const Sources: React.FC = () => {
       ),
     },
     {
+      header: t('sources.fields.description'),
+      accessor: (s) => (
+        <span className="text-xs text-[var(--color-text-muted)] truncate max-w-xs block">
+          {s.description || 'Auto-created source'}
+        </span>
+      ),
+    },
+    {
       header: t('sources.fields.robotsPolicy'),
       accessor: (s) => (
-        <span className="text-xs font-mono text-[var(--color-text-secondary)]">
+        <span className="inline-flex items-center gap-1 text-xs font-mono text-[var(--color-text-secondary)]">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           {t(`sources.robotsPolicy.${s.robotsPolicy}`)}
         </span>
       ),
@@ -118,12 +141,13 @@ export const Sources: React.FC = () => {
       header: t('sources.fields.enabled'),
       accessor: (s) => (
         <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-xs text-[11px] font-mono ${
+          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
             s.enabled
-              ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-              : 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'
+              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+              : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
           }`}
         >
+          <span className={`w-1.5 h-1.5 rounded-full ${s.enabled ? 'bg-emerald-400' : 'bg-zinc-400'}`} />
           {s.enabled ? t('common.enabled') : t('common.disabled')}
         </span>
       ),
@@ -145,27 +169,23 @@ export const Sources: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-4">
-      {/* Header Banner */}
-      <div className="flex items-center justify-between bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-sm p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xs bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center shrink-0 border border-[var(--color-brand-500)]/20">
-            <Globe className="w-4 h-4" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-[var(--color-text-primary)] tracking-tight">
-              {t('sources.title')}
-            </h1>
-            <p className="text-xs text-[var(--color-text-muted)]">{t('sources.subtitle')}</p>
-          </div>
+    <div className="space-y-6">
+      {/* Clean Page Header matching Collectors page */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
+            {t('sources.title')}
+          </h1>
+          <p className="text-sm text-[var(--color-text-muted)]">{t('sources.subtitle')}</p>
         </div>
-        <Button onClick={openCreateModal} className="bg-[var(--color-brand-600)] hover:bg-[var(--color-brand-500)]">
+        <Button onClick={openCreateModal}>
           <Plus className="w-4 h-4" />
           {t('sources.create')}
         </Button>
       </div>
 
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-sm p-4">
+      {/* Single Table Card matching Collectors page */}
+      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-5 shadow-[var(--shadow-card)]">
         <DataTable
           columns={columns}
           data={data?.data || []}
@@ -184,96 +204,112 @@ export const Sources: React.FC = () => {
         />
       </div>
 
-      {/* Create Source Modal */}
+      {/* Create / Edit Source Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-sm p-5 max-w-md w-full shadow-lg">
-            <h2 className="text-sm font-bold uppercase tracking-wider font-mono text-[var(--color-text-primary)]">
-              {editingSource ? `Edit "${editingSource.name}"` : t('sources.create')}
-            </h2>
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
-                  {t('sources.fields.name')}
-                </label>
-                <Input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    if (!editingSource && !slug) {
-                      setSlug(
-                        e.target.value
-                          .toLowerCase()
-                          .replace(/[^a-z0-9]+/g, '-')
-                          .replace(/^-|-$/g, '')
-                      );
-                    }
-                  }}
-                  placeholder="e.g. Open Books Archive"
-                />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-2xl)] shadow-2xl overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] flex items-center justify-center">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
+                  {editingSource ? `Edit "${editingSource.name}"` : t('sources.create')}
+                </h2>
+              </div>
+              <button onClick={closeModal} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
+                    {t('sources.fields.name')}
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      if (!editingSource && !slug) {
+                        setSlug(
+                          e.target.value
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, '-')
+                            .replace(/^-|-$/g, '')
+                        );
+                      }
+                    }}
+                    placeholder="e.g. Open Books Archive"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
+                    {t('sources.fields.slug')}
+                    {editingSource && (
+                      <span className="ml-1 text-[var(--color-text-muted)] font-normal">
+                        (fixed)
+                      </span>
+                    )}
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    disabled={!!editingSource}
+                    pattern="^[a-z0-9\-]+$"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder="open-books-archive"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
+                    {t('sources.fields.baseUrl')}
+                  </label>
+                  <Input
+                    type="url"
+                    required
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://example.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
+                    {t('sources.fields.robotsPolicy')}
+                  </label>
+                  <Select
+                    value={robotsPolicy}
+                    onValueChange={(v) => setRobotsPolicy(v as 'RESPECT' | 'IGNORE')}
+                    options={[
+                      { value: 'RESPECT', label: 'Respect robots.txt' },
+                      { value: 'IGNORE', label: 'Ignore robots.txt' },
+                    ]}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
+                    {t('sources.fields.description')}
+                  </label>
+                  <Textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                    placeholder="Optional description of this data source..."
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
-                  {t('sources.fields.slug')}
-                  {editingSource && (
-                    <span className="ml-1 text-[var(--color-text-muted)] font-normal">
-                      (fixed)
-                    </span>
-                  )}
-                </label>
-                <Input
-                  type="text"
-                  required
-                  disabled={!!editingSource}
-                  pattern="^[a-z0-9\-]+$"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="open-books-archive"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
-                  {t('sources.fields.baseUrl')}
-                </label>
-                <Input
-                  type="url"
-                  required
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://example.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
-                  {t('sources.fields.robotsPolicy')}
-                </label>
-                <Select
-                  value={robotsPolicy}
-                  onValueChange={(v) => setRobotsPolicy(v as 'RESPECT' | 'IGNORE')}
-                  options={[
-                    { value: 'RESPECT', label: 'Respect robots.txt' },
-                    { value: 'IGNORE', label: 'Ignore robots.txt' },
-                  ]}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
-                  {t('sources.fields.description')}
-                </label>
-                <Textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
+              {/* Pinned Footer */}
+              <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <Button type="button" variant="ghost" onClick={closeModal}>
                   {t('common.cancel')}
                 </Button>

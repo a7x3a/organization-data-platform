@@ -24,15 +24,11 @@ class TelegramNotConfiguredError(Exception):
 def build_client() -> TelegramClient:
     """
     Build a TelegramClient from a saved session string.
-
-    Deliberately never prompts for phone/OTP — that one-time interactive
-    login happens once, locally, via `python -m scripts.telegram_login`,
-    which is what produces TELEGRAM_SESSION_STRING. A background worker
-    process has no way to receive an OTP code, so this must never block on
-    one; callers connect explicitly and check is_user_authorized() rather
-    than using TelegramClient.start(), which would try to log in
-    interactively if the session were ever invalid.
     """
+    from app.telegram.api_server import load_persistent_telegram_session
+
+    load_persistent_telegram_session()
+
     if not (
         settings.telegram_api_id
         and settings.telegram_api_hash
@@ -40,7 +36,7 @@ def build_client() -> TelegramClient:
     ):
         raise TelegramNotConfiguredError(
             "TELEGRAM_API_ID/TELEGRAM_API_HASH/TELEGRAM_SESSION_STRING must all be set. "
-            "Run `python -m scripts.telegram_login` once, locally, to generate the session string."
+            "Please configure Telegram authentication in Settings."
         )
     return TelegramClient(
         StringSession(settings.telegram_session_string),

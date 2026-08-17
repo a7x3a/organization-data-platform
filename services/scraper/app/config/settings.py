@@ -12,7 +12,7 @@ def _find_repo_root() -> Path:
     for p in [curr] + list(curr.parents):
         if (p / "docker-compose.yml").exists() or (p / ".git").exists() or (p / "package.json").exists():
             return p
-    return Path(__file__).resolve().parents[4]
+    return curr.parents[-1] if curr.parents else curr
 
 REPO_ROOT = _find_repo_root()
 

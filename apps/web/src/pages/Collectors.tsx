@@ -16,7 +16,7 @@ import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Collector, isTelegramCollector, isWebCollector } from '@odp/shared-types';
 import { CollectorTypeInput } from '../types/forms';
-import { Plus, Play, Power, Send, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Play, Power, Send, Pencil, Trash2, Globe, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 // Mirrors the scraper's own category grouping (services/scraper/app/downloader/downloader.py
@@ -136,11 +136,34 @@ export const Collectors: React.FC = () => {
       setCollectorType('TELEGRAM');
       setChannels(collector.configuration.channels.join('\n'));
       setMessageLimit(collector.configuration.messageLimit);
+      setDownloadMedia(collector.configuration.downloadMedia);
       const incMedia = collector.configuration.includeMediaTypes || [];
       setMediaTypes(
         incMedia.length > 0
           ? incMedia
           : [...ALL_MEDIA_TYPES]
+      );
+      let allowedExts = (collector.configuration as any).allowedExtensions || [];
+      if (allowedExts.length === 0) {
+        const lowerName = collector.name.toLowerCase();
+        if (lowerName.includes('book') || lowerName.includes('ebook')) {
+          allowedExts = ['.pdf', '.epub', '.mobi', '.azw3', '.fb2', '.djvu'];
+        } else if (lowerName.includes('research') || lowerName.includes('document')) {
+          allowedExts = ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md'];
+        } else if (lowerName.includes('audio')) {
+          allowedExts = ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'];
+        } else if (lowerName.includes('data') || lowerName.includes('dataset')) {
+          allowedExts = ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml'];
+        }
+      }
+      const restricted = allowedExts.length > 0;
+      setRestrictFileTypes(restricted);
+      setFileTypeCategories(
+        restricted
+          ? FILE_TYPE_CATEGORIES.filter((cat) =>
+              cat.extensions.some((ext) => allowedExts.includes(ext))
+            ).map((cat) => cat.label)
+          : []
       );
     } else if (isWebCollector(collector)) {
       setCollectorType('WEB');
@@ -155,8 +178,8 @@ export const Collectors: React.FC = () => {
       setFileTypeCategories(
         restricted
           ? FILE_TYPE_CATEGORIES.filter((cat) =>
-              cat.extensions.some((ext) => collector.configuration.allowedExtensions.includes(ext))
-            ).map((cat) => cat.label)
+            cat.extensions.some((ext) => collector.configuration.allowedExtensions.includes(ext))
+          ).map((cat) => cat.label)
           : []
       );
     }
@@ -179,28 +202,35 @@ export const Collectors: React.FC = () => {
         .map((c) => c.trim().replace(/^@/, ''))
         .filter(Boolean);
 
-      // Preserve fields this form doesn't expose (sinceDate) rather than
-      // silently dropping them on every edit — same reasoning as the WEB
-      // branch below.
       const existingTelegramConfig =
         editingCollector && isTelegramCollector(editingCollector)
           ? editingCollector.configuration
           : undefined;
 
+      const extensions =
+        restrictFileTypes && fileTypeCategories.length > 0
+          ? FILE_TYPE_CATEGORIES.filter((c) => fileTypeCategories.includes(c.label)).flatMap(
+            (c) => c.extensions
+          )
+          : [];
+
+      const effectiveMediaTypes = [...mediaTypes];
+      if (restrictFileTypes && fileTypeCategories.length > 0) {
+        const hasDocCategory = fileTypeCategories.some((cat) =>
+          ['Documents', 'Spreadsheets', 'Presentations', 'Ebooks', 'Archives', 'Text & Data'].includes(cat)
+        );
+        if (hasDocCategory && !effectiveMediaTypes.includes('document')) {
+          effectiveMediaTypes.push('document');
+        }
+      }
+
       const telegramConfig = {
         ...existingTelegramConfig,
         channels: channelList,
         messageLimit,
-        // The scraper treats an *empty* includeMediaTypes as "no filter,
-        // every kind" (same as the field being omitted) — not "no media
-        // types allowed". So if the user unchecked every box while
-        // "download media" was still on, submitting downloadMedia:true
-        // with [] would silently download everything, the opposite of
-        // what an all-unchecked grid visually implies. Turning
-        // downloadMedia off in that case is the only unambiguous way to
-        // express "collect no media" over this wire format.
-        downloadMedia: downloadMedia && mediaTypes.length > 0,
-        includeMediaTypes: mediaTypes as Array<'photo' | 'video' | 'audio' | 'document'>,
+        downloadMedia: downloadMedia && effectiveMediaTypes.length > 0,
+        includeMediaTypes: effectiveMediaTypes as Array<'photo' | 'video' | 'audio' | 'document'>,
+        allowedExtensions: extensions,
       };
 
       if (editingCollector) {
@@ -239,8 +269,8 @@ export const Collectors: React.FC = () => {
     const extensions =
       restrictFileTypes && fileTypeCategories.length > 0
         ? FILE_TYPE_CATEGORIES.filter((c) => fileTypeCategories.includes(c.label)).flatMap(
-            (c) => c.extensions
-          )
+          (c) => c.extensions
+        )
         : [];
 
     // Preserve fields this simplified form doesn't expose (allowedUrlPatterns,
@@ -360,11 +390,10 @@ export const Collectors: React.FC = () => {
           onClick={() =>
             c.enabled ? disableCollector.mutate(c.id) : enableCollector.mutate(c.id)
           }
-          className={`inline-flex items-center gap-1.5 text-xs transition-colors ${
-            c.enabled
-              ? 'text-[var(--color-success-400)] hover:text-[var(--color-error-400)]'
-              : 'text-[var(--color-text-muted)] hover:text-[var(--color-success-400)]'
-          }`}
+          className={`inline-flex items-center gap-1.5 text-xs transition-colors ${c.enabled
+            ? 'text-[var(--color-success-400)] hover:text-[var(--color-error-400)]'
+            : 'text-[var(--color-text-muted)] hover:text-[var(--color-success-400)]'
+            }`}
         >
           <Power className="w-3 h-3" />
           {c.enabled ? t('common.enabled') : t('common.disabled')}
@@ -427,10 +456,10 @@ export const Collectors: React.FC = () => {
           pagination={
             data
               ? {
-                  page,
-                  totalPages: data.totalPages,
-                  onPageChange: setPage,
-                }
+                page,
+                totalPages: data.totalPages,
+                onPageChange: setPage,
+              }
               : undefined
           }
         />
@@ -438,290 +467,425 @@ export const Collectors: React.FC = () => {
 
       {/* Create Collector Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-              {editingCollector ? `Edit "${editingCollector.name}"` : t('collectors.create')}
-            </h2>
-            <form onSubmit={handleSubmit} className="mt-5 space-y-5">
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  Collector Type
-                  {editingCollector && (
-                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
-                      (fixed once created)
-                    </span>
-                  )}
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={!!editingCollector}
-                    onClick={() => setCollectorType('WEB')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-                      collectorType === 'WEB'
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-2xl overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+                {editingCollector ? `Edit "${editingCollector.name}"` : t('collectors.create')}
+              </h2>
+              <button
+                onClick={closeModal}
+                className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    Collector Type
+                    {editingCollector && (
+                      <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
+                        (fixed once created)
+                      </span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={!!editingCollector}
+                      onClick={() => setCollectorType('WEB')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${collectorType === 'WEB'
                         ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
                         : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    Web
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!!editingCollector}
-                    onClick={() => setCollectorType('TELEGRAM')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-                      collectorType === 'TELEGRAM'
+                        }`}
+                    >
+                      Web
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!editingCollector}
+                      onClick={() => setCollectorType('TELEGRAM')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${collectorType === 'TELEGRAM'
                         ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
                         : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    Telegram
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('collectors.fields.source')}
-                  {editingCollector && (
-                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
-                      (fixed once created)
-                    </span>
-                  )}
-                </label>
-                <Select
-                  value={sourceId}
-                  onValueChange={setSourceId}
-                  disabled={!!editingCollector}
-                  placeholder="Select source website..."
-                  options={(sourcesData?.data || []).map((s) => ({
-                    value: s.id,
-                    label: `${s.name} (${s.slug})`,
-                  }))}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('collectors.fields.name')}
-                </label>
-                <Input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={
-                    collectorType === 'TELEGRAM'
-                      ? 'e.g. News Channel Archive'
-                      : 'e.g. Daily PDF Books Scraper'
-                  }
-                />
-              </div>
-
-              {collectorType === 'TELEGRAM' ? (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                      Channels (one per line or comma separated)
-                    </label>
-                    <Textarea
-                      required
-                      rows={3}
-                      value={channels}
-                      onChange={(e) => setChannels(e.target.value)}
-                      placeholder="my_channel&#10;another_channel"
-                    />
-                    <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
-                      Public channel usernames, without the @. Requires the scraper
-                      worker's Telegram account to be logged in (see README) and to
-                      have access to each channel.
-                    </p>
+                        }`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      Telegram
+                    </button>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    {t('collectors.fields.source')}
+                    {editingCollector && (
+                      <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
+                        (fixed once created)
+                      </span>
+                    )}
+                  </label>
+                  <Select
+                    value={sourceId}
+                    onValueChange={setSourceId}
+                    disabled={!!editingCollector}
+                    placeholder="Select source website..."
+                    options={(sourcesData?.data || []).map((s) => ({
+                      value: s.id,
+                      label: `${s.name} (${s.slug})`,
+                    }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    {t('collectors.fields.name')}
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={
+                      collectorType === 'TELEGRAM'
+                        ? 'e.g. News Channel Archive'
+                        : 'e.g. Daily PDF Books Scraper'
+                    }
+                  />
+                </div>
+
+                {collectorType === 'TELEGRAM' ? (
+                  <>
                     <div>
                       <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                        Message Limit (per channel, per run)
+                        Channels (one per line or comma separated)
                       </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={100000}
-                        value={messageLimit}
-                        onChange={(e) => setMessageLimit(Number(e.target.value))}
+                      <Textarea
+                        required
+                        rows={3}
+                        value={channels}
+                        onChange={(e) => setChannels(e.target.value)}
+                        placeholder="my_channel&#10;another_channel"
+                      />
+                      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                        Public channel usernames, without the @. Requires the scraper
+                        worker's Telegram account to be logged in (see README) and to
+                        have access to each channel.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                          Message Limit (per channel, per run)
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={100000}
+                          value={messageLimit}
+                          onChange={(e) => setMessageLimit(Number(e.target.value))}
+                        />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={downloadMedia}
+                            onChange={(e) => setDownloadMedia(e.target.checked)}
+                            className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                          />
+                          <span className="text-xs text-[var(--color-text-secondary)]">
+                            Download media
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {downloadMedia && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                            Telegram Media Kinds
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {ALL_MEDIA_TYPES.map((type) => (
+                              <label key={type} className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={mediaTypes.includes(type)}
+                                  onChange={() => toggleMediaType(type)}
+                                  className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                                />
+                                <span className="text-xs text-[var(--color-text-secondary)] capitalize">
+                                  {type === 'document' ? 'Documents (Files)' : `${type}s`}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-[var(--color-border-subtle)]">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={restrictFileTypes}
+                              onChange={(e) => setRestrictFileTypes(e.target.checked)}
+                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                            />
+                            <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                              Restrict to specific file categories (PDF, Ebooks, Docs, etc.)
+                            </span>
+                          </label>
+                          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                            Off by default — collects every file attachment. Select a preset or check boxes below to restrict file types.
+                          </p>
+
+                          <div className="mt-2.5 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRestrictFileTypes(true);
+                                setFileTypeCategories(['Documents', 'Ebooks']);
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                                restrictFileTypes &&
+                                fileTypeCategories.includes('Documents') &&
+                                fileTypeCategories.includes('Ebooks')
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                              }`}
+                            >
+                              📚 Books & Ebooks Preset
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRestrictFileTypes(true);
+                                setFileTypeCategories(['Documents', 'Text & Data']);
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                                restrictFileTypes &&
+                                fileTypeCategories.includes('Documents') &&
+                                fileTypeCategories.includes('Text & Data')
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                              }`}
+                            >
+                              📄 Research Docs Preset
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRestrictFileTypes(true);
+                                setFileTypeCategories(['Audio']);
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                                restrictFileTypes &&
+                                fileTypeCategories.includes('Audio') &&
+                                fileTypeCategories.length === 1
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                              }`}
+                            >
+                              🎧 Audiobooks Preset
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRestrictFileTypes(false);
+                                setFileTypeCategories([]);
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                                !restrictFileTypes
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-muted)]'
+                              }`}
+                            >
+                              🌐 All Files (No Filter)
+                            </button>
+                          </div>
+
+                          {restrictFileTypes && (
+                            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {FILE_TYPE_CATEGORIES.map((category) => (
+                                <label key={category.label} className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={fileTypeCategories.includes(category.label)}
+                                    onChange={() => toggleFileTypeCategory(category.label)}
+                                    className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                                  />
+                                  <span className="text-xs text-[var(--color-text-secondary)]">
+                                    {category.label}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+
+                          {restrictFileTypes && fileTypeCategories.length === 0 && (
+                            <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
+                              No file categories selected — with none checked, all file extensions will be collected.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        {t('collectors.fields.startUrls')} (one per line)
+                      </label>
+                      <Textarea
+                        required
+                        rows={3}
+                        value={startUrls}
+                        onChange={(e) => setStartUrls(e.target.value)}
+                        placeholder="https://example.com/books&#10;https://example.com/archive"
                       />
                     </div>
-                    <div className="flex items-end pb-2">
+
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        {t('collectors.fields.allowedDomains')} (comma separated)
+                      </label>
+                      <Input
+                        type="text"
+                        value={allowedDomains}
+                        onChange={(e) => setAllowedDomains(e.target.value)}
+                        placeholder="example.com, archive.example.com"
+                      />
+                    </div>
+
+                    <div>
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          checked={downloadMedia}
-                          onChange={(e) => setDownloadMedia(e.target.checked)}
+                          checked={restrictFileTypes}
+                          onChange={(e) => setRestrictFileTypes(e.target.checked)}
                           className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
                         />
-                        <span className="text-xs text-[var(--color-text-secondary)]">
-                          Download media
+                        <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                          Restrict to specific file types
                         </span>
                       </label>
-                    </div>
-                  </div>
+                      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                        Off by default — the crawler discovers every file type it finds (PDFs,
+                        images, audio, video, archives, and more), not just a fixed list.
+                      </p>
 
-                  {downloadMedia && (
-                    <div>
-                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                        Media types to download
-                      </label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {ALL_MEDIA_TYPES.map((type) => (
-                          <label key={type} className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={mediaTypes.includes(type)}
-                              onChange={() => toggleMediaType(type)}
-                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                            />
-                            <span className="text-xs text-[var(--color-text-secondary)] capitalize">
-                              {type === 'document' ? 'Documents (files)' : `${type}s`}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                      {mediaTypes.length === 0 && (
+                      {restrictFileTypes && (
+                        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {FILE_TYPE_CATEGORIES.map((category) => (
+                            <label key={category.label} className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={fileTypeCategories.includes(category.label)}
+                                onChange={() => toggleFileTypeCategory(category.label)}
+                                className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                              />
+                              <span className="text-xs text-[var(--color-text-secondary)]">
+                                {category.label}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {restrictFileTypes && fileTypeCategories.length === 0 && (
                         <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
-                          No media types selected — media downloading will be turned off; only
-                          each message's text will be collected.
+                          No file types selected — with none checked, this has no effect and every
+                          file type will still be discovered.
                         </p>
                       )}
                     </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                      {t('collectors.fields.startUrls')} (one per line)
-                    </label>
-                    <Textarea
-                      required
-                      rows={3}
-                      value={startUrls}
-                      onChange={(e) => setStartUrls(e.target.value)}
-                      placeholder="https://example.com/books&#10;https://example.com/archive"
-                    />
-                  </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                      {t('collectors.fields.allowedDomains')} (comma separated)
-                    </label>
-                    <Input
-                      type="text"
-                      value={allowedDomains}
-                      onChange={(e) => setAllowedDomains(e.target.value)}
-                      placeholder="example.com, archive.example.com"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={restrictFileTypes}
-                        onChange={(e) => setRestrictFileTypes(e.target.checked)}
-                        className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                      />
-                      <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-                        Restrict to specific file types
-                      </span>
-                    </label>
-                    <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
-                      Off by default — the crawler discovers every file type it finds (PDFs,
-                      images, audio, video, archives, and more), not just a fixed list.
-                    </p>
-
-                    {restrictFileTypes && (
-                      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {FILE_TYPE_CATEGORIES.map((category) => (
-                          <label key={category.label} className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={fileTypeCategories.includes(category.label)}
-                              onChange={() => toggleFileTypeCategory(category.label)}
-                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                            />
-                            <span className="text-xs text-[var(--color-text-secondary)]">
-                              {category.label}
-                            </span>
-                          </label>
-                        ))}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                          Max Depth
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={maxDepth}
+                          onChange={(e) => setMaxDepth(Number(e.target.value))}
+                        />
                       </div>
-                    )}
-                    {restrictFileTypes && fileTypeCategories.length === 0 && (
-                      <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
-                        No file types selected — with none checked, this has no effect and every
-                        file type will still be discovered.
-                      </p>
-                    )}
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                          Max Pages
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={100000}
+                          value={maxPages}
+                          onChange={(e) => setMaxPages(Number(e.target.value))}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                          Concurrency
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={16}
+                          value={concurrency}
+                          onChange={(e) => setConcurrency(Number(e.target.value))}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {collectorType === 'WEB' && (
+                  <div
+                    onClick={() => setUseBrowser(!useBrowser)}
+                    className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${useBrowser
+                      ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
+                      }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]'
+                        }`}>
+                        <Globe className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs font-semibold">
+                          <span>Force Playwright Browser</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${useBrowser ? 'bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)]'
+                            }`}>
+                            JS SPAs
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
+                          Use Playwright headless browser for JavaScript-rendered web apps
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
+                      }`}>
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${useBrowser ? 'translate-x-4' : 'translate-x-0'
+                        }`} />
+                    </div>
                   </div>
+                )}
+              </div>
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                        Max Depth
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={maxDepth}
-                        onChange={(e) => setMaxDepth(Number(e.target.value))}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                        Max Pages
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={100000}
-                        value={maxPages}
-                        onChange={(e) => setMaxPages(Number(e.target.value))}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                        Concurrency
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={16}
-                        value={concurrency}
-                        onChange={(e) => setConcurrency(Number(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {collectorType === 'WEB' && (
-                <label className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    checked={useBrowser}
-                    onChange={(e) => setUseBrowser(e.target.checked)}
-                    className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                  />
-                  <span className="text-xs text-[var(--color-text-secondary)]">
-                    Use Playwright headless browser (for JS-rendered pages)
-                  </span>
-                </label>
-              )}
-
-              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
+              {/* Pinned Footer */}
+              <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <Button type="button" variant="ghost" onClick={closeModal}>
                   {t('common.cancel')}
                 </Button>
@@ -732,8 +896,8 @@ export const Collectors: React.FC = () => {
                   {createCollector.isPending || updateCollector.isPending
                     ? t('common.loading')
                     : editingCollector
-                    ? 'Save Changes'
-                    : t('common.create')}
+                      ? 'Save Changes'
+                      : t('common.create')}
                 </Button>
               </div>
             </form>

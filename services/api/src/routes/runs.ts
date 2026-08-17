@@ -53,7 +53,8 @@ router.delete(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await runService.deleteRun(req.params.id);
+      const deleteFiles = req.query.deleteFiles === 'true' || req.query.deleteFiles === '1';
+      await runService.deleteRun(req.params.id, deleteFiles);
       res.status(204).send();
     } catch (err) {
       next(err);

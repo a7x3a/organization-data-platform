@@ -98,9 +98,6 @@ class FilePipeline:
                 await self.report_progress(manifest)
                 return
 
-            category = categorize_file(result.mime_type, result.extension, temp_path=result.temp_path)
-            r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
-
             extra_metadata = None
             is_pdf = (result.mime_type == "application/pdf") or (
                 result.extension and result.extension.lower() == ".pdf"
@@ -110,6 +107,11 @@ class FilePipeline:
 
                 pdf_res = extract_and_classify_pdf(result.temp_path)
                 extra_metadata = {"pdf_extraction": pdf_res.to_dict()}
+                category = pdf_res.folder_path
+            else:
+                category = categorize_file(result.mime_type, result.extension, temp_path=result.temp_path)
+
+            r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
 
             try:
                 storage.upload_file(result.temp_path, r2_key, content_type=result.mime_type)

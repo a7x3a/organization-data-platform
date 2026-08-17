@@ -160,7 +160,9 @@ const ACTIVE_STATUSES: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunS
 // (CollectionError cascades). CollectedFile.collectionRunId is ON DELETE SET
 // NULL, never a cascade delete — a run being cleared out of the list can
 // never take a genuinely collected file down with it.
-export async function deleteRun(id: string) {
+import { storageProvider } from './storage';
+
+export async function deleteRun(id: string, deleteFiles: boolean = false) {
   const run = await getRunById(id);
 
   if (ACTIVE_STATUSES.includes(run.status as RunStatus)) {
@@ -171,7 +173,26 @@ export async function deleteRun(id: string) {
     );
   }
 
-  await prisma.collectionRun.delete({ where: { id } });
+  if (deleteFiles) {
+    const files = await prisma.collectedFile.findMany({
+      where: { collectionRunId: run.id },
+      select: { id: true, r2Key: true },
+    });
+    for (const f of files) {
+      if (f.r2Key) {
+        try {
+          await storageProvider.delete(f.r2Key);
+        } catch (err) {
+          logger.warn({ r2Key: f.r2Key, err }, 'Failed to delete storage file during run purge');
+        }
+      }
+    }
+    await prisma.collectedFile.deleteMany({
+      where: { collectionRunId: run.id },
+    });
+  }
+
+  await prisma.collectionRun.delete({ where: { id: run.id } });
 }
 
 export async function cancelRun(id: string, userId: string) {
@@ -284,7 +305,7 @@ export async function pauseRun(id: string, userId: string) {
     return run;
   }
 
-  const pausableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING];
+  const pausableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
   if (!pausableStatuses.includes(run.status as RunStatus)) {
     throw new AppError(
       400,
@@ -294,13 +315,14 @@ export async function pauseRun(id: string, userId: string) {
   }
 
   try {
-    await redis.set(`pause_run:${id}`, '1');
+    await redis.set(`pause_run:${run.id}`, '1');
+    await redis.set(`pause_run:${run.runId}`, '1');
   } catch (err) {
     logger.warn({ runId: id, err }, 'Failed to set pause flag in Redis');
   }
 
   const updated = await prisma.collectionRun.update({
-    where: { id },
+    where: { id: run.id },
     data: { status: RunStatus.PAUSED },
   });
 
@@ -309,11 +331,11 @@ export async function pauseRun(id: string, userId: string) {
       userId,
       action: 'run.paused',
       entityType: 'CollectionRun',
-      entityId: id,
+      entityId: run.id,
     },
   });
 
-  logger.info({ runId: id, userId }, 'collection_run_paused');
+  logger.info({ runId: run.id, userId }, 'collection_run_paused');
   return updated;
 }
 
@@ -333,13 +355,14 @@ export async function resumeRun(id: string, userId: string) {
   }
 
   try {
-    await redis.del(`pause_run:${id}`);
+    await redis.del(`pause_run:${run.id}`);
+    await redis.del(`pause_run:${run.runId}`);
   } catch (err) {
     logger.warn({ runId: id, err }, 'Failed to delete pause flag in Redis');
   }
 
   const updated = await prisma.collectionRun.update({
-    where: { id },
+    where: { id: run.id },
     data: { status: RunStatus.RUNNING },
   });
 
@@ -348,11 +371,11 @@ export async function resumeRun(id: string, userId: string) {
       userId,
       action: 'run.resumed',
       entityType: 'CollectionRun',
-      entityId: id,
+      entityId: run.id,
     },
   });
 
-  logger.info({ runId: id, userId }, 'collection_run_resumed');
+  logger.info({ runId: run.id, userId }, 'collection_run_resumed');
   return updated;
 }
 

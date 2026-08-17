@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { apiClient } from '../api/client';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { Shield, HardDrive, UserCheck, Send, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -20,9 +20,9 @@ export const Settings: React.FC = () => {
 
   const fetchTelegramStatus = () => {
     setLoadingTelegramStatus(true);
-    axios
-      .get('/api/telegram/status')
-      .then((r) => setTelegramStatus(r.data))
+    apiClient
+      .get('/telegram/status')
+      .then((r: any) => setTelegramStatus(r.data))
       .catch(() => setTelegramStatus({ is_configured: false, is_authorized: false }))
       .finally(() => setLoadingTelegramStatus(false));
   };
@@ -32,7 +32,7 @@ export const Settings: React.FC = () => {
   }, []);
 
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="space-y-8 w-full">
       <div>
         <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           {t('nav.settings')}

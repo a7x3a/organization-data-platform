@@ -22,6 +22,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
+# Ensure standard MIME database recognizes ebook, archive, and dataset formats
+mimetypes.add_type("application/epub+zip", ".epub")
+mimetypes.add_type("application/x-mobipocket-ebook", ".mobi")
+mimetypes.add_type("application/vnd.amazon.mobi8-ebook", ".azw3")
+mimetypes.add_type("application/x-fb2+xml", ".fb2")
+mimetypes.add_type("image/vnd.djvu", ".djvu")
+mimetypes.add_type("application/x-djvu", ".djvu")
+mimetypes.add_type("application/x-7z-compressed", ".7z")
+mimetypes.add_type("application/x-rar-compressed", ".rar")
+mimetypes.add_type("application/x-parquet", ".parquet")
+mimetypes.add_type("application/jsonlines", ".jsonl")
+mimetypes.add_type("audio/opus", ".opus")
+
 import structlog
 from telethon import TelegramClient
 from telethon.tl.types import Message
@@ -45,6 +58,9 @@ class TelegramCollectorConfig:
     download_media: bool = True
     # e.g. ["photo", "video", "document", "audio"] — empty/None means "all kinds"
     include_media_types: Optional[list[str]] = None
+    # e.g. [".pdf", ".epub", ".mobi"] — empty/None means "all extensions"
+    allowed_extensions: Optional[list[str]] = None
+    save_message_json: bool = False
 
 
 def _message_url(channel: str, message_id: int) -> str:
@@ -52,26 +68,90 @@ def _message_url(channel: str, message_id: int) -> str:
 
 
 def _media_kind(message: Any) -> Optional[str]:
-    if getattr(message, "photo", None):
+    media = getattr(message, "media", None)
+    if not media:
+        return None
+    if getattr(message, "photo", None) or getattr(media, "photo", None):
         return "photo"
-    if getattr(message, "video", None):
+    if getattr(message, "video", None) or getattr(media, "video", None):
         return "video"
-    if getattr(message, "voice", None) or getattr(message, "audio", None):
+    if getattr(message, "voice", None) or getattr(message, "audio", None) or getattr(media, "voice", None) or getattr(media, "audio", None):
         return "audio"
-    if getattr(message, "document", None):
+    if getattr(message, "document", None) or getattr(media, "document", None) or hasattr(media, "document"):
+        return "document"
+    if getattr(message, "file", None) is not None:
         return "document"
     return None
 
 
 def _original_media_filename(message: Any) -> Optional[str]:
+    file_obj = getattr(message, "file", None)
+    if file_obj and getattr(file_obj, "name", None):
+        return file_obj.name
+
     document = getattr(message, "document", None)
     if not document:
         return None
     attributes = getattr(document, "attributes", None) or []
     for attr in attributes:
-        name = getattr(attr, "file_name", None)
+        name = getattr(attr, "file_name", None) or getattr(attr, "filename", None)
         if name:
             return name
+    return None
+
+
+def _get_filename_ext(message: Any) -> Optional[str]:
+    file_obj = getattr(message, "file", None)
+    if file_obj and getattr(file_obj, "ext", None):
+        ext = str(file_obj.ext).lower()
+        if ext:
+            return ext if ext.startswith(".") else f".{ext}"
+
+    filename = _original_media_filename(message)
+    if filename:
+        ext = os.path.splitext(filename)[1].lower()
+        if ext:
+            return ext
+
+    document = getattr(message, "document", None)
+    mime = getattr(document, "mime_type", None) or (getattr(file_obj, "mime_type", None) if file_obj else None)
+    if mime:
+        mime_str = str(mime).lower()
+        if "pdf" in mime_str:
+            return ".pdf"
+        if "epub" in mime_str:
+            return ".epub"
+        if "mobi" in mime_str or "azw" in mime_str:
+            return ".mobi"
+        if "fb2" in mime_str:
+            return ".fb2"
+        if "djvu" in mime_str:
+            return ".djvu"
+        if "mp3" in mime_str:
+            return ".mp3"
+        if "wav" in mime_str:
+            return ".wav"
+        if "ogg" in mime_str:
+            return ".ogg"
+        if "flac" in mime_str:
+            return ".flac"
+        if "json" in mime_str:
+            return ".json"
+        if "parquet" in mime_str:
+            return ".parquet"
+        if "csv" in mime_str:
+            return ".csv"
+        if "word" in mime_str or "docx" in mime_str:
+            return ".docx"
+        if "zip" in mime_str:
+            return ".zip"
+        if "rar" in mime_str:
+            return ".rar"
+        if "7z" in mime_str:
+            return ".7z"
+        guessed = mimetypes.guess_extension(mime_str)
+        if guessed:
+            return guessed.lower()
     return None
 
 
@@ -208,15 +288,19 @@ async def scrape_channel(
 ) -> AsyncIterator[DownloadResult]:
     """
     Yields one DownloadResult per artifact discovered in `channel`, newest
-    message first, up to cfg.message_limit (or until cfg.since_date, since
-    Telethon's default iteration order means "older than since_date" means
-    every remaining message is too).
+    message first, up to cfg.message_limit (or until cfg.since_date).
     """
     since = None
     if cfg.since_date:
         since = datetime.fromisoformat(cfg.since_date)
         if since.tzinfo is None:
             since = since.replace(tzinfo=timezone.utc)
+
+    normalized_allowed = (
+        [e.lower() if e.startswith(".") else f".{e.lower()}" for e in cfg.allowed_extensions]
+        if cfg.allowed_extensions and len(cfg.allowed_extensions) > 0
+        else None
+    )
 
     async for message in client.iter_messages(channel, limit=cfg.message_limit):
         if should_cancel is not None and await should_cancel():
@@ -233,15 +317,51 @@ async def scrape_channel(
             and kind
             and (not cfg.include_media_types or kind in cfg.include_media_types)
         ):
-            media_result = await _download_media_artifact(
-                client, message, kind, base_url, should_cancel=should_cancel
-            )
-            if media_result:
-                yield media_result
-            if should_cancel is not None and await should_cancel():
-                return
+            skip_download = False
+            ext = _get_filename_ext(message)
+            if normalized_allowed and ext:
+                if ext not in normalized_allowed:
+                    log.info(
+                        "telegram_skipping_unallowed_extension",
+                        channel=channel,
+                        msg_id=message.id,
+                        ext=ext,
+                        allowed=normalized_allowed,
+                    )
+                    skip_download = True
+
+            if not skip_download:
+                media_result = await _download_media_artifact(
+                    client, message, kind, base_url, should_cancel=should_cancel
+                )
+                if media_result:
+                    if (
+                        normalized_allowed
+                        and media_result.extension
+                        and media_result.extension.lower() not in normalized_allowed
+                    ):
+                        log.info(
+                            "telegram_discarding_post_download_unallowed_extension",
+                            channel=channel,
+                            msg_id=message.id,
+                            ext=media_result.extension,
+                            allowed=normalized_allowed,
+                        )
+                        if os.path.exists(media_result.temp_path):
+                            try:
+                                os.unlink(media_result.temp_path)
+                            except OSError:
+                                pass
+                    else:
+                        yield media_result
+
+                if should_cancel is not None and await should_cancel():
+                    return
 
         if should_cancel is not None and await should_cancel():
             return
 
-        yield _message_record_artifact(message, channel, kind)
+        # Only yield message record JSON if save_message_json is explicitly True,
+        # OR if ".json" is explicitly listed in normalized_allowed extensions.
+        if cfg.save_message_json or (normalized_allowed and ".json" in normalized_allowed):
+            yield _message_record_artifact(message, channel, kind)
