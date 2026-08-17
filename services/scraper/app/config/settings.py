@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     api_base_url: str = "http://api:4000"
     api_service_token: Optional[str] = None  # SERVICE_ACCOUNT JWT
 
+    # ── Google Gemini API & Audio Processing ─────────────────
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash"
+    audio_chunk_seconds: int = 60
+
     # ── Telegram (account-level credentials, shared by every TELEGRAM
     # collector — never stored per-collector, never sent to the frontend) ──
     telegram_api_id: Optional[int] = None
@@ -51,6 +56,70 @@ class Settings(BaseSettings):
     worker_concurrency: int = 4
     max_file_size_mb: int = 500
     temp_dir: str = "/tmp/scraper"
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def resolve_redis_url(cls, v: Optional[str]) -> str:
+        url = v or "redis://localhost:6379"
+        import socket
+        import os
+        from urllib.parse import urlparse, urlunparse
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 6379
+
+            is_docker = os.path.exists("/.dockerenv") or os.getenv("CONTAINER_NAME") is not None
+            if is_docker and host in ("localhost", "127.0.0.1"):
+                try:
+                    socket.gethostbyname("redis")
+                    netloc = f"redis:{port}"
+                    return urlunparse(parsed._replace(netloc=netloc))
+                except socket.gaierror:
+                    pass
+            elif not is_docker and host not in ("localhost", "127.0.0.1"):
+                try:
+                    socket.gethostbyname(host)
+                except socket.gaierror:
+                    netloc = f"localhost:{port}"
+                    return urlunparse(parsed._replace(netloc=netloc))
+        except Exception:
+            pass
+        return url
+
+    @field_validator("api_base_url", mode="before")
+    @classmethod
+    def resolve_api_base_url(cls, v: Optional[str]) -> str:
+        url = v or "http://localhost:4000"
+        import socket
+        import os
+        from urllib.parse import urlparse, urlunparse
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 4000
+            scheme = parsed.scheme or "http"
+
+            is_docker = os.path.exists("/.dockerenv") or os.getenv("CONTAINER_NAME") is not None
+            if is_docker and host in ("localhost", "127.0.0.1"):
+                try:
+                    socket.gethostbyname("api")
+                    netloc = f"api:{port}"
+                    return urlunparse(parsed._replace(netloc=netloc))
+                except socket.gaierror:
+                    pass
+            elif not is_docker and host not in ("localhost", "127.0.0.1"):
+                try:
+                    socket.gethostbyname(host)
+                except socket.gaierror:
+                    netloc = f"localhost:{port}"
+                    return urlunparse(parsed._replace(netloc=netloc))
+        except Exception:
+            pass
+        return url
+
 
     # ── Scraping defaults (overridden per-collector) ──────────
     default_request_delay_ms: int = 1000

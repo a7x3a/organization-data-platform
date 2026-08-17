@@ -5,6 +5,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import { pinoHttp } from 'pino-http';
 
 import { env } from './config/env';
@@ -20,6 +21,7 @@ import collectorsRouter from './routes/collectors';
 import runsRouter from './routes/runs';
 import filesRouter from './routes/files';
 import usersRouter from './routes/users';
+import telegramRouter from './routes/telegram';
 
 // ─── App setup ───────────────────────────────────────────────
 
@@ -62,14 +64,41 @@ app.use(
   })
 );
 
-// Global rate limiter
+// Global rate limiter — protects against abusive/runaway PUBLIC (browser)
+// traffic. The scraper worker is internal, trusted, and authenticated with
+// a long-lived SERVICE_ACCOUNT token, calling back constantly by design
+// (cancellation polling, per-file progress/dedup checks) — a single active
+// browser-mode crawl with a handful of concurrent pages can legitimately
+// fire dozens of these calls per second. Counting that traffic against the
+// same 500-per-15-min bucket a real user's browser is limited by meant the
+// scraper started getting its own status checks 429'd mid-crawl — and
+// since is_cancelled() treats any request failure as "not cancelled", that
+// silently made cancellation stop working entirely for as long as the
+// worker stayed rate-limited, with no visible error anywhere.
+//
+// jwt.decode (not verify) is used only to make this skip decision — it is
+// not a trust boundary. A forged/unsigned token with a fake SERVICE_ACCOUNT
+// role would skip the counter but still 401 at requireAuth downstream,
+// exactly as an unskipped forged token would.
+function isServiceAccountRequest(req: express.Request): boolean {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return false;
+  try {
+    const decoded = jwt.decode(header.slice('Bearer '.length)) as { roles?: string[] } | null;
+    return !!decoded?.roles?.includes('SERVICE_ACCOUNT');
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 500,
+    max: 5000, // Elevated for real-time polling dashboard
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later' },
+    skip: (req) => req.url.includes('/health') || req.url.includes('/ready') || isServiceAccountRequest(req),
   })
 );
 
@@ -79,12 +108,14 @@ app.set('trust proxy', 1);
 // ─── Routes ──────────────────────────────────────────────────
 
 app.use('/', healthRouter);
+app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/sources', sourcesRouter);
 app.use('/api/collectors', collectorsRouter);
 app.use('/api/runs', runsRouter);
 app.use('/api/files', filesRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/telegram', telegramRouter);
 
 // 404 handler
 app.use((_req, res) => {

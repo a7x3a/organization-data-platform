@@ -42,6 +42,7 @@ COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 # sites (Wix, React/Vue SPAs, etc.), which is most of the modern web.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
+    ffmpeg \
     && playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 

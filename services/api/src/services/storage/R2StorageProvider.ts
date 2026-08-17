@@ -16,4 +16,8 @@ export class R2StorageProvider implements StorageProvider {
   async getSignedUrl(key: string): Promise<{ url: string; expiresAt: string }> {
     return r2Service.generateSignedUrl(key);
   }
+
+  async delete(key: string): Promise<void> {
+    await r2Service.deleteObject(key);
+  }
 }

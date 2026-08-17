@@ -32,6 +32,7 @@ enum RobotsPolicy {
 enum CollectorType {
   WEB
   TELEGRAM
+  MEDIA
   API
   APP
   MANUAL
@@ -41,6 +42,7 @@ enum CollectorType {
 enum RunStatus {
   PENDING
   RUNNING
+  PAUSED
   COMPLETED
   FAILED
   CANCEL_REQUESTED

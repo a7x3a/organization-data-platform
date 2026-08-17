@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'warning' | 'danger';
 type Size = 'sm' | 'md';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -11,11 +11,16 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT_CLASSES: Record<Variant, string> = {
-  primary: 'bg-[var(--color-brand-600)] text-white hover:bg-[var(--color-brand-500)]',
+  primary:
+    'bg-[var(--color-brand-600)] text-white hover:bg-[var(--color-brand-500)] shadow-xs font-semibold active:opacity-95',
   secondary:
-    'border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]',
-  ghost: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-text-primary)]',
-  danger: 'text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-error-bg)]',
+    'bg-[var(--color-bg-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-overlay)] hover:border-[var(--color-border-strong)] shadow-xs font-medium',
+  ghost:
+    'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-overlay)] hover:text-[var(--color-text-primary)] font-medium',
+  warning:
+    'bg-amber-600 text-white hover:bg-amber-500 active:bg-amber-700 shadow-sm font-semibold border border-amber-600/30',
+  danger:
+    'bg-red-600 text-white hover:bg-red-500 active:bg-red-700 shadow-sm font-semibold border border-red-600/30',
 };
 
 const SIZE_CLASSES: Record<Size, string> = {
@@ -24,7 +29,7 @@ const SIZE_CLASSES: Record<Size, string> = {
 };
 
 const PADDING_CLASSES: Record<Size, { normal: string; iconOnly: string }> = {
-  sm: { normal: 'px-3 py-1.5', iconOnly: 'p-1.5' },
+  sm: { normal: 'px-3.5 py-1.5', iconOnly: 'p-1.5' },
   md: { normal: 'px-4 py-2', iconOnly: 'p-2' },
 };
 
@@ -34,7 +39,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
-        className={`inline-flex items-center justify-center rounded-[var(--radius-md)] font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none ${padding} ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+        className={`inline-flex items-center justify-center rounded-xl transition-all disabled:opacity-50 disabled:pointer-events-none ${padding} ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
         {...props}
       >
         {children}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRuns, useCancelRun, useDeleteRun } from '../hooks/useRuns';
+import { useRuns, useCancelRun, usePauseRun, useResumeRun, useForceCancelRun, useDeleteRun } from '../hooks/useRuns';
 import { DataTable, Column } from '../components/DataTable';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
@@ -8,10 +8,11 @@ import { Select } from '../components/Input';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CollectionRun, RunStatus } from '@odp/shared-types';
 import { formatDuration } from '../lib/utils';
+import { LiveDuration } from '../components/LiveDuration';
 import { Link } from 'react-router-dom';
-import { XCircle, Trash2 } from 'lucide-react';
+import { XCircle, Trash2, Zap, Pause, Play } from 'lucide-react';
 
-const ACTIVE_STATUSES = new Set([RunStatus.PENDING, RunStatus.RUNNING, 'CANCEL_REQUESTED']);
+const ACTIVE_STATUSES = new Set([RunStatus.PENDING, RunStatus.RUNNING, RunStatus.PAUSED, 'CANCEL_REQUESTED']);
 
 export const Runs: React.FC = () => {
   const { t } = useTranslation();
@@ -23,6 +24,9 @@ export const Runs: React.FC = () => {
     status: statusFilter || undefined,
   });
   const cancelRun = useCancelRun();
+  const pauseRun = usePauseRun();
+  const resumeRun = useResumeRun();
+  const forceCancelRun = useForceCancelRun();
   const deleteRun = useDeleteRun();
   const [runToDelete, setRunToDelete] = useState<CollectionRun | null>(null);
 
@@ -75,24 +79,62 @@ export const Runs: React.FC = () => {
     {
       header: t('runs.fields.duration'),
       accessor: (r) => (
-        <span className="font-mono text-xs text-[var(--color-text-muted)]">
-          {formatDuration(r.startedAt, r.completedAt)}
-        </span>
+        <LiveDuration
+          startedAt={r.startedAt}
+          completedAt={r.completedAt}
+          status={r.status}
+        />
       ),
     },
     {
       header: t('common.actions'),
       accessor: (r) =>
         ACTIVE_STATUSES.has(r.status) ? (
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => cancelRun.mutate(r.id)}
-            disabled={cancelRun.isPending}
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            {t('runs.cancel')}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {r.status === 'PAUSED' ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                iconOnly
+                title="Resume Run"
+                onClick={() => resumeRun.mutate(r.id)}
+                disabled={resumeRun.isPending}
+              >
+                <Play className="w-3.5 h-3.5 text-emerald-400" />
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                iconOnly
+                title="Pause Run"
+                onClick={() => pauseRun.mutate(r.id)}
+                disabled={pauseRun.isPending || r.status === 'CANCEL_REQUESTED'}
+              >
+                <Pause className="w-3.5 h-3.5 text-amber-400" />
+              </Button>
+            )}
+            <Button
+              variant="warning"
+              size="sm"
+              iconOnly
+              title={r.status === 'CANCEL_REQUESTED' ? 'Cancelling...' : 'Cancel Run'}
+              onClick={() => cancelRun.mutate(r.id)}
+              disabled={cancelRun.isPending || r.status === 'CANCEL_REQUESTED'}
+            >
+              <XCircle className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              iconOnly
+              title="Force Stop & Purge Queue Job"
+              onClick={() => forceCancelRun.mutate(r.id)}
+              disabled={forceCancelRun.isPending}
+            >
+              <Zap className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         ) : (
           <Button
             variant="danger"
@@ -131,22 +173,24 @@ export const Runs: React.FC = () => {
         />
       </div>
 
-      <DataTable
-        columns={columns}
-        data={data?.data || []}
-        keyExtractor={(r) => r.id}
-        isLoading={isLoading}
-        emptyMessage="No collection runs found."
-        pagination={
-          data
-            ? {
-                page,
-                totalPages: data.totalPages,
-                onPageChange: setPage,
-              }
-            : undefined
-        }
-      />
+      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-5 shadow-[var(--shadow-card)]">
+        <DataTable
+          columns={columns}
+          data={data?.data || []}
+          keyExtractor={(r) => r.id}
+          isLoading={isLoading}
+          emptyMessage="No collection runs found."
+          pagination={
+            data
+              ? {
+                  page,
+                  totalPages: data.totalPages,
+                  onPageChange: setPage,
+                }
+              : undefined
+          }
+        />
+      </div>
 
       <ConfirmDialog
         isOpen={!!runToDelete}

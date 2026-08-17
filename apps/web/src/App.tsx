@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { ThemeProvider } from './hooks/useTheme';
 import { AppLayout } from './layouts/AppLayout';
 import { AuthLayout } from './layouts/AuthLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -13,6 +14,7 @@ import { CollectorDetail } from './pages/CollectorDetail';
 import { Runs } from './pages/Runs';
 import { RunDetail } from './pages/RunDetail';
 import { Files } from './pages/Files';
+import { DataBrowser } from './pages/DataBrowser';
 import { Settings } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Upload } from './pages/Upload';
@@ -26,7 +28,9 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
-      staleTime: 5000,
+      refetchOnReconnect: false,
+      staleTime: 1000 * 60 * 5, // 5 minutes fresh data — instant memory cache rendering!
+      gcTime: 1000 * 60 * 60, // 60 minutes cache retention
     },
   },
 });
@@ -52,40 +56,43 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <BrowserRouter>
-            <Routes>
-              {/* Public Auth routes */}
-              <Route element={<AuthLayout />}>
-                <Route path="/login" element={<Login />} />
-              </Route>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <BrowserRouter>
+              <Routes>
+                {/* Public Auth routes */}
+                <Route element={<AuthLayout />}>
+                  <Route path="/login" element={<Login />} />
+                </Route>
 
-              {/* Protected Platform routes */}
-              <Route
-                element={
-                  <ProtectedRoute>
-                    <AppLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/sources" element={<Sources />} />
-                <Route path="/collectors" element={<Collectors />} />
-                <Route path="/collectors/:id" element={<CollectorDetail />} />
-                <Route path="/runs" element={<Runs />} />
-                <Route path="/runs/:id" element={<RunDetail />} />
-                <Route path="/files" element={<Files />} />
-                <Route path="/upload" element={<Upload />} />
-                <Route path="/users" element={<Users />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </AuthProvider>
-      </QueryClientProvider>
+                {/* Protected Platform routes */}
+                <Route
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/sources" element={<Sources />} />
+                  <Route path="/collectors" element={<Collectors />} />
+                  <Route path="/collectors/:id" element={<CollectorDetail />} />
+                  <Route path="/runs" element={<Runs />} />
+                  <Route path="/runs/:id" element={<RunDetail />} />
+                  <Route path="/files" element={<Files />} />
+                  <Route path="/data" element={<DataBrowser />} />
+                  <Route path="/upload" element={<Upload />} />
+                  <Route path="/users" element={<Users />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="*" element={<NotFound />} />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+          </AuthProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

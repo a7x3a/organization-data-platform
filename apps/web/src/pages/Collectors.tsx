@@ -3,17 +3,43 @@ import { useTranslation } from 'react-i18next';
 import {
   useCollectors,
   useCreateCollector,
+  useUpdateCollector,
+  useDeleteCollector,
   useRunCollector,
   useEnableCollector,
   useDisableCollector,
 } from '../hooks/useCollectors';
 import { useSources } from '../hooks/useSources';
 import { DataTable, Column } from '../components/DataTable';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
-import { Collector } from '@odp/shared-types';
-import { Plus, Play, Power } from 'lucide-react';
+import { Collector, isTelegramCollector, isWebCollector } from '@odp/shared-types';
+import { CollectorTypeInput } from '../types/forms';
+import { Plus, Play, Power, Send, Pencil, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+
+// Mirrors the scraper's own category grouping (services/scraper/app/downloader/downloader.py
+// _CATEGORY_BY_EXTENSION) so "Documents" here means the same thing R2/local
+// storage files it into. Grouped by category rather than one checkbox per
+// extension — a few dozen individual boxes isn't a usable picker.
+const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = [
+  { label: 'Documents', extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf'] },
+  { label: 'Spreadsheets', extensions: ['.xls', '.xlsx', '.ods', '.csv', '.tsv'] },
+  { label: 'Presentations', extensions: ['.ppt', '.pptx', '.odp'] },
+  { label: 'Ebooks', extensions: ['.epub', '.mobi', '.azw3', '.fb2'] },
+  { label: 'Archives', extensions: ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz'] },
+  {
+    label: 'Images',
+    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic'],
+  },
+  { label: 'Audio', extensions: ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac'] },
+  { label: 'Video', extensions: ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv'] },
+  {
+    label: 'Text & Data',
+    extensions: ['.txt', '.md', '.json', '.jsonl', '.xml', '.srt', '.vtt', '.parquet'],
+  },
+];
 
 export const Collectors: React.FC = () => {
   const { t } = useTranslation();
@@ -23,25 +49,178 @@ export const Collectors: React.FC = () => {
   const { data: sourcesData } = useSources({ page: 1, pageSize: 100 });
 
   const createCollector = useCreateCollector();
+  const updateCollector = useUpdateCollector();
+  const deleteCollector = useDeleteCollector();
   const runCollector = useRunCollector();
   const enableCollector = useEnableCollector();
   const disableCollector = useDisableCollector();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [collectorToDelete, setCollectorToDelete] = useState<Collector | null>(null);
+  // null = creating a new collector; set = editing this existing one.
+  // Source and type are fixed once a collector exists (the API's
+  // updateCollectorSchema omits sourceId entirely, and switching collector
+  // type would require a completely different configuration shape) — both
+  // are shown read-only in edit mode rather than left silently ineffective.
+  const [editingCollector, setEditingCollector] = useState<Collector | null>(null);
 
   // Form state
+  const [collectorType, setCollectorType] = useState<CollectorTypeInput>('WEB');
   const [sourceId, setSourceId] = useState('');
   const [name, setName] = useState('');
+  // WEB fields
   const [startUrls, setStartUrls] = useState('');
   const [allowedDomains, setAllowedDomains] = useState('');
   const [maxDepth, setMaxDepth] = useState(5);
   const [maxPages, setMaxPages] = useState(1000);
   const [concurrency, setConcurrency] = useState(4);
   const [useBrowser, setUseBrowser] = useState(false);
+  // Off by default — discover every file type the crawler finds, matching
+  // the scraper's own "discover everything unless narrowed" default
+  // (empty allowedExtensions means no filter, not "nothing allowed").
+  const [restrictFileTypes, setRestrictFileTypes] = useState(false);
+  const [fileTypeCategories, setFileTypeCategories] = useState<string[]>([]);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const toggleFileTypeCategory = (label: string) => {
+    setFileTypeCategories((prev) =>
+      prev.includes(label) ? prev.filter((c) => c !== label) : [...prev, label]
+    );
+  };
+  // TELEGRAM fields
+  const [channels, setChannels] = useState('');
+  const [messageLimit, setMessageLimit] = useState(500);
+  const [downloadMedia, setDownloadMedia] = useState(true);
+  // All four checked by default — an empty includeMediaTypes list means
+  // "no filter" to the scraper, so "everything checked" and "list omitted"
+  // are equivalent; sending the explicit list here just keeps the UI's
+  // checked state and what's actually submitted in sync at a glance.
+  const ALL_MEDIA_TYPES = ['photo', 'video', 'audio', 'document'] as const;
+  const [mediaTypes, setMediaTypes] = useState<string[]>([...ALL_MEDIA_TYPES]);
+
+  const toggleMediaType = (type: string) => {
+    setMediaTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
+  };
+
+  const resetForm = () => {
+    setEditingCollector(null);
+    setCollectorType('WEB');
+    setSourceId('');
+    setName('');
+    setStartUrls('');
+    setAllowedDomains('');
+    setMaxDepth(5);
+    setMaxPages(1000);
+    setConcurrency(4);
+    setUseBrowser(false);
+    setRestrictFileTypes(false);
+    setFileTypeCategories([]);
+    setChannels('');
+    setMessageLimit(500);
+    setDownloadMedia(true);
+    setMediaTypes([...ALL_MEDIA_TYPES]);
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (collector: Collector) => {
+    setEditingCollector(collector);
+    setName(collector.name);
+    setSourceId(collector.sourceId);
+
+    if (isTelegramCollector(collector)) {
+      setCollectorType('TELEGRAM');
+      setChannels(collector.configuration.channels.join('\n'));
+      setMessageLimit(collector.configuration.messageLimit);
+      const incMedia = collector.configuration.includeMediaTypes || [];
+      setMediaTypes(
+        incMedia.length > 0
+          ? incMedia
+          : [...ALL_MEDIA_TYPES]
+      );
+    } else if (isWebCollector(collector)) {
+      setCollectorType('WEB');
+      setStartUrls(collector.configuration.startUrls.join('\n'));
+      setAllowedDomains(collector.configuration.allowedDomains.join(', '));
+      setMaxDepth(collector.configuration.maxDepth);
+      setMaxPages(collector.configuration.maxPages);
+      setConcurrency(collector.configuration.concurrency);
+      setUseBrowser(collector.configuration.useBrowser);
+      const restricted = collector.configuration.allowedExtensions.length > 0;
+      setRestrictFileTypes(restricted);
+      setFileTypeCategories(
+        restricted
+          ? FILE_TYPE_CATEGORIES.filter((cat) =>
+              cat.extensions.some((ext) => collector.configuration.allowedExtensions.includes(ext))
+            ).map((cat) => cat.label)
+          : []
+      );
+    }
+
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    resetForm();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sourceId) return;
+
+    if (collectorType === 'TELEGRAM') {
+      const channelList = channels
+        .split(/[\n,]+/)
+        .map((c) => c.trim().replace(/^@/, ''))
+        .filter(Boolean);
+
+      // Preserve fields this form doesn't expose (sinceDate) rather than
+      // silently dropping them on every edit — same reasoning as the WEB
+      // branch below.
+      const existingTelegramConfig =
+        editingCollector && isTelegramCollector(editingCollector)
+          ? editingCollector.configuration
+          : undefined;
+
+      const telegramConfig = {
+        ...existingTelegramConfig,
+        channels: channelList,
+        messageLimit,
+        // The scraper treats an *empty* includeMediaTypes as "no filter,
+        // every kind" (same as the field being omitted) — not "no media
+        // types allowed". So if the user unchecked every box while
+        // "download media" was still on, submitting downloadMedia:true
+        // with [] would silently download everything, the opposite of
+        // what an all-unchecked grid visually implies. Turning
+        // downloadMedia off in that case is the only unambiguous way to
+        // express "collect no media" over this wire format.
+        downloadMedia: downloadMedia && mediaTypes.length > 0,
+        includeMediaTypes: mediaTypes as Array<'photo' | 'video' | 'audio' | 'document'>,
+      };
+
+      if (editingCollector) {
+        await updateCollector.mutateAsync({
+          id: editingCollector.id,
+          data: { name, type: 'TELEGRAM', configuration: telegramConfig },
+        });
+      } else {
+        await createCollector.mutateAsync({
+          sourceId,
+          name,
+          type: 'TELEGRAM',
+          enabled: true,
+          configuration: telegramConfig,
+        });
+      }
+      closeModal();
+      return;
+    }
+
     // Accept commas as well as newlines — "Allowed Domains" right below
     // this field is comma-separated, so a user typing all URLs on one
     // line separated by commas (an easy, natural mistake) previously
@@ -54,36 +233,70 @@ export const Collectors: React.FC = () => {
       .split(',')
       .map((d) => d.trim())
       .filter(Boolean);
+    // Not restricting, or restricting with nothing checked (a no-op form
+    // state), both mean the same thing to the scraper: [] = no filter,
+    // discover every file type. Only a genuine category selection narrows it.
+    const extensions =
+      restrictFileTypes && fileTypeCategories.length > 0
+        ? FILE_TYPE_CATEGORIES.filter((c) => fileTypeCategories.includes(c.label)).flatMap(
+            (c) => c.extensions
+          )
+        : [];
 
-    await createCollector.mutateAsync({
-      sourceId,
-      name,
-      type: 'WEB',
-      enabled: true,
-      configuration: {
-        startUrls: urls,
-        allowedDomains: domains,
-        allowedUrlPatterns: [],
-        excludedUrlPatterns: [],
-        allowedExtensions: [],
-        allowedMimeTypes: [],
-        maxDepth,
-        maxPages,
-        maxFiles: 10000,
-        requestDelayMs: 1000,
-        concurrency,
-        requestTimeoutSeconds: 30,
-        maxRetries: 3,
-        useBrowser,
-        robotsEnabled: true,
-      },
-    });
-    setIsModalOpen(false);
+    // Preserve fields this simplified form doesn't expose (allowedUrlPatterns,
+    // excludedUrlPatterns, allowedMimeTypes, maxFiles, requestDelayMs,
+    // requestTimeoutSeconds, maxRetries, robotsEnabled) rather than silently
+    // resetting them to hardcoded defaults every time an existing collector
+    // is edited — a user who'd customized maxFiles to 500 shouldn't find it
+    // quietly back at 10000 after renaming their collector.
+    const existingWebConfig =
+      editingCollector && isWebCollector(editingCollector) ? editingCollector.configuration : undefined;
+
+    const webConfig = {
+      allowedUrlPatterns: [],
+      excludedUrlPatterns: [],
+      allowedMimeTypes: [],
+      maxFiles: 10000,
+      requestDelayMs: 1000,
+      requestTimeoutSeconds: 30,
+      maxRetries: 3,
+      robotsEnabled: true,
+      ...existingWebConfig,
+      startUrls: urls,
+      allowedDomains: domains,
+      allowedExtensions: extensions,
+      maxDepth,
+      maxPages,
+      concurrency,
+      useBrowser,
+    };
+
+    if (editingCollector) {
+      await updateCollector.mutateAsync({
+        id: editingCollector.id,
+        data: { name, type: 'WEB', configuration: webConfig },
+      });
+    } else {
+      await createCollector.mutateAsync({
+        sourceId,
+        name,
+        type: 'WEB',
+        enabled: true,
+        configuration: webConfig,
+      });
+    }
+    closeModal();
   };
 
   const handleRun = async (id: string) => {
     const res = await runCollector.mutateAsync(id);
     navigate(`/runs/${res.collectionRunId}`);
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!collectorToDelete) return;
+    await deleteCollector.mutateAsync(collectorToDelete.id);
+    setCollectorToDelete(null);
   };
 
   const columns: Column<Collector>[] = [
@@ -99,21 +312,46 @@ export const Collectors: React.FC = () => {
       ),
     },
     {
-      header: t('collectors.fields.startUrls'),
-      accessor: (c) => (
-        <span className="text-xs text-[var(--color-text-muted)] truncate max-w-xs block">
-          {c.configuration.startUrls?.[0] || '—'}
-        </span>
-      ),
+      header: 'Source',
+      accessor: (c) => {
+        if (isTelegramCollector(c)) {
+          return (
+            <span className="text-xs text-[var(--color-text-muted)] truncate max-w-xs block">
+              @{c.configuration.channels?.[0] || '—'}
+            </span>
+          );
+        }
+        if (isWebCollector(c)) {
+          return (
+            <span className="text-xs text-[var(--color-text-muted)] truncate max-w-xs block">
+              {c.configuration.startUrls?.[0] || '—'}
+            </span>
+          );
+        }
+        return <span className="text-xs text-[var(--color-text-muted)]">—</span>;
+      },
     },
     {
       header: 'Limits',
-      accessor: (c) => (
-        <div className="text-xs text-[var(--color-text-muted)]">
-          Depth {c.configuration.maxDepth} · Conc {c.configuration.concurrency}
-          {c.configuration.useBrowser && <span className="ml-1.5">· Browser</span>}
-        </div>
-      ),
+      accessor: (c) => {
+        if (isTelegramCollector(c)) {
+          return (
+            <div className="text-xs text-[var(--color-text-muted)]">
+              {c.configuration.messageLimit} messages
+              {c.configuration.downloadMedia && <span className="ml-1.5">· Media</span>}
+            </div>
+          );
+        }
+        if (isWebCollector(c)) {
+          return (
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Depth {c.configuration.maxDepth} · Conc {c.configuration.concurrency}
+              {c.configuration.useBrowser && <span className="ml-1.5">· Browser</span>}
+            </div>
+          );
+        }
+        return <div className="text-xs text-[var(--color-text-muted)]">—</div>;
+      },
     },
     {
       header: t('collectors.fields.enabled'),
@@ -137,15 +375,29 @@ export const Collectors: React.FC = () => {
       header: '',
       className: 'text-right',
       accessor: (c) => (
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => handleRun(c.id)}
-          disabled={!c.enabled || runCollector.isPending}
-        >
-          <Play className="w-3.5 h-3.5" />
-          {t('collectors.run')}
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" iconOnly onClick={() => openEditModal(c)} title="Edit">
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            iconOnly
+            onClick={() => setCollectorToDelete(c)}
+            title="Delete"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => handleRun(c.id)}
+            disabled={!c.enabled || runCollector.isPending}
+          >
+            <Play className="w-3.5 h-3.5" />
+            {t('collectors.run')}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -159,44 +411,90 @@ export const Collectors: React.FC = () => {
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('collectors.subtitle')}</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
+        <Button onClick={openCreateModal}>
           <Plus className="w-4 h-4" />
           {t('collectors.create')}
         </Button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={data?.data || []}
-        keyExtractor={(c) => c.id}
-        isLoading={isLoading}
-        emptyMessage="No web collectors created yet."
-        pagination={
-          data
-            ? {
-                page,
-                totalPages: data.totalPages,
-                onPageChange: setPage,
-              }
-            : undefined
-        }
-      />
+      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-5 shadow-[var(--shadow-card)]">
+        <DataTable
+          columns={columns}
+          data={data?.data || []}
+          keyExtractor={(c) => c.id}
+          isLoading={isLoading}
+          emptyMessage="No collectors created yet."
+          pagination={
+            data
+              ? {
+                  page,
+                  totalPages: data.totalPages,
+                  onPageChange: setPage,
+                }
+              : undefined
+          }
+        />
+      </div>
 
       {/* Create Collector Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-              {t('collectors.create')}
+              {editingCollector ? `Edit "${editingCollector.name}"` : t('collectors.create')}
             </h2>
-            <form onSubmit={handleCreate} className="mt-5 space-y-5">
+            <form onSubmit={handleSubmit} className="mt-5 space-y-5">
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                  Collector Type
+                  {editingCollector && (
+                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
+                      (fixed once created)
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={!!editingCollector}
+                    onClick={() => setCollectorType('WEB')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                      collectorType === 'WEB'
+                        ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    Web
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!!editingCollector}
+                    onClick={() => setCollectorType('TELEGRAM')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                      collectorType === 'TELEGRAM'
+                        ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Telegram
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                   {t('collectors.fields.source')}
+                  {editingCollector && (
+                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">
+                      (fixed once created)
+                    </span>
+                  )}
                 </label>
                 <Select
                   value={sourceId}
                   onValueChange={setSourceId}
+                  disabled={!!editingCollector}
                   placeholder="Select source website..."
                   options={(sourcesData?.data || []).map((s) => ({
                     value: s.id,
@@ -214,98 +512,248 @@ export const Collectors: React.FC = () => {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Daily PDF Books Scraper"
+                  placeholder={
+                    collectorType === 'TELEGRAM'
+                      ? 'e.g. News Channel Archive'
+                      : 'e.g. Daily PDF Books Scraper'
+                  }
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('collectors.fields.startUrls')} (one per line)
+              {collectorType === 'TELEGRAM' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                      Channels (one per line or comma separated)
+                    </label>
+                    <Textarea
+                      required
+                      rows={3}
+                      value={channels}
+                      onChange={(e) => setChannels(e.target.value)}
+                      placeholder="my_channel&#10;another_channel"
+                    />
+                    <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                      Public channel usernames, without the @. Requires the scraper
+                      worker's Telegram account to be logged in (see README) and to
+                      have access to each channel.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        Message Limit (per channel, per run)
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100000}
+                        value={messageLimit}
+                        onChange={(e) => setMessageLimit(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="flex items-end pb-2">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={downloadMedia}
+                          onChange={(e) => setDownloadMedia(e.target.checked)}
+                          className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                        />
+                        <span className="text-xs text-[var(--color-text-secondary)]">
+                          Download media
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {downloadMedia && (
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        Media types to download
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {ALL_MEDIA_TYPES.map((type) => (
+                          <label key={type} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={mediaTypes.includes(type)}
+                              onChange={() => toggleMediaType(type)}
+                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                            />
+                            <span className="text-xs text-[var(--color-text-secondary)] capitalize">
+                              {type === 'document' ? 'Documents (files)' : `${type}s`}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      {mediaTypes.length === 0 && (
+                        <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
+                          No media types selected — media downloading will be turned off; only
+                          each message's text will be collected.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                      {t('collectors.fields.startUrls')} (one per line)
+                    </label>
+                    <Textarea
+                      required
+                      rows={3}
+                      value={startUrls}
+                      onChange={(e) => setStartUrls(e.target.value)}
+                      placeholder="https://example.com/books&#10;https://example.com/archive"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                      {t('collectors.fields.allowedDomains')} (comma separated)
+                    </label>
+                    <Input
+                      type="text"
+                      value={allowedDomains}
+                      onChange={(e) => setAllowedDomains(e.target.value)}
+                      placeholder="example.com, archive.example.com"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={restrictFileTypes}
+                        onChange={(e) => setRestrictFileTypes(e.target.checked)}
+                        className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                      />
+                      <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Restrict to specific file types
+                      </span>
+                    </label>
+                    <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                      Off by default — the crawler discovers every file type it finds (PDFs,
+                      images, audio, video, archives, and more), not just a fixed list.
+                    </p>
+
+                    {restrictFileTypes && (
+                      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {FILE_TYPE_CATEGORIES.map((category) => (
+                          <label key={category.label} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={fileTypeCategories.includes(category.label)}
+                              onChange={() => toggleFileTypeCategory(category.label)}
+                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                            />
+                            <span className="text-xs text-[var(--color-text-secondary)]">
+                              {category.label}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {restrictFileTypes && fileTypeCategories.length === 0 && (
+                      <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
+                        No file types selected — with none checked, this has no effect and every
+                        file type will still be discovered.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        Max Depth
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={maxDepth}
+                        onChange={(e) => setMaxDepth(Number(e.target.value))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        Max Pages
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100000}
+                        value={maxPages}
+                        onChange={(e) => setMaxPages(Number(e.target.value))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                        Concurrency
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={16}
+                        value={concurrency}
+                        onChange={(e) => setConcurrency(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {collectorType === 'WEB' && (
+                <label className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    checked={useBrowser}
+                    onChange={(e) => setUseBrowser(e.target.checked)}
+                    className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
+                  />
+                  <span className="text-xs text-[var(--color-text-secondary)]">
+                    Use Playwright headless browser (for JS-rendered pages)
+                  </span>
                 </label>
-                <Textarea
-                  required
-                  rows={3}
-                  value={startUrls}
-                  onChange={(e) => setStartUrls(e.target.value)}
-                  placeholder="https://example.com/books&#10;https://example.com/archive"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('collectors.fields.allowedDomains')} (comma separated)
-                </label>
-                <Input
-                  type="text"
-                  value={allowedDomains}
-                  onChange={(e) => setAllowedDomains(e.target.value)}
-                  placeholder="example.com, archive.example.com"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                    Max Depth
-                  </label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={maxDepth}
-                    onChange={(e) => setMaxDepth(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                    Max Pages
-                  </label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={100000}
-                    value={maxPages}
-                    onChange={(e) => setMaxPages(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                    Concurrency
-                  </label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={16}
-                    value={concurrency}
-                    onChange={(e) => setConcurrency(Number(e.target.value))}
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  checked={useBrowser}
-                  onChange={(e) => setUseBrowser(e.target.checked)}
-                  className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                />
-                <span className="text-xs text-[var(--color-text-secondary)]">
-                  Use Playwright headless browser (for JS-rendered pages)
-                </span>
-              </label>
+              )}
 
               <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
-                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+                <Button type="button" variant="ghost" onClick={closeModal}>
                   {t('common.cancel')}
                 </Button>
-                <Button type="submit" disabled={createCollector.isPending || !sourceId}>
-                  {createCollector.isPending ? t('common.loading') : t('common.create')}
+                <Button
+                  type="submit"
+                  disabled={createCollector.isPending || updateCollector.isPending || !sourceId}
+                >
+                  {createCollector.isPending || updateCollector.isPending
+                    ? t('common.loading')
+                    : editingCollector
+                    ? 'Save Changes'
+                    : t('common.create')}
                 </Button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        isOpen={!!collectorToDelete}
+        title="Delete Collector"
+        message={
+          collectorToDelete
+            ? `Delete "${collectorToDelete.name}"? This cannot be undone. Collectors with existing collection runs can't be deleted — disable them instead.`
+            : ''
+        }
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setCollectorToDelete(null)}
+        isLoading={deleteCollector.isPending}
+      />
     </div>
   );
 };

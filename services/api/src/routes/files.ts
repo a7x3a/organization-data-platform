@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
-import { requireCollector } from '../middleware/rbac';
+import { requireCollector, requireDataManager } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import { AppError } from '../middleware/errorHandler';
 import {
@@ -9,6 +9,7 @@ import {
   listFilesQuerySchema,
   manualUploadBodySchema,
   manualEntrySchema,
+  updateFileSchema,
 } from '../schemas/index';
 import * as fileService from '../services/file.service';
 import { storageProvider, LocalStorageProvider } from '../services/storage';
@@ -78,6 +79,16 @@ router.post(
   }
 );
 
+// POST /api/files/sync — Trigger storage directory synchronization
+router.post('/sync', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await fileService.syncStorageDirectories();
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/files
 router.get(
   '/',
@@ -135,6 +146,41 @@ router.get(
     try {
       const result = await fileService.getFileDownloadUrl(req.params.id);
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// PATCH /api/files/:id — Data Manager+. Metadata only (fileName/metadata) —
+// never sha256/r2Key/status, which are collection-integrity facts.
+router.patch(
+  '/:id',
+  requireDataManager,
+  validate(idParamSchema, 'params'),
+  validate(updateFileSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.updateFile(req.params.id, req.body);
+      res.json(file);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// DELETE /api/files/:id — Data Manager+. Hard delete: removes the DB record
+// AND the underlying stored object, for a file of any origin. A deliberate
+// exception to this platform's "00_raw is immutable" default — see
+// file.service.ts's deleteFile for why.
+router.delete(
+  '/:id',
+  requireDataManager,
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await fileService.deleteFile(req.params.id);
+      res.status(204).send();
     } catch (err) {
       next(err);
     }

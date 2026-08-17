@@ -55,6 +55,20 @@ class TelegramCollectionJob:
             source=self._source_slug,
         )
 
+        if await self._pipeline.is_cancelled():
+            log.info("telegram_cancelled_before_start", run_id=self._run_db_id)
+            manifest = ManifestWriter(
+                run_id=self._run_db_id,
+                source_name=self._source_slug,
+                run_folder_key=self._run_folder_key,
+                collector_version=self._data.get("collectorVersion", "1.0.0"),
+                started_at=started_at,
+                source_type="telegram",
+            )
+            metadata = MetadataWriter(self._run_folder_key, self._source_slug, source_type="telegram")
+            await self._finalize(manifest, metadata, status="CANCELLED")
+            return
+
         await self._pipeline.update_run_status("RUNNING", startedAt=started_at.isoformat())
 
         manifest = ManifestWriter(
@@ -99,6 +113,8 @@ class TelegramCollectionJob:
                     return
 
                 for channel in channels:
+                    if await self._pipeline.wait_if_paused():
+                        break
                     if await self._pipeline.is_cancelled():
                         break
 
@@ -114,6 +130,8 @@ class TelegramCollectionJob:
                         telegram_cfg,
                         should_cancel=self._pipeline.is_cancelled,
                     ):
+                        if await self._pipeline.wait_if_paused():
+                            break
                         if await self._pipeline.skip_if_known_url(
                             result.source_url, result.file_name, manifest
                         ):
@@ -126,7 +144,9 @@ class TelegramCollectionJob:
                             result, manifest=manifest, metadata=metadata
                         )
             finally:
-                await client.disconnect()
+                res = client.disconnect()
+                if res is not None:
+                    await res
 
             if await self._pipeline.is_cancelled():
                 log.info("telegram_collection_cancelled", run_id=self._run_db_id)
@@ -141,7 +161,6 @@ class TelegramCollectionJob:
                 None, "UNKNOWN", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             )
             await self._finalize(manifest, metadata, status="FAILED")
-            raise
 
     async def _finalize(
         self,

@@ -75,6 +75,34 @@ router.post(
   }
 );
 
+// POST /api/runs/:id/pause
+router.post(
+  '/:id/pause',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const run = await runService.pauseRun(req.params.id, req.user!.sub);
+      res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/runs/:id/resume
+router.post(
+  '/:id/resume',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const run = await runService.resumeRun(req.params.id, req.user!.sub);
+      res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // PATCH /api/runs/:id/status — scraper worker progress callback
 router.patch(
   '/:id/status',

@@ -77,6 +77,19 @@ class CollectionJob:
             source=self._source_slug,
         )
 
+        if await self._pipeline.is_cancelled():
+            log.info("collection_cancelled_before_start", run_id=self._run_db_id)
+            manifest = ManifestWriter(
+                run_id=self._run_db_id,
+                source_name=self._source_slug,
+                run_folder_key=self._run_folder_key,
+                collector_version=self._data.get("collectorVersion", "1.0.0"),
+                started_at=started_at,
+            )
+            metadata = MetadataWriter(self._run_folder_key, self._source_slug)
+            await self._finalize(manifest, metadata, status="CANCELLED")
+            return
+
         await self._pipeline.update_run_status("RUNNING", startedAt=started_at.isoformat())
 
         manifest = ManifestWriter(
@@ -107,15 +120,49 @@ class CollectionJob:
                 robots_enabled=self._cfg.get("robotsEnabled", True),
             )
 
+            async def on_page_crawled() -> None:
+                manifest.record_page_crawled()
+                await self._pipeline.report_progress(manifest)
+
+            async def on_file_found() -> None:
+                manifest.record_file_found()
+                await self._pipeline.report_progress(manifest)
+
             use_browser = self._cfg.get("useBrowser", False)
             if use_browser:
                 log.info("using_playwright_browser", run_id=self._run_db_id)
-                crawl_result = await crawl_with_browser(crawl_config, should_cancel=self._pipeline.is_cancelled)
+                crawl_result = await crawl_with_browser(
+                    crawl_config,
+                    should_cancel=self._pipeline.is_cancelled,
+                    on_page_crawled=on_page_crawled,
+                    on_file_found=on_file_found,
+                )
             else:
-                crawl_result = await crawl(crawl_config, should_cancel=self._pipeline.is_cancelled)
-
-            for _ in range(crawl_result.pages_crawled):
-                manifest.record_page_crawled()
+                crawl_result = await crawl(
+                    crawl_config,
+                    should_cancel=self._pipeline.is_cancelled,
+                    on_page_crawled=on_page_crawled,
+                    on_file_found=on_file_found,
+                )
+                # Smart Adaptive Crawling — if fast HTTP crawling finds 0 files on a dynamic/JS page,
+                # the system automatically falls back to Playwright browser crawling.
+                if not crawl_result.files_discovered and not crawl_result.cancelled:
+                    is_canc = False
+                    if self._pipeline.is_cancelled:
+                        is_canc = await self._pipeline.is_cancelled()
+                    if not is_canc:
+                        log.info("http_crawl_found_0_files_attempting_browser_fallback", run_id=self._run_db_id)
+                        try:
+                            browser_result = await crawl_with_browser(
+                                crawl_config,
+                                should_cancel=self._pipeline.is_cancelled,
+                                on_page_crawled=on_page_crawled,
+                                on_file_found=on_file_found,
+                            )
+                            if browser_result.files_discovered or browser_result.pages_crawled > crawl_result.pages_crawled:
+                                crawl_result = browser_result
+                        except Exception as exc:
+                            log.warning("browser_fallback_failed", run_id=self._run_db_id, error=str(exc))
 
             if crawl_result.cancelled:
                 # Cancelled during the crawl phase itself — before this,
@@ -141,6 +188,8 @@ class CollectionJob:
                     # cancellation mid-run stops new downloads from starting
                     # as soon as a semaphore slot frees up, rather than only
                     # between whole crawl batches.
+                    if await self._pipeline.wait_if_paused():
+                        raise DownloadCancelled(f"Cancelled while paused: {discovered.url}")
                     if await self._pipeline.is_cancelled():
                         raise DownloadCancelled(f"Cancelled before starting {discovered.url}")
                     await self._process_file(

@@ -45,29 +45,50 @@ export async function updateSource(id: string, input: UpdateSourceInput) {
   return prisma.source.update({ where: { id }, data: input });
 }
 
-export async function deleteSource(id: string) {
+import { storageProvider } from './storage';
+
+export async function deleteSource(id: string, cascade = true) {
   await getSourceById(id);
 
-  const collectorCount = await prisma.collector.count({ where: { sourceId: id } });
-  if (collectorCount > 0) {
-    throw new AppError(
-      409,
-      'Source has collectors and cannot be deleted. Disable it instead, or delete its collectors first.',
-      'SOURCE_HAS_COLLECTORS'
-    );
-  }
+  if (!cascade) {
+    const collectorCount = await prisma.collector.count({ where: { sourceId: id } });
+    if (collectorCount > 0) {
+      throw new AppError(
+        409,
+        'Source has collectors and cannot be deleted. Disable it instead, or delete its collectors first.',
+        'SOURCE_HAS_COLLECTORS'
+      );
+    }
 
-  // A source can have files with no collector at all — manual uploads and
-  // manual entries attach directly to a Source, bypassing Collector
-  // entirely. CollectedFile.sourceId has no cascade, so this must be
-  // checked independently of the collector check above.
-  const fileCount = await prisma.collectedFile.count({ where: { sourceId: id } });
-  if (fileCount > 0) {
-    throw new AppError(
-      409,
-      'Source has collected files and cannot be deleted. Disable it instead.',
-      'SOURCE_HAS_FILES'
-    );
+    const fileCount = await prisma.collectedFile.count({ where: { sourceId: id } });
+    if (fileCount > 0) {
+      throw new AppError(
+        409,
+        'Source has collected files and cannot be deleted. Disable it instead.',
+        'SOURCE_HAS_FILES'
+      );
+    }
+  } else {
+    // Delete underlying physical storage objects for all files belonging to this source
+    const files = await prisma.collectedFile.findMany({
+      where: { sourceId: id, r2Key: { not: null } },
+      select: { r2Key: true },
+    });
+
+    for (const f of files) {
+      if (f.r2Key) {
+        try {
+          await storageProvider.delete(f.r2Key);
+        } catch {
+          // Ignore secondary storage deletion errors
+        }
+      }
+    }
+
+    // Cascade delete DB records
+    await prisma.collectedFile.deleteMany({ where: { sourceId: id } });
+    await prisma.collectionRun.deleteMany({ where: { sourceId: id } });
+    await prisma.collector.deleteMany({ where: { sourceId: id } });
   }
 
   await prisma.source.delete({ where: { id } });

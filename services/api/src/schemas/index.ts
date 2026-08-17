@@ -87,7 +87,7 @@ export const updateSourceSchema = createSourceSchema.partial();
 
 // ─── Collector Configuration ──────────────────────────────────
 
-const collectorConfigSchema = z.object({
+const webCollectorConfigSchema = z.object({
   startUrls: z.array(z.string().url()).min(1),
   allowedDomains: z.array(z.string()).default([]),
   allowedUrlPatterns: z.array(z.string()).default([]),
@@ -105,19 +105,74 @@ const collectorConfigSchema = z.object({
   robotsEnabled: z.boolean().default(true),
 });
 
+// Telegram collectors never carry api_id/api_hash/session here — those are
+// account-level credentials configured once via the scraper worker's own
+// environment (TELEGRAM_API_ID/TELEGRAM_API_HASH/TELEGRAM_SESSION_STRING),
+// never per-collector and never sent to the frontend, same as R2 credentials.
+const telegramCollectorConfigSchema = z.object({
+  channels: z.array(z.string().min(1)).min(1),
+  messageLimit: z.number().int().min(1).max(100000).default(500),
+  sinceDate: z.string().datetime({ offset: true }).optional(),
+  downloadMedia: z.boolean().default(true),
+  includeMediaTypes: z.array(z.enum(['photo', 'video', 'audio', 'document'])).default([]),
+});
+
+const mediaCollectorConfigSchema = z.object({
+  mediaUrl: z.string().optional(),
+  startUrls: z.array(z.string()).optional(),
+  localPath: z.string().optional(),
+  audioChunkSeconds: z.number().int().min(1).max(300).default(30),
+  geminiModel: z.string().default('gemini-2.0-flash'),
+});
+
 // ─── Collector ────────────────────────────────────────────────
 
-export const createCollectorSchema = z.object({
+const baseCollectorSchema = z.object({
   sourceId: z.string().min(1),
   name: z.string().min(1).max(200),
-  type: z.enum(['WEB', 'TELEGRAM', 'API', 'APP', 'MANUAL', 'EXTERNAL']).default('WEB'),
+  type: z.enum(['WEB', 'TELEGRAM', 'MEDIA', 'API', 'APP', 'MANUAL', 'EXTERNAL']).default('WEB'),
   version: z.string().default('1.0.0'),
   enabled: z.boolean().default(true),
   schedule: z.string().nullable().optional(),
-  configuration: collectorConfigSchema,
+  configuration: z.union([webCollectorConfigSchema, telegramCollectorConfigSchema, mediaCollectorConfigSchema]),
 });
 
-export const updateCollectorSchema = createCollectorSchema.partial().omit({ sourceId: true });
+function refineConfigurationMatchesType(
+  data: { type?: string; configuration: unknown },
+  ctx: z.RefinementCtx
+) {
+  let result;
+  if (data.type === 'TELEGRAM') {
+    result = telegramCollectorConfigSchema.safeParse(data.configuration);
+  } else if (data.type === 'MEDIA') {
+    result = mediaCollectorConfigSchema.safeParse(data.configuration);
+  } else {
+    result = webCollectorConfigSchema.safeParse(data.configuration);
+  }
+
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        ...issue,
+        path: ['configuration', ...issue.path],
+      });
+    }
+  }
+}
+
+export const createCollectorSchema = baseCollectorSchema.superRefine(refineConfigurationMatchesType);
+
+export const updateCollectorSchema = baseCollectorSchema
+  .partial()
+  .omit({ sourceId: true })
+  .superRefine((data, ctx) => {
+    // On update, `type` may be omitted (unchanged) and `configuration` may
+    // be omitted too (not being changed this call) — only cross-validate
+    // when both are actually present in the request body.
+    if (data.type && data.configuration) {
+      refineConfigurationMatchesType(data as { type: string; configuration: unknown }, ctx);
+    }
+  });
 
 // ─── ID param ────────────────────────────────────────────────
 
@@ -156,6 +211,14 @@ export const recordFileSchema = z.object({
   sha256: z.string().optional(),
   r2Key: z.string().optional(),
   status: z.enum(['DISCOVERED', 'DOWNLOADING', 'UPLOADED', 'DUPLICATE', 'SKIPPED', 'FAILED']),
+});
+
+// User-editable file fields only — deliberately excludes sha256/r2Key/status/
+// fileSize/etc., which are collection-integrity facts recorded by the
+// scraper, not metadata a user should be able to edit after the fact.
+export const updateFileSchema = z.object({
+  fileName: z.string().min(1).max(500).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 // ─── Collection Error reporting (scraper worker callback) ─────
@@ -206,4 +269,5 @@ export type CreateSourceInput = z.infer<typeof createSourceSchema>;
 export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;
 export type CreateCollectorInput = z.infer<typeof createCollectorSchema>;
 export type UpdateCollectorInput = z.infer<typeof updateCollectorSchema>;
+export type UpdateFileInput = z.infer<typeof updateFileSchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;

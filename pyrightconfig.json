@@ -1,0 +1,7 @@
+{
+  "venvPath": "services/scraper",
+  "venv": ".venv",
+  "extraPaths": [
+    "services/scraper"
+  ]
+}

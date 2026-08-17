@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -69,6 +67,9 @@ services:
       NODE_ENV: development
       REDIS_URL: redis://redis:6379
       API_BASE_URL: http://api:4000
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_SESSION_STRING: ${TELEGRAM_SESSION_STRING:-}
     volumes:
       - ./services/scraper/app:/app/app
       - ./storage:/app/storage

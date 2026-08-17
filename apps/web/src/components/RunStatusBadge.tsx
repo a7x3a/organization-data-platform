@@ -12,6 +12,7 @@ export const RunStatusBadge: React.FC<RunStatusBadgeProps> = ({ status }) => {
   const styles: Record<string, string> = {
     [RunStatus.PENDING]: 'text-[var(--color-info-400)]',
     [RunStatus.RUNNING]: 'text-[var(--color-brand-400)] animate-pulse',
+    [RunStatus.PAUSED]: 'text-[var(--color-warning-400)] font-semibold',
     [RunStatus.COMPLETED]: 'text-[var(--color-success-400)]',
     [RunStatus.FAILED]: 'text-[var(--color-error-400)]',
     [RunStatus.CANCEL_REQUESTED]: 'text-[var(--color-warning-400)] animate-pulse',

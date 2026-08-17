@@ -14,12 +14,14 @@ reimplement (and risk drifting from) the same dedup/upload/record logic.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any, Optional
 
 import httpx
 import structlog
 
+from app.config.settings import settings
 from app.downloader.downloader import DownloadResult, categorize_file
 from app.storage import storage
 from app.storage.manifest_writer import ManifestWriter
@@ -92,17 +94,28 @@ class FilePipeline:
                 await self.report_progress(manifest)
                 return
 
-            category = categorize_file(result.mime_type, result.extension)
+            category = categorize_file(result.mime_type, result.extension, temp_path=result.temp_path)
             r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
+
+            extra_metadata = None
+            is_pdf = (result.mime_type == "application/pdf") or (
+                result.extension and result.extension.lower() == ".pdf"
+            )
+            if is_pdf and os.path.exists(result.temp_path):
+                from app.media.pdf_processor import extract_and_classify_pdf
+
+                pdf_res = extract_and_classify_pdf(result.temp_path)
+                extra_metadata = {"pdf_extraction": pdf_res.to_dict()}
 
             try:
                 storage.upload_file(result.temp_path, r2_key, content_type=result.mime_type)
             except Exception as e:
                 log.error(
-                    "r2_upload_failed", url=result.source_url, key=r2_key, error=str(e)
+                    "storage_upload_failed", url=result.source_url, key=r2_key, error=str(e)
                 )
                 manifest.record_file_failed()
-                await self.report_file_error(result.source_url, "R2_UPLOAD_ERROR", str(e))
+                err_code = "R2_UPLOAD_ERROR" if settings.storage_provider == "r2" else "STORAGE_ERROR"
+                await self.report_file_error(result.source_url, err_code, str(e))
                 await self.report_progress(manifest)
                 return
 
@@ -127,6 +140,7 @@ class FilePipeline:
                 source_url=result.source_url,
                 final_url=result.final_url,
                 r2_key=r2_key,
+                extra_metadata=extra_metadata,
             )
 
             manifest.record_file_downloaded()
@@ -156,21 +170,70 @@ class FilePipeline:
             log.error("run_status_update_failed", run_id=self._run_db_id, error=str(e))
 
     async def is_cancelled(self) -> bool:
-        """Check if the run has been marked for cancellation."""
+        """
+        Check if the run has been marked for cancellation.
+
+        raise_for_status() matters here beyond the obvious: a non-200
+        response (e.g. a 429 from the API's rate limiter) still has a JSON
+        body, just not one with a "status" field — data.get("status") would
+        silently evaluate to None/False with no exception at all, making a
+        transient HTTP failure indistinguishable from "not cancelled" and
+        the run un-cancellable for as long as the failure persisted, with
+        nothing logged anywhere to explain why.
+        """
         try:
             r = await self._api.get(f"/api/runs/{self._run_db_id}")
+            r.raise_for_status()
             data = r.json()
-            return data.get("status") == "CANCEL_REQUESTED"
-        except Exception:
+            status = data.get("status")
+            return status in ("CANCEL_REQUESTED", "CANCELLED")
+        except Exception as e:
+            log.warning("cancellation_check_failed", run_id=self._run_db_id, error=str(e))
             return False
+
+    async def wait_if_paused(self) -> bool:
+        """
+        Check if the run is currently in PAUSED status (via Redis or API status).
+        If paused, wait in a sleep loop until resumed or cancelled.
+        Returns True if cancelled while waiting.
+        """
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url)
+            while True:
+                if await self.is_cancelled():
+                    await r.aclose()
+                    return True
+
+                val = await r.get(f"pause_run:{self._run_db_id}")
+                if not val:
+                    # Also check API status as fallback
+                    res = await self._api.get(f"/api/runs/{self._run_db_id}")
+                    if res.status_code == 200:
+                        st = res.json().get("status")
+                        if st != "PAUSED":
+                            break
+                    else:
+                        break
+
+                log.info("collection_run_paused_waiting", run_id=self._run_db_id)
+                await asyncio.sleep(2)
+
+            await r.aclose()
+        except Exception as e:
+            log.warning("pause_check_error", run_id=self._run_db_id, error=str(e))
+
+        return False
 
     async def is_duplicate(self, sha256: str) -> bool:
         """Ask the API if this SHA-256 already exists."""
         try:
             r = await self._api.get(f"/api/files?sha256={sha256}&pageSize=1")
+            r.raise_for_status()
             data = r.json()
             return data.get("total", 0) > 0
-        except Exception:
+        except Exception as e:
+            log.warning("duplicate_check_failed", sha256=sha256, error=str(e))
             return False
 
     async def is_known_url(self, url: str) -> bool:
@@ -183,9 +246,11 @@ class FilePipeline:
                 "/api/files",
                 params={"sourceId": self._source_id, "sourceUrl": url, "pageSize": 1},
             )
+            r.raise_for_status()
             data = r.json()
             return data.get("total", 0) > 0
-        except Exception:
+        except Exception as e:
+            log.warning("known_url_check_failed", url=url, error=str(e))
             return False
 
     async def reserve_file_id(self, **kwargs: Any) -> str:

@@ -1,17 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filesApi } from '../api/files';
 
-export function useFiles(params?: {
-  page?: number;
-  pageSize?: number;
-  collectionRunId?: string;
-  sourceId?: string;
-  status?: string;
-  sha256?: string;
-}) {
+export function useFiles(
+  params?: {
+    page?: number;
+    pageSize?: number;
+    collectionRunId?: string;
+    sourceId?: string;
+    status?: string;
+    sha256?: string;
+  },
+  options?: {
+    refetchInterval?: number | false;
+  }
+) {
   return useQuery({
     queryKey: ['files', params],
     queryFn: () => filesApi.list(params),
+    refetchInterval: options?.refetchInterval,
   });
 }
 
@@ -42,5 +48,25 @@ export function useManualEntry() {
   return useMutation({
     mutationFn: filesApi.manualEntry,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
+  });
+}
+
+export function useUpdateFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof filesApi.update>[1] }) =>
+      filesApi.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
+  });
+}
+
+export function useDeleteFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: filesApi.delete,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }

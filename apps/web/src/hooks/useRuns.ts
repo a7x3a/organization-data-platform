@@ -11,7 +11,22 @@ export function useRuns(params?: {
   return useQuery({
     queryKey: ['runs', params],
     queryFn: () => runsApi.list(params),
-    refetchInterval: 5000, // Poll active runs list every 5s for real-time progress
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data &&
+        data.data?.some(
+          (r) =>
+            r.status === 'RUNNING' ||
+            r.status === 'PENDING' ||
+            r.status === 'PAUSED' ||
+            r.status === 'CANCEL_REQUESTED'
+        )
+      ) {
+        return 1000; // Poll active runs every 1s for live real-time second counting
+      }
+      return 10000;
+    },
   });
 }
 
@@ -22,8 +37,14 @@ export function useRun(id: string) {
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (data && (data.status === 'RUNNING' || data.status === 'PENDING' || data.status === 'CANCEL_REQUESTED')) {
-        return 2000; // Poll active run detail every 2s
+      if (
+        data &&
+        (data.status === 'RUNNING' ||
+          data.status === 'PENDING' ||
+          data.status === 'PAUSED' ||
+          data.status === 'CANCEL_REQUESTED')
+      ) {
+        return 1000; // Poll active run detail every 1s for live real-time second counter
       }
       return false;
     },
@@ -34,6 +55,42 @@ export function useCancelRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: runsApi.cancel,
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['runs', id] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function usePauseRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.pause,
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['runs', id] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useResumeRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.resume,
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['runs', id] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useForceCancelRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.forceCancel,
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['runs', id] });
       qc.invalidateQueries({ queryKey: ['runs'] });

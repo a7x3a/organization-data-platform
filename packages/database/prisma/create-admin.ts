@@ -14,26 +14,37 @@ const prisma = new PrismaClient();
 const SALT_ROUNDS = 12;
 
 async function main() {
-  const [username = 'admin', password = 'admin12345', name = 'Admin'] = process.argv.slice(2);
+  const customUser = process.argv[2];
+  const customPass = process.argv[3];
+  const customName = process.argv[4];
 
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) {
-    console.log(`User "${username}" already exists — nothing to do.`);
-    return;
+  const defaultUsers = customUser
+    ? [{ username: customUser, password: customPass || 'admin12345', name: customName || customUser }]
+    : [
+        { username: 'a7x3a', password: 'admin12345', name: 'a7x3a' },
+        { username: 'admin', password: 'admin12345', name: 'Admin' },
+      ];
+
+  for (const u of defaultUsers) {
+    const existing = await prisma.user.findUnique({ where: { username: u.username } });
+    if (existing) {
+      console.log(`User "${u.username}" already exists — skipping.`);
+      continue;
+    }
+
+    const passwordHash = await bcrypt.hash(u.password, SALT_ROUNDS);
+    await prisma.user.create({
+      data: {
+        username: u.username,
+        name: u.name,
+        passwordHash,
+        isActive: true,
+        roles: [UserRole.ADMIN],
+      },
+    });
+
+    console.log(`Admin user ready: ${u.username} / ${u.password}`);
   }
-
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  await prisma.user.create({
-    data: {
-      username,
-      name,
-      passwordHash,
-      isActive: true,
-      roles: [UserRole.ADMIN],
-    },
-  });
-
-  console.log(`Admin user ready: ${username} / ${password}`);
 }
 
 main()

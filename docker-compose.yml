@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -51,6 +49,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-odp_user}:${POSTGRES_PASSWORD:-odp_password}@postgres:5432/${POSTGRES_DB:-odp_db}?schema=public
       REDIS_URL: redis://redis:6379
+      SCRAPER_SERVICE_URL: http://scraper:8000
     volumes:
       - ./storage:/app/storage
     depends_on:
@@ -67,12 +66,19 @@ services:
       dockerfile: services/scraper/Dockerfile
     container_name: odp-scraper
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     environment:
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       API_BASE_URL: http://api:4000
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_SESSION_STRING: ${TELEGRAM_SESSION_STRING:-}
+    volumes:
+      - ./storage:/app/storage
     depends_on:
       redis:
         condition: service_healthy

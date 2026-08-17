@@ -62,15 +62,19 @@ class CrawlResult:
 # exactly the kind of "article/research" attachment a fixed short list used
 # to miss entirely.
 DOWNLOADABLE_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".odt", ".ods", ".odp", ".rtf",
-    ".epub", ".mobi", ".azw3", ".fb2",
+    # Ebooks & Books
+    ".pdf", ".epub", ".mobi", ".azw3", ".fb2",
+    # Documents & Office
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".txt", ".md",
+    # Data & Datasets
+    ".csv", ".tsv", ".jsonl", ".json", ".xml", ".parquet", ".srt", ".vtt",
+    # Archives
     ".zip", ".tar", ".gz", ".rar", ".7z", ".bz2", ".xz",
-    ".mp3", ".mp4", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac",
-    ".mkv", ".webm", ".mov", ".avi", ".flv",
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff", ".heic",
-    ".html", ".htm", ".txt", ".md", ".csv", ".tsv", ".json", ".jsonl", ".xml",
-    ".srt", ".vtt", ".parquet",
+    # Audiobooks & Media
+    ".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac",
+    ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv",
+    # Images (Content)
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic",
 }
 
 # Extensions that mean "this is another page to crawl", never a standalone
@@ -82,30 +86,63 @@ _PAGE_EXTENSIONS = {
 }
 
 
+def get_effective_allowed_domains(start_urls: list[str], allowed_domains: list[str]) -> list[str]:
+    """
+    Return effective allowed domains.
+
+    If `allowed_domains` is explicitly set in configuration, use it.
+    Otherwise, automatically derive allowed domains from hostnames of `start_urls`
+    so the crawler stays within the source's domain(s) and never escapes to external sites.
+    """
+    if allowed_domains:
+        return [d.strip().lower() for d in allowed_domains if d.strip()]
+
+    domains: set[str] = set()
+    for raw_url in start_urls:
+        hostname = urlparse(raw_url).hostname
+        if hostname:
+            domains.add(hostname.lower())
+    return list(domains)
+
+
 def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     """
-    Check if a URL points to a downloadable file.
+    Check if a URL points to a downloadable file based on file extension, query parameters, or path segments.
 
-    With an explicit `allowed_extensions` allowlist configured, only those
-    extensions match — that's an intentional narrowing filter. With none
-    configured (the default), *any* URL whose path has a real, non-page
-    extension is treated as a candidate file, not just the fixed list above
-    — per "discover everything by default": a `.epub`, `.parquet`, or a
-    format nobody thought to list still gets attempted. The list above is
-    then just the first, fast-path check; detect_mime() after download is
-    still what actually validates content, so this only widens what gets
-    *attempted*, not what gets trusted.
+    If `allowed_extensions` is configured, only matching extensions are accepted.
+    If `allowed_extensions` is empty, match against DOWNLOADABLE_EXTENSIONS.
+    Website theme assets (.css, .js, .svg, .ico, .woff, .ttf) are explicitly ignored.
     """
-    path = urlparse(url).path.lower()
-    if allowed_extensions:
-        return any(path.endswith(ext) for ext in allowed_extensions)
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    query = parsed.query.lower()
 
-    if any(path.endswith(ext) for ext in DOWNLOADABLE_EXTENSIONS):
+    # Ignore UI theme assets (stylesheets, scripts, vectors, site icons, webfonts)
+    if any(path.endswith(ignored) for ignored in (".css", ".js", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot")):
+        return False
+
+    targets = [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in allowed_extensions] if allowed_extensions else DOWNLOADABLE_EXTENSIONS
+
+    # 1. Path extension check (e.g. /books/history.pdf)
+    if any(path.endswith(ext) for ext in targets):
         return True
 
-    last_segment = path.rsplit("/", 1)[-1]
-    ext = "." + last_segment.rsplit(".", 1)[-1] if "." in last_segment else ""
-    return ext not in _PAGE_EXTENSIONS
+    # 2. Query parameter check (e.g. /download.php?file=book.pdf or ?format=pdf)
+    if query:
+        for ext in targets:
+            clean_ext = ext.lstrip(".")
+            if f".{clean_ext}" in query or f"format={clean_ext}" in query or f"type={clean_ext}" in query or f"file={clean_ext}" in query:
+                return True
+
+    # 3. Download path segment check (e.g. /download/pdf/123, /download/epub/456)
+    for ext in targets:
+        clean_ext = ext.lstrip(".")
+        if f"/pdf/" in path and clean_ext == "pdf":
+            return True
+        if f"/epub/" in path and clean_ext == "epub":
+            return True
+
+    return False
 
 
 def url_matches_pattern(url: str, patterns: list[str]) -> bool:
@@ -117,11 +154,17 @@ def is_allowed_domain(url: str, allowed_domains: list[str]) -> bool:
     """Return True if the URL's domain is in the allowed list (or list is empty)."""
     if not allowed_domains:
         return True
-    hostname = urlparse(url).hostname or ""
-    return any(
-        hostname == domain or hostname.endswith(f".{domain}")
-        for domain in allowed_domains
-    )
+    hostname = (urlparse(url).hostname or "").lower()
+    if not hostname:
+        return False
+
+    clean_host = hostname[4:] if hostname.startswith("www.") else hostname
+    for domain in allowed_domains:
+        d = domain.lower()
+        clean_d = d[4:] if d.startswith("www.") else d
+        if clean_host == clean_d or clean_host.endswith(f".{clean_d}") or clean_d.endswith(f".{clean_host}"):
+            return True
+    return False
 
 
 _BLOCKED_HOSTNAMES = {
@@ -174,12 +217,14 @@ async def is_private_address(url: str) -> bool:
         # Can't resolve — fail closed. A URL we can't verify is safe is not safe.
         return True
 
-    return any(_is_private_ip(info[4][0]) for info in resolved)
+    return any(_is_private_ip(str(info[4][0])) for info in resolved)
 
 
 async def crawl(
     config: CrawlConfig,
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+    on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
+    on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> CrawlResult:
     """
     Perform an HTTP crawl using httpx.
@@ -198,6 +243,10 @@ async def crawl(
 
     delay = config.request_delay_ms / 1000.0
 
+    effective_allowed_domains = get_effective_allowed_domains(
+        config.start_urls, config.allowed_domains
+    )
+
     async with httpx.AsyncClient(
         headers=headers,
         timeout=config.request_timeout_seconds,
@@ -209,6 +258,9 @@ async def crawl(
 
         async def seed(url: str, depth: int = 0) -> None:
             if url in visited:
+                return
+            if not is_allowed_domain(url, effective_allowed_domains):
+                log.debug("domain_disallowed", url=url)
                 return
             if await is_private_address(url):
                 log.warning("ssrf_blocked", url=url)
@@ -241,7 +293,7 @@ async def crawl(
                         loc_url = normalize_url(loc, base_url=sitemap_url)
                         if loc_url is None:
                             continue
-                        if not is_allowed_domain(loc_url, config.allowed_domains):
+                        if not is_allowed_domain(loc_url, effective_allowed_domains):
                             continue
                         await seed(loc_url)
             except httpx.HTTPError as exc:
@@ -264,6 +316,8 @@ async def crawl(
                         if not url_matches_pattern(url, config.excluded_url_patterns):
                             result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
                             log.debug("file_discovered", url=url)
+                            if on_file_found:
+                                await on_file_found()
                         return
 
                     if not await robots.is_allowed(url, enabled=config.robots_enabled):
@@ -273,6 +327,8 @@ async def crawl(
                     # Fetch page
                     response = await client.get(url)
                     result.pages_crawled += 1
+                    if on_page_crawled:
+                        await on_page_crawled()
 
                     if response.status_code != 200:
                         return
@@ -282,6 +338,8 @@ async def crawl(
                         # Could be a direct file — treat as discovered
                         if not url_matches_pattern(url, config.excluded_url_patterns):
                             result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
+                            if on_file_found:
+                                await on_file_found()
                         return
 
                     log.debug("page_crawled", url=url, depth=depth)
@@ -300,7 +358,7 @@ async def crawl(
                         normalized = normalize_url(resource_url, base_url=url)
                         if normalized is None or normalized in visited:
                             continue
-                        if not is_allowed_domain(normalized, config.allowed_domains):
+                        if not is_allowed_domain(normalized, effective_allowed_domains):
                             continue
                         if await is_private_address(normalized):
                             continue
@@ -328,7 +386,7 @@ async def crawl(
                             continue
                         if link_url in visited:
                             continue
-                        if not is_allowed_domain(link_url, config.allowed_domains):
+                        if not is_allowed_domain(link_url, effective_allowed_domains):
                             continue
                         if await is_private_address(link_url):
                             continue

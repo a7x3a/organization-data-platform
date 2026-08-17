@@ -113,6 +113,46 @@ def extract_pdf_title(file_path: str) -> Optional[str]:
         return None
 
 
+def extract_epub_title(file_path: str) -> Optional[str]:
+    """Read an EPUB ebook's embedded <dc:title> metadata from content.opf."""
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+        with zipfile.ZipFile(file_path, 'r') as z:
+            if "META-INF/container.xml" in z.namelist():
+                container_data = z.read("META-INF/container.xml")
+                root = ET.fromstring(container_data)
+                rootfile = root.find(".//{*}rootfile")
+                if rootfile is not None:
+                    opf_path = rootfile.attrib.get("full-path")
+                    if opf_path and opf_path in z.namelist():
+                        opf_data = z.read(opf_path)
+                        opf_root = ET.fromstring(opf_data)
+                        title_elem = opf_root.find(".//{*}title")
+                        if title_elem is not None and title_elem.text:
+                            return title_elem.text.strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def extract_docx_title(file_path: str) -> Optional[str]:
+    """Read a DOCX document's embedded core properties title metadata."""
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+        with zipfile.ZipFile(file_path, 'r') as z:
+            if "docProps/core.xml" in z.namelist():
+                core_data = z.read("docProps/core.xml")
+                root = ET.fromstring(core_data)
+                title_elem = root.find(".//{*}title")
+                if title_elem is not None and title_elem.text:
+                    return title_elem.text.strip() or None
+    except Exception:
+        return None
+    return None
+
+
 # Storage-folder category per file type — keeps 00_raw from becoming one
 # giant "files" bucket mixing PDFs, audio, video and everything else.
 # Checked mime_type first (authoritative, from detect_mime's magic-byte
@@ -120,36 +160,63 @@ def extract_pdf_title(file_path: str) -> Optional[str]:
 # generic (application/octet-stream) or empty.
 _CATEGORY_BY_EXTENSION = {
     ".pdf": "pdf",
-    ".doc": "documents", ".docx": "documents", ".odt": "documents", ".rtf": "documents",
-    ".xls": "spreadsheets", ".xlsx": "spreadsheets", ".ods": "spreadsheets",
-    ".csv": "spreadsheets", ".tsv": "spreadsheets",
+    ".doc": "documents", ".docx": "documents", ".odt": "documents", ".rtf": "documents", ".pages": "documents",
+    ".xls": "spreadsheets", ".xlsx": "spreadsheets", ".ods": "spreadsheets", ".csv": "spreadsheets", ".tsv": "spreadsheets",
     ".ppt": "presentations", ".pptx": "presentations", ".odp": "presentations",
     ".zip": "archives", ".rar": "archives", ".7z": "archives", ".tar": "archives",
-    ".gz": "archives", ".bz2": "archives", ".xz": "archives",
-    ".txt": "text", ".md": "text",
-    ".epub": "ebooks", ".mobi": "ebooks", ".azw3": "ebooks", ".fb2": "ebooks",
+    ".gz": "archives", ".bz2": "archives", ".xz": "archives", ".iso": "archives",
+    ".txt": "text", ".md": "text", ".rst": "text",
+    ".epub": "ebooks", ".mobi": "ebooks", ".azw3": "ebooks", ".fb2": "ebooks", ".djvu": "ebooks", ".cbz": "ebooks", ".cbr": "ebooks", ".chm": "ebooks",
+    ".mp3": "audio", ".m4a": "audio", ".wav": "audio", ".flac": "audio", ".ogg": "audio", ".opus": "audio", ".aac": "audio", ".wma": "audio",
+    ".mp4": "video", ".mkv": "video", ".avi": "video", ".mov": "video", ".webm": "video", ".flv": "video", ".wmv": "video", ".m4v": "video",
+    ".jpg": "images", ".jpeg": "images", ".png": "images", ".gif": "images", ".webp": "images", ".svg": "images", ".bmp": "images", ".ico": "images",
     ".srt": "subtitles", ".vtt": "subtitles",
-    ".json": "data", ".jsonl": "data", ".xml": "data", ".parquet": "data",
+    ".json": "data", ".jsonl": "data", ".xml": "data", ".parquet": "data", ".arrow": "data", ".feather": "data",
+    ".py": "code", ".js": "code", ".ts": "code", ".html": "code", ".css": "code", ".sql": "code", ".yaml": "code", ".yml": "code",
 }
 
 
-def categorize_file(mime_type: Optional[str], extension: Optional[str]) -> str:
-    """Return the storage subfolder ('pdf', 'audio', 'documents', ...) for a file."""
-    if mime_type:
-        primary = mime_type.split("/")[0]
-        if mime_type == "application/pdf":
-            return "pdf"
-        if primary == "audio":
-            return "audio"
-        if primary == "video":
-            return "video"
-        if primary == "image":
-            return "images"
-        if primary == "text":
-            return "text"
-
+def categorize_file(
+    mime_type: Optional[str],
+    extension: Optional[str],
+    temp_path: Optional[str] = None,
+) -> str:
+    """
+    Return the storage subfolder ('pdf/native/decoded', 'pdf/native/encoded', 'pdf/ocr', 'audio', ...) for a file.
+    PDF files are automatically inspected and sub-categorized into 'pdf/native/decoded', 'pdf/native/encoded', or 'pdf/ocr'.
+    """
+    clean_ext = ""
     if extension:
-        category = _CATEGORY_BY_EXTENSION.get(extension.lower())
+        clean_ext = extension.split("?")[0].split("#")[0].strip().lower()
+        if clean_ext and not clean_ext.startswith("."):
+            clean_ext = f".{clean_ext}"
+
+    is_pdf = (mime_type == "application/pdf") or (clean_ext == ".pdf")
+    if is_pdf:
+        if temp_path and os.path.exists(temp_path):
+            from app.media.pdf_processor import extract_and_classify_pdf
+
+            pdf_result = extract_and_classify_pdf(temp_path)
+            return pdf_result.folder_path
+        return "pdf/native/decoded"
+
+    if mime_type:
+        mime_clean = mime_type.lower()
+        if mime_clean == "application/pdf":
+            return "pdf/native/decoded"
+        if mime_clean.startswith("audio/"):
+            return "audio"
+        if mime_clean.startswith("video/"):
+            return "video"
+        if mime_clean.startswith("image/"):
+            return "images"
+        if mime_clean.startswith("text/"):
+            return "text"
+        if "zip" in mime_clean or "rar" in mime_clean or "tar" in mime_clean or "compressed" in mime_clean:
+            return "archives"
+
+    if clean_ext:
+        category = _CATEGORY_BY_EXTENSION.get(clean_ext)
         if category:
             return category
 
@@ -194,10 +261,19 @@ async def download_file(
     final_url = url
     temp_path: Optional[str] = None
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,ku;q=0.8,ar;q=0.7",
+        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+    }
     try:
         async with client.stream(
             "GET",
             url,
+            headers=headers,
             timeout=timeout,
             follow_redirects=True,
         ) as response:
@@ -272,11 +348,19 @@ async def download_file(
 
     # Prefer the document's own embedded title over its URL-derived name
     # when one exists — URLs are often opaque slugs even when the file
-    # itself carries a real, readable title.
-    if mime_type == "application/pdf":
-        title = extract_pdf_title(temp_path)
-        if title:
-            file_name = sanitize_filename(title) + (extension or ".pdf")
+    # itself carries a real, readable book/document title.
+    extracted_title = None
+    if mime_type == "application/pdf" or extension == ".pdf":
+        extracted_title = extract_pdf_title(temp_path)
+    elif mime_type == "application/epub+zip" or extension == ".epub":
+        extracted_title = extract_epub_title(temp_path)
+    elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or extension == ".docx":
+        extracted_title = extract_docx_title(temp_path)
+
+    if extracted_title:
+        clean_title = sanitize_filename(extracted_title)
+        if clean_title and clean_title != "unnamed":
+            file_name = clean_title + (extension or "")
 
     log.info(
         "download_completed",

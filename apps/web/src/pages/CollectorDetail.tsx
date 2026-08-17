@@ -6,9 +6,10 @@ import { useRuns } from '../hooks/useRuns';
 import { DataTable, Column } from '../components/DataTable';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
-import { Play, ArrowLeft, Bot, Globe } from 'lucide-react';
-import { CollectionRun } from '@odp/shared-types';
+import { Play, ArrowLeft, Bot, Globe, Send } from 'lucide-react';
+import { CollectionRun, isTelegramCollector, isWebCollector } from '@odp/shared-types';
 import { formatDuration } from '../lib/utils';
+import { LiveDuration } from '../components/LiveDuration';
 
 export const CollectorDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -59,9 +60,11 @@ export const CollectorDetail: React.FC = () => {
     {
       header: t('runs.fields.duration'),
       accessor: (run) => (
-        <span className="font-mono text-xs text-[var(--color-text-muted)]">
-          {formatDuration(run.startedAt, run.completedAt)}
-        </span>
+        <LiveDuration
+          startedAt={run.startedAt}
+          completedAt={run.completedAt}
+          status={run.status}
+        />
       ),
     },
   ];
@@ -81,7 +84,12 @@ export const CollectorDetail: React.FC = () => {
             {collector.name}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
-            <Globe className="w-3.5 h-3.5" /> Source: {collector.source?.name} ({collector.source?.slug})
+            {isTelegramCollector(collector) ? (
+              <Send className="w-3.5 h-3.5" />
+            ) : (
+              <Globe className="w-3.5 h-3.5" />
+            )}
+            Source: {collector.source?.name} ({collector.source?.slug})
           </p>
         </div>
         <Button onClick={handleRun} disabled={!collector.enabled || runCollector.isPending}>
@@ -92,30 +100,67 @@ export const CollectorDetail: React.FC = () => {
 
       {/* Config Details */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono border-t border-b border-[var(--color-border)] py-5">
-        <div>
-          <span className="text-[var(--color-text-muted)] block">Start URLs</span>
-          <span className="text-[var(--color-brand-400)] truncate block">
-            {collector.configuration.startUrls?.join(', ') || '—'}
-          </span>
-        </div>
-        <div>
-          <span className="text-[var(--color-text-muted)] block">Max Depth / Pages</span>
-          <span className="text-[var(--color-text-primary)]">
-            {collector.configuration.maxDepth} levels / {collector.configuration.maxPages} pages
-          </span>
-        </div>
-        <div>
-          <span className="text-[var(--color-text-muted)] block">Concurrency / Delay</span>
-          <span className="text-[var(--color-text-primary)]">
-            {collector.configuration.concurrency} workers / {collector.configuration.requestDelayMs}ms delay
-          </span>
-        </div>
-        <div>
-          <span className="text-[var(--color-text-muted)] block">Engine</span>
-          <span className="text-[var(--color-text-primary)]">
-            {collector.configuration.useBrowser ? 'Playwright Chromium' : 'HTTP Spider'}
-          </span>
-        </div>
+        {isTelegramCollector(collector) ? (
+          <>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Channels</span>
+              <span className="text-[var(--color-brand-400)] truncate block">
+                {collector.configuration.channels?.map((c) => `@${c}`).join(', ') || '—'}
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Message Limit</span>
+              <span className="text-[var(--color-text-primary)]">
+                {collector.configuration.messageLimit} per channel, per run
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Media</span>
+              <span className="text-[var(--color-text-primary)]">
+                {collector.configuration.downloadMedia ? 'Downloaded' : 'Skipped (text only)'}
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Engine</span>
+              <span className="text-[var(--color-text-primary)]">Telethon</span>
+            </div>
+          </>
+        ) : isWebCollector(collector) ? (
+          <>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Start URLs</span>
+              <span className="text-[var(--color-brand-400)] truncate block">
+                {collector.configuration.startUrls?.join(', ') || '—'}
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Max Depth / Pages</span>
+              <span className="text-[var(--color-text-primary)]">
+                {collector.configuration.maxDepth} levels / {collector.configuration.maxPages} pages
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Concurrency / Delay</span>
+              <span className="text-[var(--color-text-primary)]">
+                {collector.configuration.concurrency} workers / {collector.configuration.requestDelayMs}ms delay
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">Engine</span>
+              <span className="text-[var(--color-text-primary)]">
+                {collector.configuration.useBrowser ? 'Playwright Chromium' : 'HTTP Spider'}
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)] block">File Types</span>
+              <span className="text-[var(--color-text-primary)] truncate block">
+                {collector.configuration.allowedExtensions?.length
+                  ? collector.configuration.allowedExtensions.join(', ')
+                  : 'All types'}
+              </span>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* Collection Runs for this collector */}

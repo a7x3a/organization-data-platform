@@ -15,11 +15,11 @@ export function formatBytes(bytes: number | bigint | null): string {
   return `${parseFloat((n / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-export function formatDuration(startedAt: string | null, completedAt: string | null): string {
+export function formatDuration(startedAt: string | null, completedAt: string | null, nowMs?: number): string {
   if (!startedAt) return '—';
   const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
-  const ms = end - start;
+  const end = completedAt ? new Date(completedAt).getTime() : (nowMs || Date.now());
+  const ms = Math.max(0, end - start);
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${Math.floor(ms / 1000)}s`;
   if (ms < 3600000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;

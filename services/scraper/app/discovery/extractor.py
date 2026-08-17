@@ -53,29 +53,79 @@ _ENCLOSURE_RELS = {"alternate", "enclosure"}
 def extract_page_links(html: str, base_url: str) -> set[str]:
     """
     Every <a href> target on the page, resolved to an absolute URL.
-
-    Deliberately makes no page-vs-file distinction here — that classification
-    already happens downstream (is_downloadable_url), same as the original
-    scrapy-based extractor's deny_extensions=() behavior.
+    Also includes <form action="..."> targets and <iframe src="..."> embed URLs.
     """
     tree = HTMLParser(html)
     links: set[str] = set()
+
+    # 1. Standard <a href> anchors
     for node in tree.css("a[href]"):
         href = node.attributes.get("href")
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
             continue
         links.add(urljoin(base_url, href))
+
+    # 2. Form action targets (<form action="...">)
+    for node in tree.css("form[action]"):
+        action = node.attributes.get("action")
+        if action and not action.startswith(("javascript:", "#")):
+            links.add(urljoin(base_url, action))
+
+    # 3. Iframe & Embed sources (<iframe src="...">, <embed src="...">)
+    for node in tree.css("iframe[src], embed[src]"):
+        src = node.attributes.get("src")
+        if src and not src.startswith(("javascript:", "#")):
+            links.add(urljoin(base_url, src))
+
     return links
+
+
+def extract_html_metadata(html: str, url: str) -> dict[str, str]:
+    """
+    Extract rich structured book & document metadata from page HTML:
+    - Page Title (OpenGraph, Dublin Core, <title>)
+    - Author / Creator (DC.creator, citation_author, meta author)
+    - Description (og:description, description)
+    - JSON-LD Book / Article schema fields
+    """
+    tree = HTMLParser(html)
+    meta_data: dict[str, str] = {}
+
+    # Extract Title
+    og_title = tree.css_first("meta[property='og:title']")
+    dc_title = tree.css_first("meta[name='DC.title'], meta[name='citation_title']")
+    title_node = tree.css_first("title")
+
+    if og_title and og_title.attributes.get("content"):
+        meta_data["title"] = og_title.attributes["content"].strip()
+    elif dc_title and dc_title.attributes.get("content"):
+        meta_data["title"] = dc_title.attributes["content"].strip()
+    elif title_node and title_node.text():
+        meta_data["title"] = title_node.text().strip()
+
+    # Extract Author
+    author_node = tree.css_first("meta[name='author'], meta[name='DC.creator'], meta[name='citation_author']")
+    if author_node and author_node.attributes.get("content"):
+        meta_data["author"] = author_node.attributes["content"].strip()
+
+    # Extract Description
+    desc_node = tree.css_first("meta[name='description'], meta[property='og:description']")
+    if desc_node and desc_node.attributes.get("content"):
+        meta_data["description"] = desc_node.attributes["content"].strip()
+
+    # Extract Language
+    lang_node = tree.css_first("html[lang]")
+    if lang_node and lang_node.attributes.get("lang"):
+        meta_data["language"] = lang_node.attributes["lang"].strip()
+
+    return meta_data
 
 
 def extract_resource_urls(html: str, base_url: str) -> set[str]:
     """
     Every non-<a> resource URL a page can point to: images, video/audio
     sources, embedded objects, alternate/enclosure links, plus URLs found in
-    inline <script> bodies and JSON-LD blocks. This is what catches files a
-    site links via a JS-rendered "Download" button or a <link rel=enclosure>
-    feed entry instead of a plain anchor — most of what "find every file
-    type inside an article/research page" actually requires.
+    inline <script> bodies and JSON-LD blocks.
     """
     tree = HTMLParser(html)
     resources: set[str] = set()
@@ -89,9 +139,6 @@ def extract_resource_urls(html: str, base_url: str) -> set[str]:
             value = node.attributes.get(attr)
             if not value:
                 continue
-            # srcset-style attributes hold comma-separated "url descriptor"
-            # pairs (e.g. "a.jpg 1x, b.jpg 2x") — split() also safely handles
-            # the common single-URL case since it's a no-op there.
             for candidate in value.split(","):
                 url_part = candidate.strip().split(" ")[0]
                 if url_part:
@@ -109,11 +156,61 @@ _SITEMAP_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.IGNORECASE)
 
 
 def extract_sitemap_locs(xml_text: str) -> list[str]:
-    """
-    Extract <loc> entries from a sitemap.xml or sitemap-index.xml body.
-
-    Regex-based rather than a full XML parser deliberately — sitemap <loc>
-    entries are a simple, well-known structure, and this avoids adding an XML
-    dependency on top of selectolax for HTML.
-    """
+    """Extract <loc> entries from a sitemap.xml body."""
     return _SITEMAP_LOC_RE.findall(xml_text)
+
+
+_IGNORE_TAGS = {"script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "style"}
+
+
+def extract_page_text(html: str) -> str:
+    """
+    Extract clean, readable, meaningful body text from an HTML document.
+
+    Handles:
+    - Standard paragraphs (<p>), headings (<h1>-<h6>), blockquotes, lists.
+    - Custom text containers (<div class="textcontent">, <article>, #textbody, .post-body, etc.).
+    - RTL text (Persian, Kurdish, Arabic) and poetry lines (<div class="H R">, <div class="H L">).
+    - Ignores page furniture (scripts, styles, navigation bars, footers).
+    """
+    tree = HTMLParser(html)
+
+    # 1. Remove unwanted furniture tags
+    for tag in _IGNORE_TAGS:
+        for node in tree.css(tag):
+            node.decompose()
+
+    for node in tree.css(".text-nav, .nav, .footer, .header, .sidebar, .menu"):
+        node.decompose()
+
+    # 2. Prefer specific main text containers if present
+    main_node = None
+    for selector in [
+        "#textbody", ".textcontent", "article", "main",
+        ".post-content", ".entry-content", ".article-body", ".text-container"
+    ]:
+        found = tree.css_first(selector)
+        if found:
+            main_node = found
+            break
+
+    root = main_node or tree.body or tree.root
+    if not root:
+        return ""
+
+    lines: list[str] = []
+
+    # 3. Extract text from leaf/block elements recursively
+    for node in root.traverse():
+        if node.tag in ("script", "style", "option", "button"):
+            continue
+        text = node.text(deep=False)
+        if text:
+            clean = " ".join(text.split())
+            if clean and len(clean) > 0:
+                # Avoid duplicate lines from nested container nodes
+                if not lines or lines[-1] != clean:
+                    lines.append(clean)
+
+    return "\n".join(lines)
+

@@ -1,11 +1,32 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { Shield, HardDrive, UserCheck } from 'lucide-react';
+import { Shield, HardDrive, UserCheck, Send, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Button } from '../components/Button';
+import { TelegramSetupModal } from '../components/TelegramSetupModal';
 
 export const Settings: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const [showTelegramSetup, setShowTelegramSetup] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<{
+    is_configured: boolean;
+    is_authorized: boolean;
+    user?: { first_name: string; username: string };
+    reason?: string;
+  } | null>(null);
+
+  const fetchTelegramStatus = () => {
+    axios
+      .get('/api/telegram/status')
+      .then((r) => setTelegramStatus(r.data))
+      .catch(() => setTelegramStatus({ is_configured: false, is_authorized: false }));
+  };
+
+  useEffect(() => {
+    fetchTelegramStatus();
+  }, []);
 
   return (
     <div className="space-y-8 max-w-4xl">
@@ -39,6 +60,56 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
+        {/* Telegram Scraper Account Configuration */}
+        <div>
+          <div className="flex items-center justify-between pb-4 border-b border-[var(--color-border)] mb-4">
+            <div className="flex items-center gap-2.5">
+              <Send className="w-4 h-4 text-blue-400" />
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Telegram Scraper Account
+              </h2>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowTelegramSetup(true)}
+            >
+              {telegramStatus?.is_authorized ? 'Manage Account' : 'Setup Account'}
+            </Button>
+          </div>
+          <div className="p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] space-y-3">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-[var(--color-text-muted)]">Connection Status:</span>
+              <span className="flex items-center gap-1.5 font-semibold">
+                {telegramStatus?.is_authorized ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span className="text-emerald-400">Authorized</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                    <span className="text-amber-400">Not Logged In</span>
+                  </>
+                )}
+              </span>
+            </div>
+            {telegramStatus?.user && (
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-[var(--color-text-muted)]">Account User:</span>
+                <span className="text-[var(--color-text-primary)]">
+                  {telegramStatus.user.first_name}{' '}
+                  {telegramStatus.user.username ? `(@${telegramStatus.user.username})` : ''}
+                </span>
+              </div>
+            )}
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Interactive Telethon auth allows Telegram channel collection runs to download documents and media directly.
+            </p>
+          </div>
+        </div>
+
         {/* Cloudflare R2 Info */}
         <div>
           <div className="flex items-center gap-2.5 pb-4 border-b border-[var(--color-border)] mb-4">
@@ -50,7 +121,7 @@ export const Settings: React.FC = () => {
           <div className="space-y-2 text-xs font-mono">
             <div className="flex justify-between">
               <span className="text-[var(--color-text-muted)]">Target Zone:</span>
-              <span className="text-[var(--color-text-primary)]">00_raw/web/</span>
+              <span className="text-[var(--color-text-primary)]">00_raw/web/ & 00_raw/telegram/</span>
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--color-text-muted)]">Security Model:</span>
@@ -79,6 +150,12 @@ export const Settings: React.FC = () => {
           </ul>
         </div>
       </div>
+
+      <TelegramSetupModal
+        isOpen={showTelegramSetup}
+        onClose={() => setShowTelegramSetup(false)}
+        onSuccess={fetchTelegramStatus}
+      />
     </div>
   );
 };

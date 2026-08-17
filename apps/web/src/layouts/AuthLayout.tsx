@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Database, Globe, ShieldCheck, Fingerprint, Copy, Archive } from 'lucide-react';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const PIPELINE_STEPS = [
   { icon: Globe, label: 'Discover', desc: 'Crawl sources within explicit boundaries' },
@@ -48,7 +49,10 @@ export const AuthLayout: React.FC = () => {
       </div>
 
       {/* Form panel */}
-      <div className="flex-1 flex items-center justify-center p-6">
+      <div className="flex-1 flex items-center justify-center p-6 relative">
+        <div className="absolute top-6 right-6">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-sm">
           <Outlet />
         </div>

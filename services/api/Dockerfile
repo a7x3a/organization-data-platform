@@ -61,8 +61,14 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 # Copy compiled shared-types
 COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
 
+# Copy entrypoint script
+COPY services/api/docker-entrypoint.sh /app/docker-entrypoint.sh
+
 # Non-root user for security
-RUN groupadd --gid 1001 nodejs && useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home nodejs
+RUN groupadd --gid 1001 nodejs && \
+    useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home nodejs && \
+    chmod +x /app/docker-entrypoint.sh
+
 USER nodejs
 
 EXPOSE 4000
@@ -70,4 +76,5 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD node -e "require('http').get('http://localhost:4000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "services/api/dist/services/api/src/server.js"]

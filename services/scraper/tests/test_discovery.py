@@ -10,8 +10,10 @@ from app.discovery.extractor import (
     extract_page_links,
     extract_resource_urls,
     extract_sitemap_locs,
+    extract_page_text,
 )
 from app.discovery.robots import RobotsCache
+
 
 
 # ─── extract_page_links ─────────────────────────────────────────
@@ -199,3 +201,55 @@ async def test_robots_cache_falls_back_to_conventional_sitemap_path():
         robots = RobotsCache(client)
         sitemaps = await robots.sitemaps_for("https://example.com/page")
     assert sitemaps == ["https://example.com/sitemap.xml"]
+
+
+# ─── Domain Scoping & File Classification ──────────────────────
+
+def test_get_effective_allowed_domains_derives_from_start_urls():
+    from app.spiders.http_spider import get_effective_allowed_domains, is_downloadable_url
+
+    # When allowed_domains is empty, auto-derives from start_urls hostnames
+    derived = get_effective_allowed_domains(["https://lib.kurdish.org/books/index.html"], [])
+    assert derived == ["lib.kurdish.org"]
+
+    # When allowed_domains is specified, uses configured allowed_domains
+    configured = get_effective_allowed_domains(["https://lib.kurdish.org/books"], ["kurdish.org"])
+    assert configured == ["kurdish.org"]
+
+
+def test_is_downloadable_url_does_not_misclassify_clean_html_permalinks_with_dots():
+    from app.spiders.http_spider import is_downloadable_url
+
+    # Clean HTML permalinks containing dots must NOT be marked as downloadable files
+    assert is_downloadable_url("https://example.com/article/v1.0", []) is False
+    assert is_downloadable_url("https://example.com/item/john.doe", []) is False
+
+    # Target files with real downloadable extensions must be identified correctly
+    assert is_downloadable_url("https://example.com/docs/book.pdf", []) is True
+    assert is_downloadable_url("https://example.com/data/report.docx", []) is True
+
+    # With allowed_extensions filter configured
+    assert is_downloadable_url("https://example.com/docs/book.pdf", [".pdf"]) is True
+    assert is_downloadable_url("https://example.com/img/photo.png", [".pdf"]) is False
+
+
+def test_extract_page_text_extracts_poetry_and_article_body():
+    html = """
+    <div class="text-container">
+        <div id="textbody">
+            <div class="textcontent lg rtl">
+                <div class="H R">مجمر سینه ز دوریت به تاب است امشب</div>
+                <div class="H L">وز غمت صبر به دل نقش بر آب است امشب</div>
+            </div>
+            <div class="text-nav">
+                <a class="prev" href="/prev">Prev</a>
+            </div>
+        </div>
+    </div>
+    """
+    text = extract_page_text(html)
+    assert "مجمر سینه ز دوریت به تاب است امشب" in text
+    assert "وز غمت صبر به دل نقش بر آب است امشب" in text
+    assert "Prev" not in text
+
+

@@ -103,3 +103,39 @@ async def test_two_different_urls_same_content_hash_identically(temp_dir):
     assert result_a.sha256 == result_b.sha256
     os.unlink(result_a.temp_path)
     os.unlink(result_b.temp_path)
+
+
+def test_extract_filename_unquotes_percent_encoding():
+    from urllib.parse import quote
+    original_title = "مێژووی_ئەدەبی_کوردی.pdf"
+    url = f"https://example.com/books/{quote(original_title)}"
+    name = extract_filename(url)
+    assert name == original_title
+
+
+def test_extract_epub_and_docx_title(tmp_path):
+    import zipfile
+    from app.downloader.downloader import extract_epub_title, extract_docx_title
+
+    # Test EPUB container title extraction
+    epub_file = str(tmp_path / "test.epub")
+    with zipfile.ZipFile(epub_file, "w") as z:
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        z.writestr(
+            "OEBPS/content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>Kurdish Literature History</dc:title></metadata></package>',
+        )
+    assert extract_epub_title(epub_file) == "Kurdish Literature History"
+
+    # Test DOCX core properties title extraction
+    docx_file = str(tmp_path / "test.docx")
+    with zipfile.ZipFile(docx_file, "w") as z:
+        z.writestr(
+            "docProps/core.xml",
+            '<?xml version="1.0"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/coreproperties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Research Document Title</dc:title></cp:coreProperties>',
+        )
+    assert extract_docx_title(docx_file) == "Research Document Title"
+

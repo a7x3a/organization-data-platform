@@ -29,12 +29,10 @@ describe('sanitizeFilename', () => {
   });
 
   it('preserves non-Latin scripts (e.g. Kurdish/Arabic titles)', () => {
-    // These characters are outside a-zA-Z0-9._- and get replaced — this
-    // documents that behavior explicitly rather than leaving it implicit.
-    // The ORIGINAL title is preserved separately as metadata; this function
-    // only generates the safe machine name.
+    // Non-Latin characters (Kurdish, Arabic, etc.) are preserved in safe filenames
+    // while spaces are converted to underscores.
     const result = sanitizeFilename('کتێبی بیرکاری');
-    expect(result).toBe('file');
+    expect(result).toBe('کتێبی_بیرکاری');
   });
 
   it('truncates very long names', () => {

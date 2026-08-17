@@ -23,6 +23,21 @@ export const runsApi = {
     return res.data;
   },
 
+  pause: async (id: string) => {
+    const res = await apiClient.post<CollectionRun>(`/runs/${id}/pause`);
+    return res.data;
+  },
+
+  resume: async (id: string) => {
+    const res = await apiClient.post<CollectionRun>(`/runs/${id}/resume`);
+    return res.data;
+  },
+
+  forceCancel: async (id: string) => {
+    const res = await apiClient.post<CollectionRun>(`/runs/${id}/force-cancel`);
+    return res.data;
+  },
+
   delete: async (id: string) => {
     await apiClient.delete(`/runs/${id}`);
   },

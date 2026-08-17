@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { redis } from '../config/redis';
 import { AppError } from '../middleware/errorHandler';
 import { parsePagination, toPrismaSkipTake, buildPaginatedResult } from '../utils/pagination';
 import { collectionQueue } from '../queues/collection.queue';
@@ -48,6 +49,11 @@ export async function getRunById(id: string) {
     include: {
       collector: { select: { id: true, name: true, type: true, configuration: true } },
       source: { select: { id: true, name: true, slug: true, baseUrl: true } },
+      // Capped rather than unbounded — a pathological run (thousands of
+      // per-file failures) shouldn't turn every run-detail fetch into an
+      // unbounded row scan. Newest first: the reason a run is FAILED is
+      // almost always one of its most recent errors, not its first.
+      errors: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   });
   if (!run) throw new AppError(404, 'Collection run not found', 'RUN_NOT_FOUND');
@@ -69,9 +75,18 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   // (deleteRun makes that possible now), since the next "count + 1" can
   // collide with a runId that still exists. runId's numeric suffix is
   // zero-padded, so string-descending order matches numeric order.
+  //
+  // Deliberately NOT scoped to collectorId — CollectionRun.runId is a single
+  // globally-unique column (schema.prisma), not unique per collector. Scoping
+  // this lookup by collectorId meant two different collectors both starting
+  // their first run of the day computed the same "next" sequence (1 each),
+  // both tried to create "..._run_000001", and the second one 500'd on a
+  // unique-constraint violation — which is exactly what silently broke every
+  // *other* collector's first run after any one collector had already taken
+  // run_000001 for the day.
   const datePrefix = new Date().toISOString().slice(0, 10);
   const latestRun = await prisma.collectionRun.findFirst({
-    where: { collectorId, runId: { startsWith: `${datePrefix}_run_` } },
+    where: { runId: { startsWith: `${datePrefix}_run_` } },
     orderBy: { runId: 'desc' },
     select: { runId: true },
   });
@@ -89,6 +104,12 @@ export async function startCollectionRun(collectorId: string, userId: string) {
     },
   });
 
+  // R2 zone per collector type — 00_raw/web/... for WEB, 00_raw/telegram/...
+  // for TELEGRAM, matching the platform's storage layout (see
+  // WEB_COLLECTION_PLATFORM_PLAN.md §5). Falls back to 'web' for any other
+  // (not-yet-implemented) collector type rather than producing an invalid key.
+  const zone = collector.type === 'TELEGRAM' ? 'telegram' : 'web';
+
   // Enqueue the BullMQ job
   const job = await collectionQueue.add(
     'collection.start',
@@ -97,8 +118,9 @@ export async function startCollectionRun(collectorId: string, userId: string) {
       collectorId,
       sourceId: collector.sourceId,
       sourceSlug: collector.source.slug,
+      collectorType: collector.type,
       configuration: collector.configuration,
-      runFolderKey: `00_raw/web/${collector.source.slug}/${runId}`,
+      runFolderKey: `00_raw/${zone}/${collector.source.slug}/${runId}`,
     },
     {
       jobId: `collection-${run.id}`,
@@ -155,6 +177,10 @@ export async function deleteRun(id: string) {
 export async function cancelRun(id: string, userId: string) {
   const run = await getRunById(id);
 
+  if (run.status === RunStatus.CANCEL_REQUESTED || run.status === RunStatus.CANCELLED) {
+    return run;
+  }
+
   const cancellableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING];
   if (!cancellableStatuses.includes(run.status as RunStatus)) {
     throw new AppError(
@@ -162,6 +188,16 @@ export async function cancelRun(id: string, userId: string) {
       `Cannot cancel a run with status: ${run.status}`,
       'INVALID_RUN_STATUS'
     );
+  }
+
+  // Attempt to remove job from BullMQ queue if still pending
+  try {
+    const job = await collectionQueue.getJob(`collection-${id}`);
+    if (job) {
+      await job.remove();
+    }
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Could not remove BullMQ job during cancel');
   }
 
   const updated = await prisma.collectionRun.update({
@@ -183,10 +219,137 @@ export async function cancelRun(id: string, userId: string) {
   return updated;
 }
 
+export async function forceCancelRun(id: string, userId: string) {
+  const run = await getRunById(id);
+
+  try {
+    const job = await collectionQueue.getJob(`collection-${id}`);
+    if (job) {
+      await job.remove();
+    }
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Could not remove BullMQ job during force cancel');
+  }
+
+  const completedAt = new Date();
+  const updated = await prisma.collectionRun.update({
+    where: { id },
+    data: {
+      status: RunStatus.CANCELLED,
+      completedAt,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.force_cancelled',
+      entityType: 'CollectionRun',
+      entityId: id,
+    },
+  });
+
+  logger.info({ runId: id, userId }, 'collection_run_force_cancelled');
+  return updated;
+}
+
+export async function pauseRun(id: string, userId: string) {
+  const run = await getRunById(id);
+
+  if (run.status === RunStatus.PAUSED) {
+    return run;
+  }
+
+  const pausableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING];
+  if (!pausableStatuses.includes(run.status as RunStatus)) {
+    throw new AppError(
+      400,
+      `Cannot pause a run with status: ${run.status}`,
+      'INVALID_RUN_STATUS'
+    );
+  }
+
+  try {
+    await redis.set(`pause_run:${id}`, '1');
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Failed to set pause flag in Redis');
+  }
+
+  const updated = await prisma.collectionRun.update({
+    where: { id },
+    data: { status: RunStatus.PAUSED },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.paused',
+      entityType: 'CollectionRun',
+      entityId: id,
+    },
+  });
+
+  logger.info({ runId: id, userId }, 'collection_run_paused');
+  return updated;
+}
+
+export async function resumeRun(id: string, userId: string) {
+  const run = await getRunById(id);
+
+  if (run.status === RunStatus.RUNNING) {
+    return run;
+  }
+
+  if (run.status !== RunStatus.PAUSED) {
+    throw new AppError(
+      400,
+      `Cannot resume a run with status: ${run.status}`,
+      'INVALID_RUN_STATUS'
+    );
+  }
+
+  try {
+    await redis.del(`pause_run:${id}`);
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Failed to delete pause flag in Redis');
+  }
+
+  const updated = await prisma.collectionRun.update({
+    where: { id },
+    data: { status: RunStatus.RUNNING },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.resumed',
+      entityType: 'CollectionRun',
+      entityId: id,
+    },
+  });
+
+  logger.info({ runId: id, userId }, 'collection_run_resumed');
+  return updated;
+}
+
 const TERMINAL_STATUSES: RunStatus[] = [
   RunStatus.COMPLETED,
   RunStatus.FAILED,
   RunStatus.CANCELLED,
+];
+
+// Statuses the worker must never be allowed to downgrade back to RUNNING via
+// a progress-only update. Cancellation used to be silently un-doable: the
+// worker calls this endpoint after nearly every file to report incremental
+// counts, hardcoding status: "RUNNING" each time — so the moment a user
+// requested cancellation, the very next progress report overwrote
+// CANCEL_REQUESTED back to RUNNING before the worker's own cancellation
+// check ever got a chance to see it, and the run churned on regardless.
+const STATUSES_PROTECTED_FROM_RUNNING_REVERT: RunStatus[] = [
+  RunStatus.CANCEL_REQUESTED,
+  RunStatus.CANCELLED,
+  RunStatus.COMPLETED,
+  RunStatus.FAILED,
 ];
 
 // Called by the scraper worker to report run progress/completion. errorCount
@@ -194,9 +357,15 @@ const TERMINAL_STATUSES: RunStatus[] = [
 // the caller, since the worker already reports each error independently via
 // recordError() — deriving it here keeps the two paths from drifting apart.
 export async function updateRunStatus(id: string, input: UpdateRunStatusInput) {
-  await getRunById(id); // throws 404 if not found
+  const current = await getRunById(id); // throws 404 if not found
 
-  const data: Record<string, unknown> = { status: input.status };
+  const data: Record<string, unknown> = {};
+  const isProgressOnlyRunningReport =
+    input.status === RunStatus.RUNNING &&
+    STATUSES_PROTECTED_FROM_RUNNING_REVERT.includes(current.status as RunStatus);
+  if (!isProgressOnlyRunningReport) {
+    data.status = input.status;
+  }
   if (input.startedAt) data.startedAt = new Date(input.startedAt);
   if (input.completedAt) data.completedAt = new Date(input.completedAt);
   if (input.manifestR2Key !== undefined) data.manifestR2Key = input.manifestR2Key;

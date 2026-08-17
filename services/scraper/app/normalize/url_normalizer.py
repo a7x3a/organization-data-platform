@@ -3,7 +3,8 @@ Centralized URL normalization.
 
 Every place that discovers, queues, or deduplicates a URL must go through
 here — this is the single source of truth for what makes two URLs "the
-same" during a crawl. Spiders should never do their own ad-hoc URL cleanup.
+same" during a crawl. Handles percent-encoded (%D9%88...) and decoded
+UTF-8 Unicode URLs seamlessly.
 """
 from urllib.parse import (
     urljoin,
@@ -11,6 +12,8 @@ from urllib.parse import (
     urlunparse,
     parse_qsl,
     urlencode,
+    unquote,
+    quote,
 )
 
 # Query parameters that carry no identity — stripping them prevents the same
@@ -32,14 +35,14 @@ def normalize_url(url: str, base_url: str | None = None) -> str | None:
     Normalize a URL for consistent discovery/dedup.
 
     - Resolves relative URLs against base_url when given.
+    - Decodes percent-encoded Unicode paths (%D9%88... -> Kurdish text) and re-encodes safely.
     - Lowercases scheme and host.
     - Drops default ports (http:80, https:443).
     - Drops the fragment.
     - Drops known tracking query parameters; sorts remaining ones.
     - Collapses a single trailing slash on non-root paths.
 
-    Returns None for malformed URLs or unsupported schemes (anything other
-    than http/https) — callers should treat None as "skip this URL".
+    Returns None for malformed URLs or unsupported schemes.
     """
     if not url or not url.strip():
         return None
@@ -70,7 +73,11 @@ def normalize_url(url: str, base_url: str | None = None) -> str | None:
     else:
         netloc = host
 
-    path = parsed.path or "/"
+    raw_path = parsed.path or "/"
+    # Unquote first to decode %D9%88... into clean UTF-8 text, then re-quote path safely
+    decoded_path = unquote(raw_path)
+    path = quote(decoded_path, safe="/:~%+=&;$@,-_")
+
     if len(path) > 1 and path.endswith("/"):
         path = path.rstrip("/")
         if not path:

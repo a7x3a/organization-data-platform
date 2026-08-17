@@ -39,6 +39,18 @@ export class LocalStorageProvider implements StorageProvider {
     }
   }
 
+  async delete(key: string): Promise<void> {
+    try {
+      await fs.unlink(this.resolveKey(key));
+      logger.info({ key }, 'local_storage_delete_completed');
+    } catch (err: unknown) {
+      // Already gone is not a failure — deleting a file record whose
+      // object was somehow already removed should still succeed.
+      if ((err as { code?: string }).code === 'ENOENT') return;
+      throw err;
+    }
+  }
+
   async getSignedUrl(key: string): Promise<{ url: string; expiresAt: string }> {
     const expiresAt = new Date(Date.now() + env.R2_SIGNED_URL_EXPIRES * 1000).toISOString();
     // Served by the authenticated local-file route — local mode has no real

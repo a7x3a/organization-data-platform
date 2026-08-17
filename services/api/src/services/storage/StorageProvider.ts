@@ -4,4 +4,5 @@ export interface StorageProvider {
   upload(key: string, body: Buffer, contentType: string): Promise<void>;
   exists(key: string): Promise<boolean>;
   getSignedUrl(key: string): Promise<{ url: string; expiresAt: string }>;
+  delete(key: string): Promise<void>;
 }

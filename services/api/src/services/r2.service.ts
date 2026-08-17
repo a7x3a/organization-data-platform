@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { env } from '../config/env';
@@ -85,6 +85,17 @@ class R2Service {
     );
 
     logger.info({ key, contentType }, 'r2_upload_completed');
+  }
+
+  /**
+   * Permanently delete an object from R2. There is no undo — callers are
+   * responsible for deciding whether deleting a given key is appropriate
+   * (see file.service.ts's deleteFile for the immutability tradeoff this
+   * makes for collected files specifically).
+   */
+  async deleteObject(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    logger.info({ key }, 'r2_delete_completed');
   }
 }
 

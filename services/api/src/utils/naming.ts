@@ -33,25 +33,44 @@ export function sanitizeFilename(original: string): string {
 // for manual uploads the same way the scraper's own pipeline already does.
 const CATEGORY_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'pdf',
-  '.doc': 'documents', '.docx': 'documents', '.odt': 'documents', '.rtf': 'documents',
-  '.xls': 'spreadsheets', '.xlsx': 'spreadsheets', '.ods': 'spreadsheets', '.csv': 'spreadsheets',
+  '.doc': 'documents', '.docx': 'documents', '.odt': 'documents', '.rtf': 'documents', '.pages': 'documents',
+  '.xls': 'spreadsheets', '.xlsx': 'spreadsheets', '.ods': 'spreadsheets', '.csv': 'spreadsheets', '.tsv': 'spreadsheets',
   '.ppt': 'presentations', '.pptx': 'presentations', '.odp': 'presentations',
-  '.zip': 'archives', '.rar': 'archives', '.7z': 'archives', '.tar': 'archives', '.gz': 'archives',
-  '.txt': 'text', '.md': 'text',
+  '.zip': 'archives', '.rar': 'archives', '.7z': 'archives', '.tar': 'archives', '.gz': 'archives', '.bz2': 'archives', '.xz': 'archives', '.iso': 'archives',
+  '.txt': 'text', '.md': 'text', '.rst': 'text',
+  '.epub': 'ebooks', '.mobi': 'ebooks', '.azw3': 'ebooks', '.fb2': 'ebooks', '.djvu': 'ebooks', '.cbz': 'ebooks', '.cbr': 'ebooks', '.chm': 'ebooks',
+  '.mp3': 'audio', '.m4a': 'audio', '.wav': 'audio', '.flac': 'audio', '.ogg': 'audio', '.opus': 'audio', '.aac': 'audio', '.wma': 'audio',
+  '.mp4': 'video', '.mkv': 'video', '.avi': 'video', '.mov': 'video', '.webm': 'video', '.flv': 'video', '.wmv': 'video', '.m4v': 'video',
+  '.jpg': 'images', '.jpeg': 'images', '.png': 'images', '.gif': 'images', '.webp': 'images', '.svg': 'images', '.bmp': 'images', '.ico': 'images',
+  '.srt': 'subtitles', '.vtt': 'subtitles',
+  '.json': 'data', '.jsonl': 'data', '.xml': 'data', '.parquet': 'data', '.arrow': 'data', '.feather': 'data',
+  '.py': 'code', '.js': 'code', '.ts': 'code', '.html': 'code', '.css': 'code', '.sql': 'code', '.yaml': 'code', '.yml': 'code',
 };
 
 export function categorizeFile(mimeType: string | null | undefined, extension: string | null | undefined): string {
-  if (mimeType) {
-    if (mimeType === 'application/pdf') return 'pdf';
-    const primary = mimeType.split('/')[0];
-    if (primary === 'audio') return 'audio';
-    if (primary === 'video') return 'video';
-    if (primary === 'image') return 'images';
-    if (primary === 'text') return 'text';
+  let cleanExt = '';
+  if (extension) {
+    cleanExt = extension.split('?')[0].split('#')[0].trim().toLowerCase();
+    if (cleanExt && !cleanExt.startsWith('.')) {
+      cleanExt = `.${cleanExt}`;
+    }
   }
 
-  if (extension) {
-    const category = CATEGORY_BY_EXTENSION[extension.toLowerCase()];
+  if (cleanExt === '.pdf' || mimeType === 'application/pdf') {
+    return 'pdf';
+  }
+
+  if (mimeType) {
+    const mimeLower = mimeType.toLowerCase();
+    if (mimeLower.startsWith('audio/')) return 'audio';
+    if (mimeLower.startsWith('video/')) return 'video';
+    if (mimeLower.startsWith('image/')) return 'images';
+    if (mimeLower.startsWith('text/')) return 'text';
+    if (mimeLower.includes('zip') || mimeLower.includes('rar') || mimeLower.includes('compressed')) return 'archives';
+  }
+
+  if (cleanExt) {
+    const category = CATEGORY_BY_EXTENSION[cleanExt];
     if (category) return category;
   }
 

@@ -49,4 +49,27 @@ export const filesApi = {
     const res = await apiClient.post<CollectedFile>('/files/manual-entry', data);
     return res.data;
   },
+
+  update: async (
+    id: string,
+    data: { fileName?: string; metadata?: Record<string, unknown> }
+  ): Promise<CollectedFile> => {
+    const res = await apiClient.patch<CollectedFile>(`/files/${id}`, data);
+    return res.data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await apiClient.delete(`/files/${id}`);
+  },
+
+  syncStorage: async (): Promise<{
+    provider: string;
+    totalChecked: number;
+    syncedCount: number;
+    missingCount: number;
+    timestamp: string;
+  }> => {
+    const res = await apiClient.post('/files/sync');
+    return res.data;
+  },
 };

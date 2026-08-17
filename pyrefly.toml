@@ -1,0 +1,6 @@
+[tool.pyrefly]
+python-interpreter-path = "services/scraper/.venv/Scripts/python.exe"
+search-paths = [
+  "services/scraper",
+  "services/scraper/.venv/Lib/site-packages"
+]

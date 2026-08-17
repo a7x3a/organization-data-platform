@@ -41,6 +41,7 @@ class MetadataWriter:
         source_url: str,
         final_url: str,
         r2_key: str,
+        extra_metadata: Optional[dict] = None,
     ) -> None:
         record = {
             "file_id": file_id,
@@ -56,6 +57,8 @@ class MetadataWriter:
             "final_url": final_url,
             "r2_key": r2_key,
         }
+        if extra_metadata:
+            record.update(extra_metadata)
         self._records.append(record)
         self._tmp.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._tmp.flush()

@@ -76,7 +76,7 @@ router.delete(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await sourceService.deleteSource(req.params.id);
+      await sourceService.deleteSource(req.params.id, req.query.cascade !== 'false');
       res.status(204).send();
     } catch (err) {
       next(err);

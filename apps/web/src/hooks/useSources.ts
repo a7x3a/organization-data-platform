@@ -5,7 +5,20 @@ export function useDashboardStats() {
   return useQuery({
     queryKey: ['dashboard', 'stats'],
     queryFn: dashboardApi.getStats,
-    refetchInterval: 30_000, // Poll every 30s
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data &&
+        (data.runningRuns > 0 ||
+          data.recentRuns?.some(
+            (r) =>
+              r.status === 'RUNNING' || r.status === 'PENDING' || r.status === 'CANCEL_REQUESTED'
+          ))
+      ) {
+        return 2000; // Poll dashboard stats every 2s while runs are active
+      }
+      return 10000;
+    },
   });
 }
 

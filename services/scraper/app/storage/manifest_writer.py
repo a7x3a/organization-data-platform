@@ -33,24 +33,36 @@ class ManifestWriter:
         self._files_failed = 0
         self._pages_crawled = 0
 
-    def record_file_downloaded(self) -> None:
+    def record_file_found(self) -> None:
         self._files_found += 1
+
+    def record_file_downloaded(self) -> None:
         self._files_downloaded += 1
 
     def record_file_skipped(self) -> None:
-        self._files_found += 1
         self._files_skipped += 1
 
     def record_file_duplicate(self) -> None:
-        self._files_found += 1
         self._files_duplicate += 1
 
     def record_file_failed(self) -> None:
-        self._files_found += 1
         self._files_failed += 1
 
     def record_page_crawled(self) -> None:
         self._pages_crawled += 1
+
+    @property
+    def total_processed(self) -> int:
+        return (
+            self._files_downloaded
+            + self._files_skipped
+            + self._files_duplicate
+            + self._files_failed
+        )
+
+    @property
+    def files_found(self) -> int:
+        return max(self._files_found, self.total_processed)
 
     def build(self, *, status: str, completed_at: Optional[datetime] = None) -> dict:
         return {
@@ -59,7 +71,7 @@ class ManifestWriter:
             "source_name": self._source_name,
             "started_at": self._started_at.isoformat(),
             "completed_at": (completed_at or datetime.now(timezone.utc)).isoformat(),
-            "files_found": self._files_found,
+            "files_found": self.files_found,
             "files_downloaded": self._files_downloaded,
             "files_skipped": self._files_skipped,
             "files_duplicate": self._files_duplicate,
@@ -83,7 +95,7 @@ class ManifestWriter:
     @property
     def stats(self) -> dict:
         return {
-            "files_found": self._files_found,
+            "files_found": self.files_found,
             "files_downloaded": self._files_downloaded,
             "files_skipped": self._files_skipped,
             "files_duplicate": self._files_duplicate,

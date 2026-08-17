@@ -7,8 +7,9 @@ export interface CollectionJobData {
   collectorId: string;
   sourceId: string;
   sourceSlug: string;
-  configuration: unknown;  // CollectorConfiguration JSON
-  runFolderKey: string;    // R2 prefix: 00_raw/web/{slug}/{run_id}
+  collectorType: string;   // 'WEB' | 'TELEGRAM' | ... — routes to the right job class in the scraper worker
+  configuration: unknown;  // CollectorConfiguration JSON (shape depends on collectorType)
+  runFolderKey: string;    // R2 prefix: 00_raw/{web|telegram}/{slug}/{run_id}
 }
 
 export const COLLECTION_QUEUE_NAME = 'collection';

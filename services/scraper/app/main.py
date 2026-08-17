@@ -17,6 +17,7 @@ import redis.asyncio as aioredis
 from app.config.settings import settings
 from app.jobs.collection_job import CollectionJob
 from app.jobs.telegram_collection_job import TelegramCollectionJob
+from app.jobs.media_job import MediaCollectionJob
 
 # Configure structlog
 structlog.configure(
@@ -44,16 +45,22 @@ def handle_signal(sig: int, frame) -> None:  # type: ignore
 async def process_job(job_data: dict, api_client: httpx.AsyncClient) -> None:
     """
     Process a single BullMQ job — dispatched to the collector-type-specific
-    job class. `collectorType` is set by the API when it enqueues the job
-    (services/api/src/services/run.service.ts); defaults to WEB so any job
-    enqueued before this field existed still runs the way it always did.
+    job class. `collectorType` is set by the API when it enqueues the job;
+    automatically routes mediaUrl/localPath configurations to MediaCollectionJob.
     """
-    collector_type = job_data.get("collectorType", "WEB")
+    collector_type = job_data.get("collectorType", "WEB").upper()
+    cfg = job_data.get("configuration", {})
+    has_media_config = "mediaUrl" in cfg or "localPath" in cfg
+
     if collector_type == "TELEGRAM":
         job = TelegramCollectionJob(job_data, api_client)
+    elif collector_type in ("MEDIA", "YOUTUBE", "AUDIO", "VIDEO") or has_media_config:
+        job = MediaCollectionJob(job_data, api_client)
     else:
         job = CollectionJob(job_data, api_client)
     await job.run()
+
+
 
 
 async def consume_jobs(redis_client: aioredis.Redis, api_client: httpx.AsyncClient) -> None:
@@ -86,7 +93,7 @@ async def consume_jobs(redis_client: aioredis.Redis, api_client: httpx.AsyncClie
             job_id = job_id_bytes.decode("utf-8").strip()
 
             # Fetch job data
-            job_data_raw = await redis_client.hget(
+            job_data_raw = await redis_client.hget(  # type: ignore[misc]
                 f"bull:{QUEUE_NAME}:{job_id}", "data"
             )
             if not job_data_raw:
@@ -101,13 +108,13 @@ async def consume_jobs(redis_client: aioredis.Redis, api_client: httpx.AsyncClie
                     try:
                         await process_job(data, api_client)
                         # Mark as completed
-                        await redis_client.lrem(active_key, 1, jid)
-                        await redis_client.lpush(f"bull:{QUEUE_NAME}:completed", jid)
+                        await redis_client.lrem(active_key, 1, jid)  # type: ignore[misc]
+                        await redis_client.lpush(f"bull:{QUEUE_NAME}:completed", jid)  # type: ignore[misc]
                         log.info("job_completed", job_id=jid)
                     except Exception as exc:
                         log.error("job_failed", job_id=jid, error=str(exc))
-                        await redis_client.lrem(active_key, 1, jid)
-                        await redis_client.lpush(f"bull:{QUEUE_NAME}:failed", jid)
+                        await redis_client.lrem(active_key, 1, jid)  # type: ignore[misc]
+                        await redis_client.lpush(f"bull:{QUEUE_NAME}:failed", jid)  # type: ignore[misc]
 
             task = asyncio.create_task(run_job(job_id, job_data))
             tasks.add(task)
@@ -152,6 +159,10 @@ async def main() -> None:
     if settings.api_service_token:
         headers["Authorization"] = f"Bearer {settings.api_service_token}"
 
+    from app.telegram.api_server import start_telegram_api_server
+
+    server = await start_telegram_api_server(host="0.0.0.0", port=8000)
+
     async with httpx.AsyncClient(
         base_url=settings.api_base_url,
         headers=headers,
@@ -160,6 +171,8 @@ async def main() -> None:
         try:
             await consume_jobs(redis_client, api_client)
         finally:
+            server.close()
+            await server.wait_closed()
             await redis_client.aclose()
 
 

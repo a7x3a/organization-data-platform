@@ -9,6 +9,7 @@
 export enum RunStatus {
   PENDING = 'PENDING',
   RUNNING = 'RUNNING',
+  PAUSED = 'PAUSED',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
   CANCEL_REQUESTED = 'CANCEL_REQUESTED',
@@ -27,6 +28,7 @@ export enum FileStatus {
 export enum CollectorType {
   WEB = 'WEB',
   TELEGRAM = 'TELEGRAM',
+  MEDIA = 'MEDIA',
   API = 'API',
   APP = 'APP',
   MANUAL = 'MANUAL',
@@ -90,7 +92,7 @@ export interface Source {
   updatedAt: string;
 }
 
-export interface CollectorConfiguration {
+export interface WebCollectorConfiguration {
   startUrls: string[];
   allowedDomains: string[];
   allowedUrlPatterns: string[];
@@ -108,6 +110,30 @@ export interface CollectorConfiguration {
   robotsEnabled: boolean;
 }
 
+// Telegram collectors never carry api_id/api_hash/session here — those are
+// account-level credentials that live only in the scraper worker's own
+// environment, never per-collector and never sent to this frontend.
+export interface TelegramCollectorConfiguration {
+  channels: string[];
+  messageLimit: number;
+  sinceDate?: string;
+  downloadMedia: boolean;
+  includeMediaTypes?: Array<'photo' | 'video' | 'audio' | 'document'>;
+}
+
+export interface MediaCollectorConfiguration {
+  mediaUrl?: string;
+  startUrls?: string[];
+  localPath?: string;
+  audioChunkSeconds?: number;
+  geminiModel?: string;
+}
+
+export type CollectorConfiguration =
+  | WebCollectorConfiguration
+  | TelegramCollectorConfiguration
+  | MediaCollectorConfiguration;
+
 export interface Collector {
   id: string;
   sourceId: string;
@@ -120,6 +146,28 @@ export interface Collector {
   configuration: CollectorConfiguration;
   createdAt: string;
   updatedAt: string;
+}
+
+// `type` and `configuration` are separate fields with no structural link
+// TypeScript can infer on its own — these narrow `configuration` to the
+// right shape after checking `type`, instead of every consumer needing its
+// own unsafe `as WebCollectorConfiguration` cast.
+export function isWebCollector(
+  collector: Collector
+): collector is Collector & { configuration: WebCollectorConfiguration } {
+  return collector.type === CollectorType.WEB;
+}
+
+export function isTelegramCollector(
+  collector: Collector
+): collector is Collector & { configuration: TelegramCollectorConfiguration } {
+  return collector.type === CollectorType.TELEGRAM;
+}
+
+export function isMediaCollector(
+  collector: Collector
+): collector is Collector & { configuration: MediaCollectorConfiguration } {
+  return collector.type === CollectorType.MEDIA;
 }
 
 export interface CollectionRun {
@@ -142,6 +190,7 @@ export interface CollectionRun {
   collectorVersion: string;
   manifestR2Key: string | null;
   createdAt: string;
+  errors?: CollectionError[];
 }
 
 export enum FileOrigin {

@@ -17,6 +17,7 @@ from app.spiders.http_spider import (
     CrawlConfig,
     CrawlResult,
     DiscoveredFile,
+    get_effective_allowed_domains,
     is_allowed_domain,
     is_downloadable_url,
     is_private_address,
@@ -30,6 +31,8 @@ log = structlog.get_logger(__name__)
 async def crawl_with_browser(
     config: CrawlConfig,
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+    on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
+    on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> CrawlResult:
     """
     Playwright-based crawl for JavaScript-heavy pages.
@@ -42,6 +45,11 @@ async def crawl_with_browser(
     queue: asyncio.Queue = asyncio.Queue()
 
     # A plain httpx client just for robots.txt/sitemap fetches — those are
+    effective_allowed_domains = get_effective_allowed_domains(
+        config.start_urls, config.allowed_domains
+    )
+
+    # A plain httpx client just for robots.txt/sitemap fetches — those are
     # small, fast text requests that don't need a browser tab, even though
     # the actual pages below are rendered with Playwright.
     robots_client = httpx.AsyncClient(
@@ -52,6 +60,9 @@ async def crawl_with_browser(
 
     async def seed(url: str, depth: int = 0) -> None:
         if url in visited:
+            return
+        if not is_allowed_domain(url, effective_allowed_domains):
+            log.debug("domain_disallowed", url=url)
             return
         if await is_private_address(url):
             log.warning("ssrf_blocked", url=url)
@@ -78,7 +89,7 @@ async def crawl_with_browser(
                     loc_url = normalize_url(loc, base_url=sitemap_url)
                     if loc_url is None:
                         continue
-                    if not is_allowed_domain(loc_url, config.allowed_domains):
+                    if not is_allowed_domain(loc_url, effective_allowed_domains):
                         continue
                     await seed(loc_url)
         except httpx.HTTPError as exc:
@@ -89,7 +100,18 @@ async def crawl_with_browser(
     delay = config.request_delay_ms / 1000.0
 
     try:
-        await _run_browser_crawl(config, result, visited, queue, robots, delay, should_cancel)
+        await _run_browser_crawl(
+            config,
+            result,
+            visited,
+            queue,
+            robots,
+            delay,
+            should_cancel,
+            on_page_crawled=on_page_crawled,
+            on_file_found=on_file_found,
+            effective_allowed_domains=effective_allowed_domains,
+        )
     finally:
         await robots_client.aclose()
 
@@ -112,6 +134,9 @@ async def _run_browser_crawl(
     robots: RobotsCache,
     delay: float,
     should_cancel: Optional[Callable[[], Awaitable[bool]]],
+    on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
+    on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    effective_allowed_domains: list[str] = [],
 ) -> None:
     async with async_playwright() as p:
         browser: Browser = await p.chromium.launch(
@@ -126,8 +151,19 @@ async def _run_browser_crawl(
 
         try:
             context = await browser.new_context(
-                user_agent="ODP-Collector/1.0 (+https://github.com/org/data-platform)",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
                 java_script_enabled=True,
+                extra_http_headers={
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                },
+            )
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+                "window.chrome = { runtime: {} };"
             )
 
             semaphore = asyncio.Semaphore(min(config.concurrency, 4))
@@ -148,6 +184,8 @@ async def _run_browser_crawl(
                                 result.files_discovered.append(
                                     DiscoveredFile(url=url, depth=depth)
                                 )
+                                if on_file_found:
+                                    await on_file_found()
                             return
 
                         if not await robots.is_allowed(url, enabled=config.robots_enabled):
@@ -176,6 +214,8 @@ async def _run_browser_crawl(
 
                         result.pages_crawled += 1
                         log.debug("browser_page_crawled", url=url, depth=depth)
+                        if on_page_crawled:
+                            await on_page_crawled()
 
                         # Add any intercepted download URLs
                         for dl_url in downloaded_urls:
@@ -184,6 +224,8 @@ async def _run_browser_crawl(
                                 result.files_discovered.append(
                                     DiscoveredFile(url=dl_url, depth=depth)
                                 )
+                                if on_file_found:
+                                    await on_file_found()
 
                         # Embedded resources (images, video/audio sources,
                         # embedded objects, feed enclosures, inline-script
@@ -198,7 +240,7 @@ async def _run_browser_crawl(
                             normalized = normalize_url(resource_url, base_url=url)
                             if normalized is None or normalized in visited:
                                 continue
-                            if not is_allowed_domain(normalized, config.allowed_domains):
+                            if not is_allowed_domain(normalized, effective_allowed_domains):
                                 continue
                             if await is_private_address(normalized):
                                 continue
@@ -213,16 +255,18 @@ async def _run_browser_crawl(
                                 log.debug(
                                     "file_discovered", url=normalized, via="embedded_resource"
                                 )
+                                if on_file_found:
+                                    await on_file_found()
                             else:
                                 extra_page_candidates.add(normalized)
 
                         if depth >= config.max_depth:
                             return
 
-                        # Extract links from rendered DOM
+                        # Extract links & download targets from rendered DOM
                         links = await page.eval_on_selector_all(
-                            "a[href]",
-                            "els => els.map(el => el.href)",
+                            "a[href], [download], [data-href], [data-download], [data-url]",
+                            "els => els.map(el => el.href || el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-download') || el.getAttribute('data-url')).filter(Boolean)",
                         )
 
                         for raw_link_url in [*links, *extra_page_candidates]:
@@ -233,7 +277,7 @@ async def _run_browser_crawl(
                                 continue
                             if link_url in visited:
                                 continue
-                            if not is_allowed_domain(link_url, config.allowed_domains):
+                            if not is_allowed_domain(link_url, effective_allowed_domains):
                                 continue
                             if await is_private_address(link_url):
                                 continue
