@@ -45,10 +45,12 @@ class FakeMessage:
         voice=None,
         audio=None,
         document=None,
+        file_name=None,
         sender_id=1,
         views=0,
         forwards=0,
         reply_to_msg_id=None,
+        media=None,
     ):
         self.id = id
         self.date = date
@@ -57,11 +59,19 @@ class FakeMessage:
         self.video = video
         self.voice = voice
         self.audio = audio
-        self.document = document
+        if document is True or (document is None and file_name is not None):
+            self.document = FakeDocument(attributes=[FakeAttr(file_name=file_name)])
+        else:
+            self.document = document
         self.sender_id = sender_id
         self.views = views
         self.forwards = forwards
         self.reply_to_msg_id = reply_to_msg_id
+        if media is not None:
+            self.media = media
+        else:
+            self.media = bool(photo or video or voice or audio or self.document)
+
 
 
 class FakeClient:
@@ -163,7 +173,7 @@ def test_message_record_artifact_handles_reply_to_header(temp_dir):
 async def test_scrape_channel_yields_media_and_message_record(temp_dir):
     messages = [FakeMessage(1, text="a photo", photo=True)]
     client = FakeClient(messages)
-    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10)
+    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, save_message_json=True)
 
     results = [r async for r in scrape_channel(client, "chan", cfg)]
 
@@ -180,7 +190,7 @@ async def test_scrape_channel_yields_media_and_message_record(temp_dir):
 async def test_scrape_channel_skips_media_when_download_disabled(temp_dir):
     messages = [FakeMessage(1, text="a photo", photo=True)]
     client = FakeClient(messages)
-    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, download_media=False)
+    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, download_media=False, save_message_json=True)
 
     results = [r async for r in scrape_channel(client, "chan", cfg)]
 
@@ -195,7 +205,7 @@ async def test_scrape_channel_filters_by_include_media_types(temp_dir):
         FakeMessage(2, video=True),
     ]
     client = FakeClient(messages)
-    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, include_media_types=["video"])
+    cfg = TelegramCollectorConfig(channels=["chan"], message_limit=10, include_media_types=["video"], save_message_json=True)
 
     results = [r async for r in scrape_channel(client, "chan", cfg)]
 
@@ -240,7 +250,7 @@ async def test_scrape_channel_stops_at_since_date(temp_dir):
     ]
     client = FakeClient(messages)
     cfg = TelegramCollectorConfig(
-        channels=["chan"], message_limit=10, since_date="2026-01-02T00:00:00+00:00"
+        channels=["chan"], message_limit=10, since_date="2026-01-02T00:00:00+00:00", save_message_json=True
     )
 
     results = [r async for r in scrape_channel(client, "chan", cfg)]

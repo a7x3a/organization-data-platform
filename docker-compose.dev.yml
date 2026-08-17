@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: odp_password
       POSTGRES_DB: odp_db
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U odp_user -d odp_db"]
       interval: 5s
@@ -81,8 +81,22 @@ services:
     networks:
       - odp-dev-network
 
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: odp-web-dev
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - odp-dev-network
+
+
 volumes:
-  postgres_dev_data:
+  postgres_data:
+    name: odp-postgres-data
 
 networks:
   odp-dev-network:
