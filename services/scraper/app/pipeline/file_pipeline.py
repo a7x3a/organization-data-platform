@@ -83,6 +83,10 @@ class FilePipeline:
         up temp files on a failed *download* (before this is ever called).
         """
         try:
+            if await self.is_cancelled():
+                log.info("processing_skipped_run_cancelled", url=result.source_url)
+                return
+
             if await self.is_duplicate(result.sha256):
                 log.info(
                     "duplicate_detected", url=result.source_url, sha256=result.sha256
@@ -170,23 +174,37 @@ class FilePipeline:
             log.error("run_status_update_failed", run_id=self._run_db_id, error=str(e))
 
     async def is_cancelled(self) -> bool:
-        """
-        Check if the run has been marked for cancellation.
+        if getattr(self, "_cancelled", False):
+            return True
 
-        raise_for_status() matters here beyond the obvious: a non-200
-        response (e.g. a 429 from the API's rate limiter) still has a JSON
-        body, just not one with a "status" field — data.get("status") would
-        silently evaluate to None/False with no exception at all, making a
-        transient HTTP failure indistinguishable from "not cancelled" and
-        the run un-cancellable for as long as the failure persisted, with
-        nothing logged anywhere to explain why.
-        """
+        now = asyncio.get_event_loop().time()
+        last_check = getattr(self, "_last_cancelled_check", 0.0)
+        if now - last_check < 0.5:
+            return getattr(self, "_cancelled", False)
+
+        self._last_cancelled_check = now
+
+        try:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(settings.redis_url)
+            val = await r.get(f"cancel_run:{self._run_db_id}")
+            await r.aclose()
+            if val:
+                self._cancelled = True
+                return True
+        except Exception:
+            pass
+
         try:
             r = await self._api.get(f"/api/runs/{self._run_db_id}")
             r.raise_for_status()
             data = r.json()
             status = data.get("status")
-            return status in ("CANCEL_REQUESTED", "CANCELLED")
+            if status in ("CANCEL_REQUESTED", "CANCELLED"):
+                self._cancelled = True
+                return True
+            return False
         except Exception as e:
             log.warning("cancellation_check_failed", run_id=self._run_db_id, error=str(e))
             return False

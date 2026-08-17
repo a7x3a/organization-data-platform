@@ -133,6 +133,11 @@ class MediaCollectionJob:
             log.info("media_chunked", total_chunks=len(chunks))
 
             for chunk in chunks:
+                if await self._pipeline.is_cancelled():
+                    log.info("media_job_cancelled_during_chunking", run_id=self._run_db_id)
+                    await self._finalize(manifest, metadata, status="CANCELLED")
+                    return
+
                 chunk_filename = os.path.basename(chunk.file_path)
                 chunk_sha = _compute_sha256(chunk.file_path)
                 chunk_sz = os.path.getsize(chunk.file_path)
@@ -170,6 +175,10 @@ class MediaCollectionJob:
             )
             transcriptions = []
             for chunk in chunks:
+                if await self._pipeline.is_cancelled():
+                    log.info("media_job_cancelled_during_transcription", run_id=self._run_db_id)
+                    await self._finalize(manifest, metadata, status="CANCELLED")
+                    return
                 transcription = await transcriber.transcribe_chunk(chunk)
                 transcriptions.append(transcription)
 

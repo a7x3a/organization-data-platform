@@ -177,11 +177,11 @@ export async function deleteRun(id: string) {
 export async function cancelRun(id: string, userId: string) {
   const run = await getRunById(id);
 
-  if (run.status === RunStatus.CANCEL_REQUESTED || run.status === RunStatus.CANCELLED) {
+  if (run.status === RunStatus.CANCELLED) {
     return run;
   }
 
-  const cancellableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING];
+  const cancellableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.PAUSED, RunStatus.CANCEL_REQUESTED];
   if (!cancellableStatuses.includes(run.status as RunStatus)) {
     throw new AppError(
       400,
@@ -190,18 +190,30 @@ export async function cancelRun(id: string, userId: string) {
     );
   }
 
-  // Attempt to remove job from BullMQ queue if still pending
+  // Attempt to remove job from BullMQ queue if still pending/active
   try {
-    const job = await collectionQueue.getJob(`collection-${id}`);
+    const job = (await collectionQueue.getJob(`collection-${run.id}`)) || (await collectionQueue.getJob(`collection-${run.runId}`));
     if (job) {
-      await job.remove();
+      const state = await job.getState();
+      if (state === 'active') {
+        await job.moveToFailed(new Error('Cancel requested by user'), '0', true);
+      } else {
+        await job.remove();
+      }
     }
   } catch (err) {
     logger.warn({ runId: id, err }, 'Could not remove BullMQ job during cancel');
   }
 
+  try {
+    await redis.set(`cancel_run:${run.id}`, '1', 'EX', 3600);
+    await redis.set(`cancel_run:${run.runId}`, '1', 'EX', 3600);
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Failed to set cancel flag in Redis');
+  }
+
   const updated = await prisma.collectionRun.update({
-    where: { id },
+    where: { id: run.id },
     data: { status: RunStatus.CANCEL_REQUESTED },
   });
 
@@ -210,11 +222,11 @@ export async function cancelRun(id: string, userId: string) {
       userId,
       action: 'run.cancel_requested',
       entityType: 'CollectionRun',
-      entityId: id,
+      entityId: run.id,
     },
   });
 
-  logger.info({ runId: id, userId }, 'collection_run_cancel_requested');
+  logger.info({ runId: run.id, userId }, 'collection_run_cancel_requested');
 
   return updated;
 }
@@ -223,17 +235,29 @@ export async function forceCancelRun(id: string, userId: string) {
   const run = await getRunById(id);
 
   try {
-    const job = await collectionQueue.getJob(`collection-${id}`);
+    const job = (await collectionQueue.getJob(`collection-${run.id}`)) || (await collectionQueue.getJob(`collection-${run.runId}`));
     if (job) {
-      await job.remove();
+      const state = await job.getState();
+      if (state === 'active') {
+        await job.moveToFailed(new Error('Force stopped by user'), '0', true);
+      } else {
+        await job.remove();
+      }
     }
   } catch (err) {
-    logger.warn({ runId: id, err }, 'Could not remove BullMQ job during force cancel');
+    logger.warn({ runId: id, err }, 'Could not remove/abort BullMQ job during force cancel');
+  }
+
+  try {
+    await redis.set(`cancel_run:${run.id}`, '1', 'EX', 3600);
+    await redis.set(`cancel_run:${run.runId}`, '1', 'EX', 3600);
+  } catch (err) {
+    logger.warn({ runId: id, err }, 'Failed to set cancel flag in Redis');
   }
 
   const completedAt = new Date();
   const updated = await prisma.collectionRun.update({
-    where: { id },
+    where: { id: run.id },
     data: {
       status: RunStatus.CANCELLED,
       completedAt,

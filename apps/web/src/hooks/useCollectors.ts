@@ -5,6 +5,8 @@ export function useCollectors(params?: { page?: number; pageSize?: number; sourc
   return useQuery({
     queryKey: ['collectors', params],
     queryFn: () => collectorsApi.list(params),
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
   });
 }
 
@@ -13,6 +15,8 @@ export function useCollector(id: string) {
     queryKey: ['collectors', id],
     queryFn: () => collectorsApi.get(id),
     enabled: !!id,
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
   });
 }
 

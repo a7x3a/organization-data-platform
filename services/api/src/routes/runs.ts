@@ -75,6 +75,20 @@ router.post(
   }
 );
 
+// POST /api/runs/:id/force-cancel
+router.post(
+  '/:id/force-cancel',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const run = await runService.forceCancelRun(req.params.id, req.user!.sub);
+      res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // POST /api/runs/:id/pause
 router.post(
   '/:id/pause',

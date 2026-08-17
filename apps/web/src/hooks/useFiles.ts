@@ -17,6 +17,8 @@ export function useFiles(
   return useQuery({
     queryKey: ['files', params],
     queryFn: () => filesApi.list(params),
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
     refetchInterval: options?.refetchInterval,
   });
 }
@@ -26,6 +28,8 @@ export function useFile(id: string) {
     queryKey: ['files', id],
     queryFn: () => filesApi.get(id),
     enabled: !!id,
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
   });
 }
 

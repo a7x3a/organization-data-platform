@@ -22,12 +22,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load the repo-root .env regardless of the CWD this is invoked from — the
-# module docstring says "cd services/scraper" first, so the plain relative
-# ".env" pydantic-settings normally reads (app/config/settings.py) would
-# look in services/scraper/.env, which doesn't exist; the real .env lives
-# at the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[3]
+def _find_repo_root() -> Path:
+    curr = Path(__file__).resolve().parent
+    for p in [curr] + list(curr.parents):
+        if (p / "docker-compose.yml").exists() or (p / ".git").exists() or (p / "package.json").exists():
+            return p
+    return Path(__file__).resolve().parents[2]
+
+REPO_ROOT = _find_repo_root()
 load_dotenv(REPO_ROOT / ".env")
 
 
@@ -58,12 +60,25 @@ async def main() -> None:
         session_string = client.session.save()
 
     print(f"\nLogged in as: {me.first_name} (@{me.username or me.id})\n")
-    print("Add this to your .env as TELEGRAM_SESSION_STRING:\n")
+    print("TELEGRAM_SESSION_STRING:\n")
     print(session_string)
-    print(
-        "\nTreat this string like a password — it grants full access to this "
-        "Telegram account without needing your phone or 2FA again."
-    )
+
+    # Save automatically to root .env
+    env_file = REPO_ROOT / ".env"
+    if env_file.exists():
+        lines = env_file.read_text(encoding="utf-8").splitlines(keepends=True)
+        updated = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith("TELEGRAM_SESSION_STRING="):
+                new_lines.append(f"TELEGRAM_SESSION_STRING={session_string}\n")
+                updated = True
+            else:
+                new_lines.append(line)
+        if not updated:
+            new_lines.append(f"TELEGRAM_SESSION_STRING={session_string}\n")
+        env_file.write_text("".join(new_lines), encoding="utf-8")
+        print(f"\nSaved TELEGRAM_SESSION_STRING to {env_file}")
 
 
 if __name__ == "__main__":

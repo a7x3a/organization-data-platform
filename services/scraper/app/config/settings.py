@@ -2,9 +2,19 @@
 Scraper Worker Configuration
 All settings come from environment variables (never hardcoded).
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, model_validator
 from typing import Optional
+
+def _find_repo_root() -> Path:
+    curr = Path(__file__).resolve().parent
+    for p in [curr] + list(curr.parents):
+        if (p / "docker-compose.yml").exists() or (p / ".git").exists() or (p / "package.json").exists():
+            return p
+    return Path(__file__).resolve().parents[4]
+
+REPO_ROOT = _find_repo_root()
 
 
 class Settings(BaseSettings):
@@ -150,7 +160,11 @@ class Settings(BaseSettings):
         return self
 
     class Config:
-        env_file = ".env"
+        env_file = (
+            str(REPO_ROOT / ".env"),
+            str(Path(__file__).resolve().parents[2] / ".env"),
+            ".env",
+        )
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"

@@ -20,14 +20,19 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import AsyncIterator, Awaitable, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 import structlog
 from telethon import TelegramClient
 from telethon.tl.types import Message
 
 from app.config.settings import settings
-from app.downloader.downloader import DownloadResult, detect_mime, sanitize_filename
+from app.downloader.downloader import (
+    DownloadCancelled,
+    DownloadResult,
+    detect_mime,
+    sanitize_filename,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -46,23 +51,24 @@ def _message_url(channel: str, message_id: int) -> str:
     return f"https://t.me/{channel}/{message_id}"
 
 
-def _media_kind(message: Message) -> Optional[str]:
-    if message.photo:
+def _media_kind(message: Any) -> Optional[str]:
+    if getattr(message, "photo", None):
         return "photo"
-    if message.video:
+    if getattr(message, "video", None):
         return "video"
-    if message.voice or message.audio:
+    if getattr(message, "voice", None) or getattr(message, "audio", None):
         return "audio"
-    if message.document:
+    if getattr(message, "document", None):
         return "document"
     return None
 
 
-def _original_media_filename(message: Message) -> Optional[str]:
-    document = message.document
+def _original_media_filename(message: Any) -> Optional[str]:
+    document = getattr(message, "document", None)
     if not document:
         return None
-    for attr in document.attributes:
+    attributes = getattr(document, "attributes", None) or []
+    for attr in attributes:
         name = getattr(attr, "file_name", None)
         if name:
             return name
@@ -78,17 +84,47 @@ def _sha256_file(path: str) -> str:
 
 
 async def _download_media_artifact(
-    client: TelegramClient, message: Message, kind: str, base_url: str
+    client: Any,
+    message: Any,
+    kind: str,
+    base_url: str,
+    *,
+    should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
 ) -> Optional[DownloadResult]:
+    if should_cancel is not None and await should_cancel():
+        return None
+
     os.makedirs(settings.temp_dir, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=settings.temp_dir)
     os.close(fd)
 
+    async def _progress(received: int, total: int) -> None:
+        if should_cancel is not None and await should_cancel():
+            raise DownloadCancelled("Telegram download cancelled mid-stream")
+
     try:
-        downloaded = await client.download_media(message, file=temp_path)
+        downloaded = await client.download_media(
+            message, file=temp_path, progress_callback=_progress
+        )
+    except DownloadCancelled:
+        log.info("telegram_media_download_cancelled", url=base_url)
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+        return None
     except Exception as exc:
         log.warning("telegram_media_download_failed", url=base_url, error=str(exc))
         downloaded = None
+
+    if should_cancel is not None and await should_cancel():
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+        return None
 
     if not downloaded or not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
         try:
@@ -118,16 +154,22 @@ async def _download_media_artifact(
     )
 
 
-def _message_record_artifact(message: Message, channel: str, kind: Optional[str]) -> DownloadResult:
+def _message_record_artifact(message: Any, channel: str, kind: Optional[str]) -> DownloadResult:
+    reply_to_msg_id = getattr(message, "reply_to_msg_id", None)
+    if reply_to_msg_id is None:
+        reply_to = getattr(message, "reply_to", None)
+        if reply_to is not None:
+            reply_to_msg_id = getattr(reply_to, "reply_to_msg_id", None)
+
     record = {
         "message_id": message.id,
         "channel": channel,
-        "date": message.date.isoformat() if message.date else None,
-        "text": message.message or "",
-        "sender_id": message.sender_id,
-        "views": message.views,
-        "forwards": message.forwards,
-        "reply_to_msg_id": message.reply_to_msg_id,
+        "date": message.date.isoformat() if getattr(message, "date", None) else None,
+        "text": getattr(message, "message", "") or "",
+        "sender_id": getattr(message, "sender_id", None),
+        "views": getattr(message, "views", None),
+        "forwards": getattr(message, "forwards", None),
+        "reply_to_msg_id": reply_to_msg_id,
         "has_media": kind is not None,
         "media_kind": kind,
     }
@@ -158,7 +200,7 @@ def _message_record_artifact(message: Message, channel: str, kind: Optional[str]
 
 
 async def scrape_channel(
-    client: TelegramClient,
+    client: Any,
     channel: str,
     cfg: TelegramCollectorConfig,
     *,
@@ -179,7 +221,8 @@ async def scrape_channel(
     async for message in client.iter_messages(channel, limit=cfg.message_limit):
         if should_cancel is not None and await should_cancel():
             return
-        if since and message.date and message.date < since:
+        msg_date = getattr(message, "date", None)
+        if since and msg_date and msg_date < since:
             break
 
         kind = _media_kind(message)
@@ -190,8 +233,15 @@ async def scrape_channel(
             and kind
             and (not cfg.include_media_types or kind in cfg.include_media_types)
         ):
-            media_result = await _download_media_artifact(client, message, kind, base_url)
+            media_result = await _download_media_artifact(
+                client, message, kind, base_url, should_cancel=should_cancel
+            )
             if media_result:
                 yield media_result
+            if should_cancel is not None and await should_cancel():
+                return
+
+        if should_cancel is not None and await should_cancel():
+            return
 
         yield _message_record_artifact(message, channel, kind)

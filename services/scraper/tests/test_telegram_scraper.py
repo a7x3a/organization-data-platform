@@ -81,10 +81,11 @@ class FakeClient:
 
         return gen()
 
-    async def download_media(self, message, file=None):
+    async def download_media(self, message, file=None, progress_callback=None):
         self.download_calls += 1
-        with open(file, "wb") as f:
-            f.write(self._media_bytes)
+        if file is not None:
+            with open(file, "wb") as f:
+                f.write(self._media_bytes)
         return file
 
 
@@ -108,6 +109,15 @@ def test_original_media_filename_none_when_no_document():
     assert _original_media_filename(FakeMessage(1)) is None
 
 
+def test_media_kind_and_filename_with_raw_message_missing_attributes():
+    class RawMessageWithoutHelperAttributes:
+        id = 1
+
+    msg = RawMessageWithoutHelperAttributes()
+    assert _media_kind(msg) is None
+    assert _original_media_filename(msg) is None
+
+
 # ─── _message_record_artifact ───────────────────────────────────
 
 def test_message_record_artifact_shape_and_distinct_url(temp_dir):
@@ -125,6 +135,26 @@ def test_message_record_artifact_shape_and_distinct_url(temp_dir):
     assert record["text"] == "hello world"
     assert record["views"] == 100
     assert record["has_media"] is False
+    os.unlink(result.temp_path)
+
+
+def test_message_record_artifact_handles_reply_to_header(temp_dir):
+    class ReplyHeader:
+        reply_to_msg_id = 99
+
+    class RawMessageWithoutAttribute:
+        id = 100
+        date = None
+        message = "reply test"
+        sender_id = 1
+        reply_to = ReplyHeader()
+
+    msg = RawMessageWithoutAttribute()
+    result = _message_record_artifact(msg, "mychannel", kind=None)
+
+    with open(result.temp_path, encoding="utf-8") as f:
+        record = json.load(f)
+    assert record["reply_to_msg_id"] == 99
     os.unlink(result.temp_path)
 
 
@@ -194,7 +224,10 @@ async def test_scrape_channel_stops_at_since_date(temp_dir):
 
     results = [r async for r in scrape_channel(client, "chan", cfg)]
 
-    message_ids = {json.load(open(r.temp_path, encoding="utf-8"))["message_id"] for r in results}
+    message_ids = set()
+    for r in results:
+        with open(r.temp_path, encoding="utf-8") as f:
+            message_ids.add(json.load(f)["message_id"])
     assert message_ids == {3, 2}  # message 1 predates since_date
     for r in results:
         os.unlink(r.temp_path)

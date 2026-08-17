@@ -21,11 +21,10 @@ log = structlog.get_logger(__name__)
 
 CHUNK_SIZE = 64 * 1024  # 64 KB
 
-# How many chunks between cancellation checks — each check is an API round
-# trip, so this trades responsiveness for load. 32 chunks = ~2MB between
-# checks, which keeps a multi-minute download of a large file cancellable
-# without polling the API on every 64KB chunk.
-CANCEL_CHECK_EVERY_N_CHUNKS = 32
+# How many chunks between cancellation checks. With FilePipeline's 0.5s cached
+# is_cancelled implementation, checking on every chunk (1) is 0ms overhead
+# while ensuring instant response to cancellation requests.
+CANCEL_CHECK_EVERY_N_CHUNKS = 1
 
 
 @dataclass

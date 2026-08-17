@@ -5,6 +5,8 @@ export function useDashboardStats() {
   return useQuery({
     queryKey: ['dashboard', 'stats'],
     queryFn: dashboardApi.getStats,
+    placeholderData: (previousData) => previousData,
+    staleTime: 3000,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (
@@ -26,6 +28,8 @@ export function useSources(params?: { page?: number; pageSize?: number }) {
   return useQuery({
     queryKey: ['sources', params],
     queryFn: () => sourcesApi.list(params),
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
   });
 }
 
@@ -34,6 +38,8 @@ export function useSource(id: string) {
     queryKey: ['sources', id],
     queryFn: () => sourcesApi.get(id),
     enabled: !!id,
+    placeholderData: (previousData) => previousData,
+    staleTime: 5000,
   });
 }
 

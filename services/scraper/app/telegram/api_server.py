@@ -19,46 +19,67 @@ from app.config.settings import settings
 
 log = structlog.get_logger(__name__)
 
-def get_env_file_path() -> Path:
+def get_target_env_files() -> list[Path]:
+    """Find all relevant .env file locations (container mount, repo root, CWD)."""
+    paths: list[Path] = []
+    
+    # 1. Docker container mount
     app_env = Path("/app/.env")
     if app_env.exists():
-        return app_env
+        paths.append(app_env)
+
+    # 2. Repo root & parent directory search
+    curr = Path(__file__).resolve().parent
+    for p in [curr] + list(curr.parents):
+        if (p / "docker-compose.yml").exists() or (p / ".git").exists() or (p / "package.json").exists():
+            root_env = p / ".env"
+            if root_env not in paths:
+                paths.append(root_env)
+
+        cand = p / ".env"
+        if cand.exists() and cand not in paths:
+            paths.append(cand)
+
+    # 3. CWD .env
     cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        return cwd_env
-    return Path(__file__).resolve().parents[2] / ".env"
+    if cwd_env.exists() and cwd_env not in paths:
+        paths.append(cwd_env)
+
+    return paths
 
 
 def update_env_file(key_values: dict[str, str]) -> None:
-    """Persist updated Telegram credentials to .env file if writable."""
-    try:
-        env_path = get_env_file_path()
-        lines = []
-        if env_path.exists():
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
+    """Persist updated Telegram credentials to all active .env files."""
+    env_paths = get_target_env_files()
+    for env_path in env_paths:
+        try:
+            lines = []
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
 
-        updated_keys = set()
-        new_lines = []
+            updated_keys = set()
+            new_lines = []
 
-        for line in lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key in key_values:
-                    new_lines.append(f"{key}={key_values[key]}\n")
-                    updated_keys.add(key)
-                    continue
-            new_lines.append(line)
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in key_values:
+                        new_lines.append(f"{key}={key_values[key]}\n")
+                        updated_keys.add(key)
+                        continue
+                new_lines.append(line)
 
-        for k, v in key_values.items():
-            if k not in updated_keys:
-                new_lines.append(f"{k}={v}\n")
+            for k, v in key_values.items():
+                if k not in updated_keys:
+                    new_lines.append(f"{k}={v}\n")
 
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-    except Exception as e:
-        log.warning("env_file_write_failed", error=str(e))
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            log.info("env_file_updated", path=str(env_path))
+        except Exception as e:
+            log.warning("env_file_write_failed", path=str(env_path), error=str(e))
 
 
 async def check_telegram_status() -> dict:

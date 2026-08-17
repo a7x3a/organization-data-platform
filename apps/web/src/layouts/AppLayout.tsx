@@ -24,7 +24,7 @@ import { QuickCollectModal } from '../components/QuickCollectModal';
 export const AppLayout: React.FC = () => {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
-  const { data: health } = useHealth();
+  const { data: health, isLoading: isHealthLoading } = useHealth();
   const navigate = useNavigate();
   const [isQuickCollectOpen, setIsQuickCollectOpen] = React.useState(false);
 
@@ -32,6 +32,23 @@ export const AppLayout: React.FC = () => {
   const isRedisConnected = health?.checks?.redis ?? false;
   const isScraperConnected = health?.checks?.scraper ?? false;
   const isR2Connected = health?.checks?.r2 ?? false;
+
+  const renderStatusBadge = (label: string, isConnected: boolean, connectedText = 'Connected', disconnectedText = 'Disconnected') => {
+    if (!health && isHealthLoading) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          {label}: Checking...
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
+        <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+        {label}: {isConnected ? connectedText : disconnectedText}
+      </span>
+    );
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -138,28 +155,16 @@ export const AppLayout: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="hidden lg:flex items-center gap-2 text-[11px] font-mono text-[var(--color-text-muted)] border-r border-[var(--color-border)] pr-4 mr-1">
               {/* PostgreSQL */}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
-                <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                PostgreSQL: {isDbConnected ? 'Connected' : 'Disconnected'}
-              </span>
+              {renderStatusBadge('PostgreSQL', isDbConnected)}
 
               {/* Redis Queue */}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
-                <span className={`w-2 h-2 rounded-full ${isRedisConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                Redis Queue: {isRedisConnected ? 'Active' : 'Disconnected'}
-              </span>
+              {renderStatusBadge('Redis Queue', isRedisConnected, 'Active', 'Disconnected')}
 
               {/* Scraper Worker */}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
-                <span className={`w-2 h-2 rounded-full ${isScraperConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                Scraper Worker: {isScraperConnected ? 'Connected' : 'Disconnected'}
-              </span>
+              {renderStatusBadge('Scraper Worker', isScraperConnected)}
 
               {/* Cloud R2 Storage */}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
-                <span className={`w-2 h-2 rounded-full ${isR2Connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                Cloud R2: {isR2Connected ? 'Connected' : 'Not Connected'}
-              </span>
+              {renderStatusBadge('Cloud R2', isR2Connected, 'Connected', 'Not Connected')}
             </div>
 
             <Button

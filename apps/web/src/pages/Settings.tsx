@@ -10,6 +10,7 @@ export const Settings: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
   const [showTelegramSetup, setShowTelegramSetup] = useState(false);
+  const [loadingTelegramStatus, setLoadingTelegramStatus] = useState(true);
   const [telegramStatus, setTelegramStatus] = useState<{
     is_configured: boolean;
     is_authorized: boolean;
@@ -18,10 +19,12 @@ export const Settings: React.FC = () => {
   } | null>(null);
 
   const fetchTelegramStatus = () => {
+    setLoadingTelegramStatus(true);
     axios
       .get('/api/telegram/status')
       .then((r) => setTelegramStatus(r.data))
-      .catch(() => setTelegramStatus({ is_configured: false, is_authorized: false }));
+      .catch(() => setTelegramStatus({ is_configured: false, is_authorized: false }))
+      .finally(() => setLoadingTelegramStatus(false));
   };
 
   useEffect(() => {
@@ -82,7 +85,12 @@ export const Settings: React.FC = () => {
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-[var(--color-text-muted)]">Connection Status:</span>
               <span className="flex items-center gap-1.5 font-semibold">
-                {telegramStatus?.is_authorized ? (
+                {loadingTelegramStatus ? (
+                  <span className="text-amber-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    Checking...
+                  </span>
+                ) : telegramStatus?.is_authorized ? (
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                     <span className="text-emerald-400">Authorized</span>
@@ -95,17 +103,25 @@ export const Settings: React.FC = () => {
                 )}
               </span>
             </div>
+
+            <div className="flex items-center justify-between text-xs font-mono border-t border-[var(--color-border-subtle)] pt-2.5">
+              <span className="text-[var(--color-text-muted)]">Linked Platform Account:</span>
+              <span className="text-[var(--color-brand-400)] font-semibold">
+                {user?.username || 'Current Session'}
+              </span>
+            </div>
+
             {telegramStatus?.user && (
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-[var(--color-text-muted)]">Account User:</span>
+                <span className="text-[var(--color-text-muted)]">Telegram Session User:</span>
                 <span className="text-[var(--color-text-primary)]">
                   {telegramStatus.user.first_name}{' '}
                   {telegramStatus.user.username ? `(@${telegramStatus.user.username})` : ''}
                 </span>
               </div>
             )}
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Interactive Telethon auth allows Telegram channel collection runs to download documents and media directly.
+            <p className="text-xs text-[var(--color-text-muted)] pt-1">
+              Interactive Telethon auth links Telegram channel collection runs directly to your active platform session ({user?.username}).
             </p>
           </div>
         </div>

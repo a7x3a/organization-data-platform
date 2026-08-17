@@ -11,6 +11,7 @@ export function useRuns(params?: {
   return useQuery({
     queryKey: ['runs', params],
     queryFn: () => runsApi.list(params),
+    placeholderData: (previousData) => previousData,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (
@@ -35,6 +36,7 @@ export function useRun(id: string) {
     queryKey: ['runs', id],
     queryFn: () => runsApi.get(id),
     enabled: !!id,
+    placeholderData: (previousData) => previousData,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (

@@ -7,5 +7,6 @@ export function useHealth() {
     queryFn: fetchSystemHealth,
     refetchInterval: 10000, // Poll every 10s
     staleTime: 5000,
+    placeholderData: (previousData) => previousData,
   });
 }
