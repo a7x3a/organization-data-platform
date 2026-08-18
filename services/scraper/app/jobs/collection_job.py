@@ -35,6 +35,7 @@ from app.downloader.downloader import (
 from app.pipeline.file_pipeline import FilePipeline
 from app.spiders.http_spider import crawl, CrawlConfig
 from app.spiders.browser_spider import crawl_with_browser
+from app.spiders.scrapling_spider import crawl_with_scrapling
 from app.storage import storage
 from app.storage.metadata_writer import MetadataWriter
 from app.storage.manifest_writer import ManifestWriter
@@ -102,6 +103,9 @@ class CollectionJob:
         metadata = MetadataWriter(self._run_folder_key, self._source_slug)
 
         try:
+            use_scrapling = self._cfg.get("useScrapling", False) or self._cfg.get("spiderEngine") in ("scrapling", "scrapling_stealth")
+            stealth_mode = self._cfg.get("stealthMode", False) or self._cfg.get("spiderEngine") == "scrapling_stealth"
+
             # 1. Discover files
             crawl_config = CrawlConfig(
                 start_urls=self._cfg.get("startUrls", []),
@@ -118,6 +122,8 @@ class CollectionJob:
                 request_timeout_seconds=self._cfg.get("requestTimeoutSeconds", 30),
                 max_retries=self._cfg.get("maxRetries", 3),
                 robots_enabled=self._cfg.get("robotsEnabled", True),
+                use_scrapling=use_scrapling,
+                stealth_mode=stealth_mode,
             )
 
             async def on_page_crawled() -> None:
@@ -129,7 +135,15 @@ class CollectionJob:
                 await self._pipeline.report_progress(manifest)
 
             use_browser = self._cfg.get("useBrowser", False)
-            if use_browser:
+            if use_scrapling:
+                log.info("using_scrapling_spider", run_id=self._run_db_id, stealth=stealth_mode)
+                crawl_result = await crawl_with_scrapling(
+                    crawl_config,
+                    should_cancel=self._pipeline.is_cancelled,
+                    on_page_crawled=on_page_crawled,
+                    on_file_found=on_file_found,
+                )
+            elif use_browser:
                 log.info("using_playwright_browser", run_id=self._run_db_id)
                 crawl_result = await crawl_with_browser(
                     crawl_config,
@@ -287,14 +301,23 @@ class CollectionJob:
         """Upload metadata.jsonl and manifest.json, then update run status."""
         completed_at = datetime.now(timezone.utc)
 
-        # Upload metadata.jsonl
+        # Upload main root metadata.jsonl
         meta_path = metadata.finalize()
         try:
             storage.upload_file(meta_path, metadata.r2_key, "application/jsonl")
         except Exception as e:
             log.error("metadata_upload_failed", error=str(e))
-        finally:
-            metadata.cleanup()
+
+        # Upload subfolder per-category metadata.jsonl files (e.g. pdf/native/decoded/metadata.jsonl)
+        cat_files = metadata.finalize_categories()
+        for cat_dir, (cat_path, cat_r2_key) in cat_files.items():
+            try:
+                storage.upload_file(cat_path, cat_r2_key, "application/jsonl")
+                log.info("category_metadata_uploaded", category=cat_dir, r2_key=cat_r2_key)
+            except Exception as e:
+                log.error("category_metadata_upload_failed", category=cat_dir, error=str(e))
+
+        metadata.cleanup()
 
         # Upload manifest.json
         manifest_bytes = manifest.to_json(status=status, completed_at=completed_at)

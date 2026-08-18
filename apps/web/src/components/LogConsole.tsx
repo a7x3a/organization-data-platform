@@ -138,19 +138,6 @@ export const LogConsole: React.FC<LogConsoleProps> = ({ run, className = '' }) =
         </div>
 
         <div className="flex items-center gap-2.5">
-          {/* Status Indicator Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-zinc-900/90 border border-zinc-800 text-[10px] shrink-0">
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
-              }`}
-            />
-            <span className={isRunning ? 'text-emerald-400 font-medium' : 'text-zinc-400'}>
-              {isRunning ? 'LIVE' : 'ENDED'}
-            </span>
-          </div>
-
-          <div className="h-3.5 w-px bg-zinc-800 shrink-0" />
 
           {/* Auto-scroll toggle button with FIXED height & width */}
           <button

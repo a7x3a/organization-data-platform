@@ -41,6 +41,8 @@ class CrawlConfig:
     request_timeout_seconds: int = 30
     max_retries: int = 3
     robots_enabled: bool = True
+    use_scrapling: bool = False
+    stealth_mode: bool = False
 
 
 @dataclass
