@@ -49,17 +49,23 @@ async def main() -> None:
     # only place in the codebase allowed to use an interactive session.
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+    from telethon.tl.types import User
 
-    client = TelegramClient(StringSession(), int(api_id), api_hash)
+    session = StringSession()
+    client = TelegramClient(session, int(api_id), api_hash)
 
+    # `async with client` automatically calls `await client.start()`, which prompts
+    # for phone number, code, and 2FA password interactively via stdin if needed.
     async with client:
-        # start() prompts for phone number, the code Telegram sends, and a
-        # 2FA password if one is set — interactively, via stdin.
-        await client.start()
         me = await client.get_me()
-        session_string = client.session.save()
+        session_obj = getattr(client, "session", None) or session
+        save_fn = getattr(session_obj, "save", None)
+        session_string = save_fn() if callable(save_fn) else session.save()
 
-    print(f"\nLogged in as: {me.first_name} (@{me.username or me.id})\n")
+    first_name = getattr(me, "first_name", "")
+    username = getattr(me, "username", None)
+    user_id = getattr(me, "id", "")
+    print(f"\nLogged in as: {first_name} (@{username or user_id})\n")
     print("TELEGRAM_SESSION_STRING:\n")
     print(session_string)
 
