@@ -95,14 +95,17 @@ export const Sources: React.FC = () => {
     {
       header: t('sources.fields.name'),
       accessor: (s) => (
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center shrink-0 border border-[var(--color-brand-500)]/20">
-            <Globe className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="font-semibold text-xs text-[var(--color-text-primary)]">{s.name}</div>
-            <div className="text-[10px] text-[var(--color-text-muted)] font-mono">{s.slug}</div>
-          </div>
+        <div>
+          <a
+            href={s.baseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-xs text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline inline-flex items-center gap-1"
+          >
+            {s.name}
+            <ExternalLink className="w-3 h-3 text-[var(--color-text-muted)]" />
+          </a>
+          <div className="text-[10px] text-[var(--color-text-muted)] font-mono">{s.slug}</div>
         </div>
       ),
     },
@@ -131,24 +134,12 @@ export const Sources: React.FC = () => {
     {
       header: t('sources.fields.robotsPolicy'),
       accessor: (s) => (
-        <span className="inline-flex items-center gap-1 text-xs font-mono text-[var(--color-text-secondary)]">
+        <span
+          title="Respect robots.txt: Crawls honor website rules and disallow paths defined by the target site. Missing or 404 robots.txt files automatically permit full access."
+          className="inline-flex items-center gap-1 text-xs font-mono text-[var(--color-text-secondary)] cursor-help"
+        >
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           {t(`sources.robotsPolicy.${s.robotsPolicy}`)}
-        </span>
-      ),
-    },
-    {
-      header: t('sources.fields.enabled'),
-      accessor: (s) => (
-        <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-            s.enabled
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-              : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
-          }`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${s.enabled ? 'bg-emerald-400' : 'bg-zinc-400'}`} />
-          {s.enabled ? t('common.enabled') : t('common.disabled')}
         </span>
       ),
     },
@@ -289,10 +280,13 @@ export const Sources: React.FC = () => {
                     value={robotsPolicy}
                     onValueChange={(v) => setRobotsPolicy(v as 'RESPECT' | 'IGNORE')}
                     options={[
-                      { value: 'RESPECT', label: 'Respect robots.txt' },
+                      { value: 'RESPECT', label: 'Respect robots.txt (Recommended)' },
                       { value: 'IGNORE', label: 'Ignore robots.txt' },
                     ]}
                   />
+                  <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                    Respect robots.txt: Crawling honors website rules. If robots.txt is missing or 404, full access is granted by default.
+                  </p>
                 </div>
 
                 <div>

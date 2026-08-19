@@ -392,41 +392,20 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
                 />
               </div>
 
-              <div
-                onClick={() => setUseBrowser(!useBrowser)}
-                className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
-                  useBrowser
-                    ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
-                    : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                    useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]'
-                  }`}>
-                    <Globe className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-semibold">
-                      <span>Force Playwright Browser</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
-                        useBrowser ? 'bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)]'
-                      }`}>
-                        JS SPAs
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
-                      Headless Chromium browser rendering for dynamic JavaScript apps
-                    </p>
-                  </div>
+              <div className="flex items-center gap-3 p-3.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)]">
+                <div className="w-8 h-8 rounded-lg bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center shrink-0">
+                  <Monitor className="w-4 h-4" />
                 </div>
-
-                <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                  useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
-                }`}>
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    useBrowser ? 'translate-x-4' : 'translate-x-0'
-                  }`} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                    <span>Autonomous Engine Selection</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
+                      Auto
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                    HTTP, Playwright Chromium & Scrapling Stealth automatically activate when JS rendering or Cloudflare protection is detected.
+                  </p>
                 </div>
               </div>
             </div>

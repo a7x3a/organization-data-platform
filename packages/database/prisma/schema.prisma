@@ -96,6 +96,7 @@ model User {
   roles         UserRole[]
   auditLogs     AuditLog[]
   uploadedFiles CollectedFile[]
+  createdRuns   CollectionRun[] @relation("UserCollectionRuns")
 
   @@index([username])
   @@map("users")
@@ -168,8 +169,10 @@ model CollectionRun {
   errorCount       Int       @default(0)
   collectorVersion String    @default("1.0.0")
   manifestR2Key    String?
+  createdById      String?
   createdAt        DateTime  @default(now())
 
+  createdBy      User?             @relation("UserCollectionRuns", fields: [createdById], references: [id], onDelete: SetNull)
   collector      Collector         @relation(fields: [collectorId], references: [id])
   source         Source            @relation(fields: [sourceId], references: [id])
   collectedFiles CollectedFile[]
@@ -177,6 +180,7 @@ model CollectionRun {
 
   @@index([collectorId])
   @@index([sourceId])
+  @@index([createdById])
   @@index([status])
   @@index([startedAt])
   @@index([createdAt])

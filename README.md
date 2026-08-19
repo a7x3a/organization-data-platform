@@ -4,104 +4,46 @@ A unified, automated platform for harvesting, processing, categorizing, transcri
 
 ---
 
-## 🎯 What Can It Be Used For?
+## 🎯 Key Capabilities
 
-- **Document & Ebook Collection**: Crawl websites, digital libraries, and CMS platforms (WordPress, Wix, Vercel, static HTML) to automatically extract PDFs, EPUBs, DOCX files, and office documents.
-- **Adaptive Scrapling & Stealth Engine**: Integrates **Scrapling** (`scrapling[fetchers]`) with `AsyncFetcher`, `StealthyFetcher`, and `Selector` adaptors for self-healing, anti-bot protected, high-speed website crawling.
-- **Wix & SPA Deep Discovery**: Extract documents and files embedded inside JavaScript single-page applications, Wix sites (`usrfiles.com`), Google Drive sharing links (`drive.google.com`), and cloud storage.
-- **Media & Voice Dataset Creation**: Download YouTube videos, podcasts, and audio files via `yt-dlp`, chunk audio automatically, and transcribe them via Google Gemini API (or offline models) into **Speech-to-Text (STT)** and **Text-to-Speech (TTS)** datasets.
-- **Telegram Archive Scraping**: Crawl and archive files, media, and message data directly from public and private Telegram channels via Telethon.
-- **Automated Quality Inspection & PDF Classification**: Automatically inspect fetched PDFs, measure text yield, and split native digital text PDFs from scanned image PDFs (for OCR).
-- **Kurdish & Arabic Text Processing**: Extract and preserve non-ASCII script filenames (Kurdish, Arabic, Persian) cleanly, with full metadata enrichment and quality scoring.
+- **Multi-Source Scraping**: Harvest content from standard websites, JavaScript SPAs, Wix sites (`usrfiles.com`), Cloudflare-protected sites, and Telegram channels.
+- **Adaptive Stealth Engine**: Powered by **Scrapling** and **Playwright Chromium** with automatic Cloudflare Turnstile challenge solving.
+- **Smart File Filtering & Categorization**: Automatically filters non-content assets, checks file types, inspects text density in PDFs, detects languages, and categorizes content.
+- **Media & Audio Datasets**: Download YouTube videos and podcasts via `yt-dlp`, chunk audio, and transcribe them into Speech-to-Text (STT) and Text-to-Speech (TTS) datasets.
+- **Deduplication & Immutable Storage**: Deduplicates files by SHA-256 hash and writes structured `metadata.jsonl` and `manifest.json` reports to Cloudflare R2 or local storage.
 
 ---
 
-## ⚙️ How It Works
+## 📥 How Files Are Downloaded, Filtered & Categorized
+
+The platform uses a 4-stage pipeline to ensure only clean, high-quality, non-duplicate files are collected and organized:
 
 ```
-                        React + Vite Dashboard (apps/web)
-                                       │
-                                       ▼
-                        Express REST API (services/api)
-                                       │
-                        ┌──────────────┴──────────────┐
-                        ▼                             ▼
-                PostgreSQL (16)                   Redis (7)
-                (Metadata & State)             (BullMQ Queue)
-                                                      │
-                                                      ▼
-                                            Python Scraper Worker
-                                             (services/scraper)
-                                                      │
-                ┌─────────────────────────────────────┼─────────────────────────────────────┐
-                ▼                                     ▼                                     ▼
-       Web Crawler Engine                    Telegram Channel Scraper               Media & Voice Pipeline
-  (httpx + Scrapling + Playwright)                   (Telethon)                     (yt-dlp + Gemini STT/TTS)
-                │                                     │                                     │
-                └─────────────────────────────────────┼─────────────────────────────────────┘
-                                                      │
-                                                      ▼
-                                              Immutable Storage
-                                       (Cloudflare R2 / Local Storage)
+┌─────────────────┐     ┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
+│  1. Discovery   │ ──► │  2. Filtering &     │ ──► │ 3. Download &        │ ──► │ 4. Categorize &  │
+│  & Domain Check │     │     FileType Rules  │     │    Deduplication     │     │    Store Metadata│
+└─────────────────┘     └─────────────────────┘     └──────────────────────┘     └──────────────────┘
 ```
 
-1. **Job Scheduling & Dispatch**: Runs are launched via the Web Dashboard or API. Jobs are enqueued into Redis BullMQ.
-2. **Resource Discovery**: The Python Scraper Worker crawls pages (using high-speed HTTP streaming or stealth Playwright Chromium for JS sites), parsing links, Wix state, JSON-LD schemas, and embedded media assets.
-3. **Deduplication & Streaming Download**: Stream-downloads files, computes SHA-256 hashes incrementally, and skips duplicates against past runs.
-4. **Metadata & Quality Scoring**: Inspects downloaded files (PDF yield classification, language detection, Kurdish categorization, quality scoring).
-5. **Storage & Reporting**: Saves structured `metadata.jsonl` and `manifest.json` into organized raw storage (`00_raw/web/`, `00_raw/telegram/`, `00_raw/media/`) on Cloudflare R2 or local disk.
+### 1. Discovery & Domain Safety
+- **Domain Scoping**: Confines crawling to the target source domain so the crawler never escapes to external websites.
+- **Trusted Asset CDNs**: Automatically permits files hosted on trusted document/media CDNs (`cdn.gov.krd`, `usrfiles.com`, `wixstatic.com`, `drive.google.com`, `archive.org`).
+- **SSRF Protection**: Validates all URLs against private IP ranges (`127.0.0.1`, `10.0.0.0/8`, metadata APIs) for security.
 
----
+### 2. File Filtering & FileType Rules
+- **Allowed Extensions**: Identifies document formats (`.pdf`, `.epub`, `.docx`, `.xlsx`, `.zip`), audio/video (`.mp3`, `.wav`, `.mp4`), and datasets (`.csv`, `.parquet`, `.jsonl`).
+- **Asset Noise Removal**: Automatically skips page furniture and theme files (`.css`, `.js`, `.ico`, `.woff`, `.svg`).
+- **Regex Rules**: Enforces custom URL inclusion and exclusion patterns defined in the collector configuration.
 
-## 🚀 How To Use It
+### 3. Streaming Download & Deduplication
+- **Memory-Efficient Streaming**: Downloads files in chunked streams to keep RAM usage low even for large files.
+- **SHA-256 Deduplication**: Calculates file hashes on-the-fly and skips duplicate downloads instantly against prior runs.
 
-### Option A: Standard Setup with Docker (Recommended)
-
-Start the entire platform (PostgreSQL, Redis, API, Scraper, Web Dashboard) with a single command:
-
-```bash
-# 1. Clone environment file
-cp .env.example .env
-
-# 2. Build and launch containers
-docker compose up --build -d
-```
-
-- **Web Dashboard**: `http://localhost:3000`
-- **REST API**: `http://localhost:4000`
-
----
-
-### Option B: Development Setup (With Live Code Reloading)
-
-To develop with live hot-reloading on the Web, API, and Scraper:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build -d
-```
-
-To view logs for the scraper worker in development:
-
-```bash
-docker compose -f docker-compose.dev.yml logs -f scraper
-```
-
-To stop all services:
-
-```bash
-docker compose -f docker-compose.dev.yml down
-```
-
----
-
-## 🧪 Testing
-
-Run the Python scraper worker test suite (105+ tests):
-
-```bash
-cd services/scraper
-.venv\Scripts\python.exe -m pytest tests/
-```
+### 4. Classification & Quality Categorization
+- **PDF Yield Classification**: Analyzes PDF text content to separate **Native Digital Text** from **Scanned Image PDFs** (marking scanned files for downstream OCR).
+- **Language Detection**: Identifies document languages (Kurdish, Arabic, English, Persian).
+- **Kurdish Content Categorization**: Categorizes text into domains (e.g., Literature, History, Law, Religion, Science) with quality scores.
+- **Clean Unicode Filenames**: Preserves Kurdish and Arabic script filenames cleanly without corruption.
 
 ---
 
@@ -110,13 +52,57 @@ cd services/scraper
 ```
 organization-data-platform/
 ├── apps/
-│   └── web/                   # React + Vite frontend dashboard
+│   └── web/                      # React + Vite frontend dashboard
+│       ├── src/pages/            # Collectors, Files, Data Browser, Users, Upload
+│       └── src/components/       # Reusable UI components
 ├── services/
-│   ├── api/                   # Express + TypeScript REST API & Prisma DB client
-│   └── scraper/               # Python worker (Web crawling, Telegram, Media STT/TTS)
+│   ├── api/                      # Express + TypeScript REST API
+│   │   ├── src/routes/           # API endpoints (collectors, runs, files, stats)
+│   │   └── src/services/         # BullMQ queue producers & database queries
+│   └── scraper/                  # Python worker service
+│       ├── app/
+│       │   ├── discovery/        # Link, media, sitemap & robots.txt extractors
+│       │   ├── downloader/       # Streaming HTTP downloader with retry logic
+│       │   ├── media/            # Language detection, Kurdish categorization, quality scoring
+│       │   ├── spiders/          # HTTP spider, Browser Playwright spider, Scrapling spider, CF bypass
+│       │   ├── pipeline/         # Shared file pipeline (dedup, hash, upload)
+│       │   └── storage/          # MetadataWriter (jsonl) & ManifestWriter (json)
+│       └── tests/                # Pytest unit & integration test suite (105+ tests)
 ├── packages/
-│   ├── database/              # Prisma schema & PostgreSQL database migrations
-│   └── shared-types/          # Shared TypeScript types & enums
-├── docker-compose.yml         # Production orchestration
-└── docker-compose.dev.yml     # Development orchestration
+│   ├── database/                 # Prisma ORM schema & PostgreSQL migrations
+│   └── shared-types/             # Shared TypeScript interfaces & enums
+├── docker-compose.yml            # Production deployment orchestration
+└── docker-compose.dev.yml        # Local development orchestration with live reloading
+```
+
+---
+
+## 🚀 Quick Start
+
+### Using Docker (Recommended)
+
+1. Clone environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Build and start all services:
+   ```bash
+   docker compose up --build -d
+   ```
+
+- **Web Dashboard**: `http://localhost:3000`
+- **REST API**: `http://localhost:4000`
+
+### Development Mode (With Live Reloading)
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+Run the scraper test suite:
+
+```bash
+cd services/scraper
+.venv\Scripts\python.exe -m pytest tests/
 ```

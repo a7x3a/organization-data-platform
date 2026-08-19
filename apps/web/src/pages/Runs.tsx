@@ -57,6 +57,14 @@ export const Runs: React.FC = () => {
       accessor: (r) => r.collector?.name || '—',
     },
     {
+      header: 'Launched By',
+      accessor: (r: any) => (
+        <span className="text-xs text-[var(--color-text-secondary)] font-medium">
+          {r.createdBy?.name || r.createdBy?.username || 'Automated'}
+        </span>
+      ),
+    },
+    {
       header: t('runs.fields.status'),
       accessor: (r) => <RunStatusBadge status={r.status} />,
     },
