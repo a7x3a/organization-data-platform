@@ -103,14 +103,22 @@ class MetadataWriter:
     def cleanup(self) -> None:
         """Remove all temp files after successful upload."""
         try:
+            self._tmp.close()
+        except Exception:
+            pass
+        try:
             os.unlink(self._tmp.name)
-        except FileNotFoundError:
+        except OSError:
             pass
         writers = getattr(self, "_category_writers", {})
         for cat_writer in writers.values():
             try:
+                cat_writer.close()
+            except Exception:
+                pass
+            try:
                 os.unlink(cat_writer.name)
-            except FileNotFoundError:
+            except OSError:
                 pass
 
     @property

@@ -171,6 +171,8 @@ class TelegramCollectionJob:
                 None, "UNKNOWN", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             )
             await self._finalize(manifest, metadata, status="FAILED")
+        finally:
+            await self._pipeline.cleanup()
 
     async def _finalize(
         self,

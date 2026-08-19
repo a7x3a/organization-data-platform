@@ -12,6 +12,7 @@
     "dev": "docker compose -f docker-compose.dev.yml up",
     "dev:down": "docker compose -f docker-compose.dev.yml down",
     "build": "docker compose build",
+    "test": "npm run test --workspace=services/api && npm run test:e2e --workspace=apps/web",
     "db:generate": "npm run prisma:generate --workspace=packages/database",
     "db:migrate": "npm run prisma:migrate --workspace=packages/database",
     "db:studio": "npm run prisma:studio --workspace=packages/database"

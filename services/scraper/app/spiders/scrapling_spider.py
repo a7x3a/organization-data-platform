@@ -5,6 +5,8 @@ Provides crawl_with_scrapling() with support for Scrapling's:
 - Fetcher / AsyncFetcher for high-speed static fetching.
 - StealthyFetcher for anti-bot protected sites (Cloudflare, Turnstile, Akamai).
 - Adaptor / Selector for self-healing HTML element parsing.
+
+Uses parallel task processing with asyncio.Semaphore for concurrency control.
 """
 from __future__ import annotations
 
@@ -25,12 +27,14 @@ from app.spiders.http_spider import (
     DiscoveredFile,
     get_effective_allowed_domains,
     is_allowed_domain,
+    is_allowed_resource_domain,
     is_downloadable_url,
     is_private_address,
     url_matches_pattern,
 )
 
 log = structlog.get_logger(__name__)
+
 
 
 def extract_scrapling_links(response_or_selector: Selector | str, base_url: str) -> set[str]:
@@ -88,9 +92,10 @@ async def crawl_with_scrapling(
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
     on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
     on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    check_pause: Optional[Callable[[], Awaitable[bool]]] = None,
 ) -> CrawlResult:
     """
-    Execute crawl using Scrapling engine.
+    Execute crawl using Scrapling engine with parallel task processing.
 
     Supports stealth mode (StealthyFetcher) for anti-bot bypass when
     config.stealth_mode is True, or AsyncFetcher for standard high-speed scraping.
@@ -105,10 +110,16 @@ async def crawl_with_scrapling(
 
     # Robots.txt cache client
     robots_client = httpx.AsyncClient(
-        headers={"User-Agent": "ODP-Collector/1.0 (+https://github.com/org/data-platform)"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
         timeout=10,
     )
     robots = RobotsCache(robots_client)
+
+    # Initialize Scrapling Fetcher
+    async_fetcher = AsyncFetcher() if not config.stealth_mode else None
+    stealthy_fetcher = StealthyFetcher() if config.stealth_mode else None
+
+    semaphore = asyncio.Semaphore(config.concurrency)
 
     try:
         # 1. Enqueue start URLs
@@ -123,20 +134,108 @@ async def crawl_with_scrapling(
                 visited.add(normalized)
                 await queue.put((normalized, 0))
 
-        # Initialize Scrapling Fetcher
-        async_fetcher = AsyncFetcher() if not config.stealth_mode else None
-        stealthy_fetcher = StealthyFetcher() if config.stealth_mode else None
+        async def process_url(url: str, depth: int) -> None:
+            async with semaphore:
+                if result.pages_crawled >= config.max_pages:
+                    return
+                if len(result.files_discovered) >= config.max_files:
+                    return
 
-        while not queue.empty():
+                # Robots.txt check
+                if not await robots.is_allowed(url, enabled=config.robots_enabled):
+                    log.debug("scrapling_spider.robots_disallowed", url=url)
+                    return
+
+                # Fetch page content with Scrapling
+                try:
+                    if stealthy_fetcher:
+                        loop = asyncio.get_running_loop()
+                        res = await loop.run_in_executor(None, stealthy_fetcher.fetch, url)
+                    elif async_fetcher:
+                        res = await async_fetcher.get(url)
+                    else:
+                        res = await AsyncFetcher().get(url)
+                except Exception as exc:
+                    log.warning("scrapling_spider.fetch_failed", url=url, error=str(exc))
+                    return
+
+                status = getattr(res, "status", 200)
+                if status >= 400:
+                    log.warning("scrapling_spider.http_error", url=url, status=status)
+                    return
+
+                if hasattr(res, "body") and isinstance(res.body, bytes):
+                    html_body = res.body.decode("utf-8", errors="ignore")
+                elif hasattr(res, "html_content"):
+                    html_body = str(res.html_content)
+                else:
+                    html_body = getattr(res, "text", "") or ""
+                if not isinstance(html_body, str):
+                    html_body = str(html_body)
+
+                res_url = getattr(res, "url", url) or url
+
+                result.pages_crawled += 1
+                if on_page_crawled:
+                    await on_page_crawled()
+
+                # Extract resource files (PDF, audio, video, documents, etc.)
+                resource_urls = extract_resource_urls(html_body, res_url)
+                for resource_url in resource_urls:
+                    norm_res = normalize_url(resource_url, res_url)
+                    if not norm_res or await is_private_address(norm_res):
+                        continue
+                    if is_downloadable_url(norm_res, config.allowed_extensions):
+                        if is_allowed_resource_domain(norm_res, effective_allowed_domains):
+                            if not config.allowed_url_patterns or url_matches_pattern(norm_res, config.allowed_url_patterns):
+                                if not config.excluded_url_patterns or not url_matches_pattern(norm_res, config.excluded_url_patterns):
+                                    if not any(df.url == norm_res for df in result.files_discovered):
+                                        result.files_discovered.append(DiscoveredFile(url=norm_res, depth=depth))
+                                        if on_file_found:
+                                            await on_file_found()
+
+                # Extract links for next crawl depth
+                if depth < config.max_depth:
+                    scrapling_selector = Selector(content=html_body) if isinstance(html_body, str) else res
+                    page_links = extract_scrapling_links(scrapling_selector, res_url)
+
+                    for link in page_links:
+                        norm_link = normalize_url(link, res_url)
+                        if not norm_link or await is_private_address(norm_link):
+                            continue
+
+                        # Direct downloadable file check
+                        if is_downloadable_url(norm_link, config.allowed_extensions):
+                            if is_allowed_resource_domain(norm_link, effective_allowed_domains):
+                                if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
+                                    if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
+                                        if not any(df.url == norm_link for df in result.files_discovered):
+                                            result.files_discovered.append(DiscoveredFile(url=norm_link, depth=depth + 1))
+                                            if on_file_found:
+                                                await on_file_found()
+                            continue
+
+                        # Follow page navigation links
+                        if norm_link not in visited and is_allowed_domain(norm_link, effective_allowed_domains):
+                            if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
+                                if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
+                                    visited.add(norm_link)
+                                    await queue.put((norm_link, depth + 1))
+
+                if config.request_delay_ms > 0:
+                    await asyncio.sleep(config.request_delay_ms / 1000.0)
+
+        # 2. Process URLs in parallel with task pool
+        tasks: list[asyncio.Task] = []
+        while not queue.empty() or tasks:
             if should_cancel and await should_cancel():
                 log.info("scrapling_spider.cancelled_by_user")
                 result.cancelled = True
                 break
 
-            if on_page_crawled and hasattr(on_page_crawled, "__self__") and hasattr(on_page_crawled.__self__, "_pipeline"):
-                if await on_page_crawled.__self__._pipeline.check_pause():
-                    log.info("scrapling_spider.paused_by_user")
-                    break
+            if check_pause and await check_pause():
+                log.info("scrapling_spider.paused_by_user")
+                break
 
             if result.pages_crawled >= config.max_pages:
                 log.info("scrapling_spider.max_pages_reached", max_pages=config.max_pages)
@@ -146,91 +245,30 @@ async def crawl_with_scrapling(
                 log.info("scrapling_spider.max_files_reached", max_files=config.max_files)
                 break
 
-            url, depth = await queue.get()
+            while not queue.empty():
+                url, depth = await queue.get()
+                task = asyncio.create_task(process_url(url, depth))
+                tasks.append(task)
+                if len(tasks) >= config.concurrency * 2:
+                    break
 
-            # Robots.txt check
-            if not await robots.is_allowed(url, enabled=config.robots_enabled):
-                log.debug("scrapling_spider.robots_disallowed", url=url)
-                continue
+            if tasks:
+                done, tasks_set = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                tasks = list(tasks_set)
 
-            # Fetch page content with Scrapling
-            try:
-                if stealthy_fetcher:
-                    loop = asyncio.get_running_loop()
-                    res = await loop.run_in_executor(None, stealthy_fetcher.fetch, url)
-                elif async_fetcher:
-                    res = await async_fetcher.get(url)
-                else:
-                    res = await AsyncFetcher().get(url)
-            except Exception as exc:
-                log.warning("scrapling_spider.fetch_failed", url=url, error=str(exc))
-                continue
+            if queue.empty() and not tasks:
+                break
 
-            status = getattr(res, "status", 200)
-            if status >= 400:
-                log.warning("scrapling_spider.http_error", url=url, status=status)
-                continue
-
-            if hasattr(res, "body") and isinstance(res.body, bytes):
-                html_body = res.body.decode("utf-8", errors="ignore")
-            elif hasattr(res, "html_content"):
-                html_body = str(res.html_content)
-            else:
-                html_body = getattr(res, "text", "") or ""
-            if not isinstance(html_body, str):
-                html_body = str(html_body)
-
-            res_url = getattr(res, "url", url) or url
-
-            result.pages_crawled += 1
-            if on_page_crawled:
-                await on_page_crawled()
-
-            # Extract resource files (PDF, audio, video, documents, etc.)
-            resource_urls = extract_resource_urls(html_body, res_url)
-            for resource_url in resource_urls:
-                norm_res = normalize_url(resource_url, res_url)
-                if not norm_res or await is_private_address(norm_res):
-                    continue
-                if is_downloadable_url(norm_res, config.allowed_extensions):
-                    if is_allowed_domain(norm_res, effective_allowed_domains):
-                        if not config.allowed_url_patterns or url_matches_pattern(norm_res, config.allowed_url_patterns):
-                            if not config.excluded_url_patterns or not url_matches_pattern(norm_res, config.excluded_url_patterns):
-                                if not any(df.url == norm_res for df in result.files_discovered):
-                                    result.files_discovered.append(DiscoveredFile(url=norm_res, depth=depth))
-                                    if on_file_found:
-                                        await on_file_found()
-
-            # Extract links for next crawl depth
-            if depth < config.max_depth:
-                scrapling_selector = Selector(content=html_body) if isinstance(html_body, str) else res
-                page_links = extract_scrapling_links(scrapling_selector, res_url)
-
-                for link in page_links:
-                    norm_link = normalize_url(link, res_url)
-                    if not norm_link or await is_private_address(norm_link):
-                        continue
-
-                    # Direct downloadable file check
-                    if is_downloadable_url(norm_link, config.allowed_extensions):
-                        if is_allowed_domain(norm_link, effective_allowed_domains):
-                            if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
-                                if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
-                                    if not any(df.url == norm_link for df in result.files_discovered):
-                                        result.files_discovered.append(DiscoveredFile(url=norm_link, depth=depth + 1))
-                                        if on_file_found:
-                                            await on_file_found()
-                        continue
-
-                    # Follow page navigation links
-                    if norm_link not in visited and is_allowed_domain(norm_link, effective_allowed_domains):
-                        if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
-                            if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
-                                visited.add(norm_link)
-                                await queue.put((norm_link, depth + 1))
-
-            if config.request_delay_ms > 0:
-                await asyncio.sleep(config.request_delay_ms / 1000.0)
+        if result.cancelled:
+            for task in tasks:
+                task.cancel()
+            log.info("scrapling_spider.cancelled", pages=result.pages_crawled)
+        else:
+            log.info(
+                "scrapling_spider.complete",
+                pages=result.pages_crawled,
+                files=len(result.files_discovered),
+            )
 
     finally:
         await robots_client.aclose()

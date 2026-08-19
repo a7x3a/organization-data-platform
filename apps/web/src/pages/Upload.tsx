@@ -284,6 +284,7 @@ export const Upload: React.FC = () => {
                       type="file"
                       id="file-upload-input"
                       required
+                      accept=".pdf,.epub,.mobi,.azw3,.fb2,.djvu,.doc,.docx,.odt,.rtf,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.parquet,.srt,.vtt,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.mp4,.mkv,.webm,.mov,.avi,.flv,.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.tiff,.heic,.zip,.rar,.7z,.tar,.gz,.bz2,.xz"
                       onChange={(e) => setFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
@@ -326,7 +327,7 @@ export const Upload: React.FC = () => {
                           </p>
                         </div>
                         <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-                          {['.pdf', '.epub', '.docx', '.mobi', '.mp3', '.jsonl'].map((ext) => (
+                          {['.pdf', '.epub', '.docx', '.mobi', '.mp3', '.wav', '.jsonl', '.parquet'].map((ext) => (
                             <span key={ext} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">
                               {ext}
                             </span>

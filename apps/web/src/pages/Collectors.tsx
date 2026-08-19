@@ -27,17 +27,17 @@ const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = [
   { label: 'Documents', extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf'] },
   { label: 'Spreadsheets', extensions: ['.xls', '.xlsx', '.ods', '.csv', '.tsv'] },
   { label: 'Presentations', extensions: ['.ppt', '.pptx', '.odp'] },
-  { label: 'Ebooks', extensions: ['.epub', '.mobi', '.azw3', '.fb2'] },
+  { label: 'Ebooks', extensions: ['.epub', '.mobi', '.azw3', '.fb2', '.djvu'] },
   { label: 'Archives', extensions: ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz'] },
   {
     label: 'Images',
     extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic'],
   },
-  { label: 'Audio', extensions: ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac'] },
-  { label: 'Video', extensions: ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv'] },
+  { label: 'Audio', extensions: ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac', '.wma'] },
+  { label: 'Video', extensions: ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.m4v'] },
   {
     label: 'Text & Data',
-    extensions: ['.txt', '.md', '.json', '.jsonl', '.xml', '.srt', '.vtt', '.parquet'],
+    extensions: ['.txt', '.md', '.json', '.jsonl', '.xml', '.srt', '.vtt', '.parquet', '.arrow', '.feather', '.rst'],
   },
 ];
 

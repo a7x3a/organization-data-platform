@@ -1,241 +1,122 @@
-# Organization Data Platform
+# Organization Data Platform (ODP)
 
-> **Production-Grade Data Collection & Processing Platform**
-> Automated web, Telegram, media/voice transcription, and document collection with quality inspection, hashing, and Cloudflare R2 / local immutable storage.
-
----
-
-## Architecture
-
-```
-                 React + Vite Web Dashboard (apps/web)
-                                  │
-                                  ▼
-                   Express REST API (services/api)
-                                  │
-                     ┌────────────┴────────────┐
-                     ▼                         ▼
-            PostgreSQL (16)               Redis (7)
-            (metadata/state)             (BullMQ queue)
-                                               │
-                                               ▼
-                                      Python Scraper Worker
-                                       (services/scraper)
-                                               │
-                ┌──────────────────────────────┼──────────────────────────────┐
-                ▼                              ▼                              ▼
-      Web Crawling Engine            Telegram Channel Scraper       Media & Voice Transcriber
-    (Playwright + Scrapy)                  (Telethon)                 (yt-dlp + Gemini API)
-                │                              │                              │
-                └──────────────────────────────┼──────────────────────────────┘
-                                               │
-                                               ▼
-                                      Immutable Storage
-                                (Cloudflare R2 / Local 00_raw)
-```
+A unified, automated platform for harvesting, processing, categorizing, transcribing, and storing digital resources (Documents, Web pages, Telegram channels, Media/Voice audio, Ebooks, and Datasets).
 
 ---
 
-## Monorepo Layout
+## 🎯 What Can It Be Used For?
 
-```
-organization-data-platform/
-├── apps/
-│   └── web/                   # React + Vite frontend dashboard (Port 3000)
-├── services/
-│   ├── api/                   # Express + TypeScript REST API (Port 4000)
-│   └── scraper/               # Python collection worker (Web, Telegram, Media, PDF)
-├── packages/
-│   ├── database/              # Prisma schema, migrations, and database client
-│   └── shared-types/          # Shared TypeScript interfaces & enums
-├── infra/
-│   └── docker/                # Nginx configuration and Docker init scripts
-├── docker-compose.yml         # Production Docker Compose orchestration
-└── docker-compose.dev.yml     # Development Docker Compose stack
-```
+- **Document & Ebook Collection**: Crawl websites, digital libraries, and CMS platforms (WordPress, Wix, Vercel, static HTML) to automatically extract PDFs, EPUBs, DOCX files, and office documents.
+- **Adaptive Scrapling & Stealth Engine**: Integrates **Scrapling** (`scrapling[fetchers]`) with `AsyncFetcher`, `StealthyFetcher`, and `Selector` adaptors for self-healing, anti-bot protected, high-speed website crawling.
+- **Wix & SPA Deep Discovery**: Extract documents and files embedded inside JavaScript single-page applications, Wix sites (`usrfiles.com`), Google Drive sharing links (`drive.google.com`), and cloud storage.
+- **Media & Voice Dataset Creation**: Download YouTube videos, podcasts, and audio files via `yt-dlp`, chunk audio automatically, and transcribe them via Google Gemini API (or offline models) into **Speech-to-Text (STT)** and **Text-to-Speech (TTS)** datasets.
+- **Telegram Archive Scraping**: Crawl and archive files, media, and message data directly from public and private Telegram channels via Telethon.
+- **Automated Quality Inspection & PDF Classification**: Automatically inspect fetched PDFs, measure text yield, and split native digital text PDFs from scanned image PDFs (for OCR).
+- **Kurdish & Arabic Text Processing**: Extract and preserve non-ASCII script filenames (Kurdish, Arabic, Persian) cleanly, with full metadata enrichment and quality scoring.
 
 ---
 
-## Features & Capabilities
+## ⚙️ How It Works
 
-- **PDF Extraction & Quality Classifier**:
-  - Automatically inspects fetched PDF documents.
-  - Measures printable text density, text yield, and page quality score.
-  - Automatically routes high-quality digital text PDFs to `pdf/native` and scanned/image PDFs to `pdf/ocr`.
-- **Media, YouTube & Voice Transcription Pipeline**:
-  - Downloads YouTube videos, direct video/audio URLs, and local media using `yt-dlp`.
-  - Splits audio into 30-second chunks using `AudioChunker`.
-  - Transcribes audio chunks using Google Gemini API (or offline fallback) into Speech-to-Text (`stt_dataset.jsonl`), Text-to-Speech (`tts_dataset.jsonl`), and full verbatim transcripts.
-- **Telegram Channel Collector**:
-  - Iterates Telegram channel messages via user account session (Telethon).
-  - Downloads channel media and records message artifacts.
-- **Web Crawler Engine**:
-  - Supports both standard HTTP streaming crawler and Playwright browser crawler for JavaScript SPAs.
+```
+                        React + Vite Dashboard (apps/web)
+                                       │
+                                       ▼
+                        Express REST API (services/api)
+                                       │
+                        ┌──────────────┴──────────────┐
+                        ▼                             ▼
+                PostgreSQL (16)                   Redis (7)
+                (Metadata & State)             (BullMQ Queue)
+                                                      │
+                                                      ▼
+                                            Python Scraper Worker
+                                             (services/scraper)
+                                                      │
+                ┌─────────────────────────────────────┼─────────────────────────────────────┐
+                ▼                                     ▼                                     ▼
+       Web Crawler Engine                    Telegram Channel Scraper               Media & Voice Pipeline
+  (httpx + Scrapling + Playwright)                   (Telethon)                     (yt-dlp + Gemini STT/TTS)
+                │                                     │                                     │
+                └─────────────────────────────────────┼─────────────────────────────────────┘
+                                                      │
+                                                      ▼
+                                              Immutable Storage
+                                       (Cloudflare R2 / Local Storage)
+```
+
+1. **Job Scheduling & Dispatch**: Runs are launched via the Web Dashboard or API. Jobs are enqueued into Redis BullMQ.
+2. **Resource Discovery**: The Python Scraper Worker crawls pages (using high-speed HTTP streaming or stealth Playwright Chromium for JS sites), parsing links, Wix state, JSON-LD schemas, and embedded media assets.
+3. **Deduplication & Streaming Download**: Stream-downloads files, computes SHA-256 hashes incrementally, and skips duplicates against past runs.
+4. **Metadata & Quality Scoring**: Inspects downloaded files (PDF yield classification, language detection, Kurdish categorization, quality scoring).
+5. **Storage & Reporting**: Saves structured `metadata.jsonl` and `manifest.json` into organized raw storage (`00_raw/web/`, `00_raw/telegram/`, `00_raw/media/`) on Cloudflare R2 or local disk.
 
 ---
 
-## Docker & Compose Commands (Reference)
+## 🚀 How To Use It
 
-### 1. Production Docker Compose (Full Stack)
+### Option A: Standard Setup with Docker (Recommended)
 
-Start all services (PostgreSQL, Redis, API, Scraper, Web):
+Start the entire platform (PostgreSQL, Redis, API, Scraper, Web Dashboard) with a single command:
 
 ```bash
-# Build and start all services in detached mode
+# 1. Clone environment file
+cp .env.example .env
+
+# 2. Build and launch containers
 docker compose up --build -d
-
-# View live logs for all services
-docker compose logs -f
-
-# View status of running containers
-docker compose ps
-
-# View logs for a specific service (e.g. scraper or api)
-docker compose logs -f scraper
-
-# Stop and remove containers and networks
-docker compose down
-
-# Stop and remove containers, networks, and volumes
-docker compose down -v
 ```
 
-> *Note: For legacy Docker Compose v1, replace `docker compose` with `docker-compose`.*
+- **Web Dashboard**: `http://localhost:3000`
+- **REST API**: `http://localhost:4000`
 
 ---
 
-### 2. Development Docker Compose Stack
+### Option B: Development Setup (With Live Code Reloading)
 
-Run database, Redis, API, and scraper in development mode with live code mounts:
+To develop with live hot-reloading on the Web, API, and Scraper:
 
 ```bash
-# Start development stack
 docker compose -f docker-compose.dev.yml up --build -d
+```
 
-# View scraper logs in development
+To view logs for the scraper worker in development:
+
+```bash
 docker compose -f docker-compose.dev.yml logs -f scraper
+```
 
-# Stop development stack
+To stop all services:
+
+```bash
 docker compose -f docker-compose.dev.yml down
 ```
 
 ---
 
-### 3. Individual Docker Build & Run Commands
+## 🧪 Testing
 
-If you need to build and run containers individually:
+Run the Python scraper worker test suite (105+ tests):
 
-#### Express API Service (`services/api`)
 ```bash
-# Build API image
-docker build -t odp-api -f services/api/Dockerfile .
-
-# Run API container
-docker run -d \
-  --name odp-api \
-  -p 4000:4000 \
-  --env-file .env \
-  odp-api
-```
-
-#### Python Scraper Worker (`services/scraper`)
-```bash
-# Build Scraper image
-docker build -t odp-scraper -f services/scraper/Dockerfile .
-
-# Run Scraper container
-docker run -d \
-  --name odp-scraper \
-  --env-file .env \
-  odp-scraper
-```
-
-#### React Web Dashboard (`apps/web`)
-```bash
-# Build Web Dashboard image
-docker build -t odp-web -f apps/web/Dockerfile .
-
-# Run Web Dashboard container
-docker run -d \
-  --name odp-web \
-  -p 3000:80 \
-  odp-web
+cd services/scraper
+.venv\Scripts\python.exe -m pytest tests/
 ```
 
 ---
 
-## Local Quick Start (Without Full Docker)
+## 📂 Project Structure
 
-### Prerequisites
-- Node.js 20+
-- Python 3.12+
-- Docker Desktop (for Postgres & Redis)
-
-### Step 1: Configure Environment
-```bash
-cp .env.example .env
-# Fill in AUTH_ACCESS_SECRET, AUTH_REFRESH_SECRET, and storage settings
 ```
-
-### Step 2: Start Postgres & Redis Services
-```bash
-docker compose up -d postgres redis
+organization-data-platform/
+├── apps/
+│   └── web/                   # React + Vite frontend dashboard
+├── services/
+│   ├── api/                   # Express + TypeScript REST API & Prisma DB client
+│   └── scraper/               # Python worker (Web crawling, Telegram, Media STT/TTS)
+├── packages/
+│   ├── database/              # Prisma schema & PostgreSQL database migrations
+│   └── shared-types/          # Shared TypeScript types & enums
+├── docker-compose.yml         # Production orchestration
+└── docker-compose.dev.yml     # Development orchestration
 ```
-
-### Step 3: Run Database Migrations
-```bash
-npm run db:migrate
-```
-
-### Step 4: Start Web & API Development Servers
-```bash
-npm run dev
-```
-
-### Step 5: Start Python Scraper Worker
-On Windows:
-```cmd
-cd services/scraper
-.venv\Scripts\python.exe -m app.main
-```
-
-On Linux / macOS:
-```bash
-cd services/scraper
-source .venv/bin/activate
-python -m app.main
-```
-
----
-
-## Testing & Verification
-
-Run the Python scraper unit test suite (87+ tests):
-
-```bash
-# Windows
-cd services/scraper
-.venv\Scripts\python.exe -m pytest -v
-
-# Linux / macOS
-cd services/scraper
-pytest -v
-```
-
----
-
-## Environment Variables Reference
-
-| Variable | Description | Default |
-|---|---|---|
-| `NODE_ENV` | Runtime environment (`development` / `production`) | `development` |
-| `DATABASE_URL` | PostgreSQL connection URL | `postgresql://odp_user:odp_password@postgres:5432/odp_db` |
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379` |
-| `STORAGE_PROVIDER` | Storage backend (`local` or `r2`) | `local` |
-| `LOCAL_STORAGE_DIR` | Directory for local file storage | `/app/storage` |
-| `R2_ENDPOINT` | Cloudflare R2 S3 Endpoint URL | — |
-| `R2_BUCKET` | Cloudflare R2 bucket name | `organization-data` |
-| `TELEGRAM_API_ID` | Telegram API ID from my.telegram.org | — |
-| `TELEGRAM_API_HASH` | Telegram API Hash from my.telegram.org | — |
-| `TELEGRAM_SESSION_STRING` | User authorization session string | — |
-| `GEMINI_API_KEY` | Google Gemini API key for audio transcription | — |

@@ -44,6 +44,7 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgresql://odp_user:odp_password@postgres:5432/odp_db?schema=public
       REDIS_URL: redis://redis:6379
+      SCRAPER_SERVICE_URL: http://scraper:8000
     volumes:
       - ./services/api/src:/app/services/api/src
       - ./packages/shared-types/src:/app/packages/shared-types/src

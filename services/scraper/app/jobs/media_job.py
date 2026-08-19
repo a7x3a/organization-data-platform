@@ -233,6 +233,8 @@ class MediaCollectionJob:
             )
             await self._finalize(manifest, metadata, status="FAILED")
             raise
+        finally:
+            await self._pipeline.cleanup()
 
     async def _finalize(
         self,

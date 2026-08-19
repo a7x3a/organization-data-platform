@@ -5,7 +5,7 @@ import { DataTable, Column } from '../components/DataTable';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { User, UserRole } from '@odp/shared-types';
-import { Plus, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Plus, ShieldCheck, ShieldAlert, X } from 'lucide-react';
 
 const ALL_ROLES: UserRole[] = [
   UserRole.ADMIN,
@@ -124,71 +124,84 @@ export const Users: React.FC = () => {
       />
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6 max-w-md w-full">
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Create User</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-2xl overflow-hidden my-auto">
+            <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Create User</h2>
+              <button onClick={() => setIsModalOpen(false)} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            {error && <div className="mt-3 text-xs text-[var(--color-error-400)]">{error}</div>}
-
-            <form onSubmit={handleCreate} className="mt-5 space-y-5">
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  Username
-                </label>
-                <Input
-                  type="text"
-                  required
-                  pattern="^[a-zA-Z0-9_\-]+$"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="jsmith"
-                  className="font-mono"
-                />
+            {error && (
+              <div className="px-6 pt-4">
+                <div className="p-3 text-xs rounded-[var(--radius-md)] bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-400)]/20">
+                  {error}
+                </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  Full name
-                </label>
-                <Input type="text" required value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
+            <form onSubmit={handleCreate} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    Username
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    pattern="^[a-zA-Z0-9_\-]+$"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="jsmith"
+                    className="font-mono"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  Password
-                </label>
-                <Input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    Full name
+                  </label>
+                  <Input type="text" required value={name} onChange={(e) => setName(e.target.value)} />
+                </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  Roles — what this account can do
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {ALL_ROLES.map((role) => (
-                    <label
-                      key={role}
-                      className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-secondary)] cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={roles.includes(role)}
-                        onChange={() => toggleRole(role)}
-                        className="accent-[var(--color-brand-500)]"
-                      />
-                      {role}
-                    </label>
-                  ))}
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    Password
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                    Roles — what this account can do
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ALL_ROLES.map((role) => (
+                      <label
+                        key={role}
+                        className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-secondary)] cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={roles.includes(role)}
+                          onChange={() => toggleRole(role)}
+                          className="accent-[var(--color-brand-500)]"
+                        />
+                        {role}
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
+              <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
                 <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
                   Cancel
                 </Button>
