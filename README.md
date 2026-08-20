@@ -69,7 +69,15 @@ docker compose up --build -d
 
 The web dashboard is bound to standard HTTP port **`80`**, so no port number is needed in the browser!
 
-#### Option A: Access via Custom URL `http://qai.local` (Recommended)
+#### 1. Lock Server's Static IP (So IP Never Changes on Restart)
+On your Server PC, open **PowerShell as Administrator** and run:
+```powershell
+# Set static IP (replace 10.10.0.118 and 10.10.0.1 with your network IP and Gateway)
+New-NetIPAddress -InterfaceAlias "Wi-Fi" -IPAddress 10.10.0.118 -PrefixLength 16 -DefaultGateway 10.10.0.1
+Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses ("1.1.1.1", "8.8.8.8")
+```
+
+#### 2. Access via Custom URL `http://qai.local` (Recommended)
 
 1. **On the Server / Host PC (Running Docker)**:
    Open **PowerShell as Administrator** and run:
@@ -81,16 +89,16 @@ The web dashboard is bound to standard HTTP port **`80`**, so no port number is 
 2. **On other PCs / Laptops on the same Wi-Fi / LAN**:
    Open **PowerShell as Administrator** and run:
    ```powershell
-   # Replace 192.168.1.50 with your server PC's actual local IP address:
-   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n192.168.1.50 qai.local`n" -Force
+   # Replace 10.10.0.118 with your server PC's actual local IP address:
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n10.10.0.118 qai.local`n" -Force
    ```
    Now any device on the network can open: **`http://qai.local`**
 
-#### Option B: Direct Local IP Access
-1. Find your Server PC's IP address:
-   - **Windows:** Run `ipconfig` in Command Prompt (e.g. `192.168.1.50`).
-   - **Linux:** Run `hostname -I`.
-2. Open in browser: `http://<YOUR_SERVER_IP>` (e.g., `http://192.168.1.50`).
+#### 3. Remote Access via Tailscale (Optional)
+If you use [Tailscale](https://tailscale.com), your server's Tailscale IP (e.g. `100.127.128.53`) is 100% static and accessible securely from anywhere in the world. You can map it in hosts:
+```powershell
+Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n100.127.128.53 qai.local`n" -Force
+```
 
 ---
 
