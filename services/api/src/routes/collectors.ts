@@ -45,10 +45,10 @@ router.get(
   }
 );
 
-// POST /api/collectors
+// POST /api/collectors — Collector+
 router.post(
   '/',
-  requireDataManager,
+  requireCollector,
   validate(createCollectorSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -60,10 +60,10 @@ router.post(
   }
 );
 
-// PATCH /api/collectors/:id
+// PATCH /api/collectors/:id — Collector+
 router.patch(
   '/:id',
-  requireDataManager,
+  requireCollector,
   validate(idParamSchema, 'params'),
   validate(updateCollectorSchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -76,7 +76,7 @@ router.patch(
   }
 );
 
-// DELETE /api/collectors/:id
+// DELETE /api/collectors/:id — Data Manager+
 router.delete(
   '/:id',
   requireDataManager,
@@ -109,10 +109,10 @@ router.post(
   }
 );
 
-// POST /api/collectors/:id/enable
+// POST /api/collectors/:id/enable — Collector+
 router.post(
   '/:id/enable',
-  requireDataManager,
+  requireCollector,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -124,10 +124,10 @@ router.post(
   }
 );
 
-// POST /api/collectors/:id/disable
+// POST /api/collectors/:id/disable — Collector+
 router.post(
   '/:id/disable',
-  requireDataManager,
+  requireCollector,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { requireDataManager } from '../middleware/rbac';
+import { requireDataManager, requireCollector } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import { createSourceSchema, updateSourceSchema, idParamSchema, paginationSchema } from '../schemas/index';
 import * as sourceService from '../services/source.service';
@@ -38,10 +38,10 @@ router.get(
   }
 );
 
-// POST /api/sources — Data Manager+
+// POST /api/sources — Collector+
 router.post(
   '/',
-  requireDataManager,
+  requireCollector,
   validate(createSourceSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -53,10 +53,10 @@ router.post(
   }
 );
 
-// PATCH /api/sources/:id — Data Manager+
+// PATCH /api/sources/:id — Collector+
 router.patch(
   '/:id',
-  requireDataManager,
+  requireCollector,
   validate(idParamSchema, 'params'),
   validate(updateSourceSchema),
   async (req: Request, res: Response, next: NextFunction) => {
