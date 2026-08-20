@@ -65,21 +65,32 @@ docker compose up --build -d
 
 ---
 
-### Step 5: Access the Dashboard from Any Device on Your Network
+### Step 5: Access the Dashboard (IP or Custom Local URL)
 
-1. **Find your Server PC's IP address:**
-   - **Windows:** Open Command Prompt/PowerShell and run `ipconfig` (find your **IPv4 Address**, e.g., `192.168.1.150`).
-   - **Linux:** Run `hostname -I` or `ip addr show`.
+The web dashboard is served on port **`8088`**.
 
-2. **Ensure Port 3000 is open in Firewall:**
-   - Allow inbound traffic on TCP port **3000** through your server's firewall.
+#### Option A: Direct Local IP Access
+1. Find your Server PC's IP address:
+   - **Windows:** Run `ipconfig` in Command Prompt (e.g. `192.168.1.50`).
+   - **Linux:** Run `hostname -I`.
+2. Open in browser: `http://<YOUR_SERVER_IP>:8088` (e.g., `http://192.168.1.50:8088`).
 
-3. **Open in any Browser:**
-   Navigate to:
+#### Option B: Access via Custom URL `http://qai.local:8088` (Recommended)
+
+1. **On the Server / Host PC (Running Docker)**:
+   Open **PowerShell as Administrator** and run:
+   ```powershell
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n127.0.0.1 qai.local`n" -Force
    ```
-   http://<YOUR_SERVER_IP>:3000
+   Now you can open: **`http://qai.local:8088`**
+
+2. **On other PCs / Laptops on the same Wi-Fi / LAN**:
+   Open **PowerShell as Administrator** and run:
+   ```powershell
+   # Replace 192.168.1.50 with your server PC's actual local IP address:
+   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n192.168.1.50 qai.local`n" -Force
    ```
-   *(Example: `http://192.168.1.150:3000`)*
+   Now any device on the network can open: **`http://qai.local:8088`**
 
 ---
 
@@ -104,7 +115,7 @@ docker compose up --build -d
 | **View API logs** | `docker compose logs -f api` |
 | **Restart all services** | `docker compose restart` |
 | **Stop all services** | `docker compose down` |
-| **Update & Rebuild** | `git pull && docker compose up --build -d` |
+| **Update & Apply Migrations** | `git pull && docker compose up -d` |
 
 ---
 
@@ -162,7 +173,7 @@ docker compose logs -f
 ```
 organization-data-platform/
 ├── apps/
-│   └── web/                      # React + Vite dashboard (served via Nginx on port 3000)
+│   └── web/                      # React + Vite dashboard (served via Nginx on port 8088)
 ├── services/
 │   ├── api/                      # Express + TypeScript REST API (port 4000)
 │   └── scraper/                  # Python worker (Playwright, Scrapling, yt-dlp, Telethon)
