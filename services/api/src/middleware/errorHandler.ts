@@ -30,10 +30,12 @@ export function errorHandler(
     return;
   }
 
-  // Log unexpected errors server-side only
+  // Log unexpected errors server-side
   logger.error(
     {
       err,
+      message: err.message,
+      stack: err.stack,
       path: req.path,
       method: req.method,
     },
@@ -41,7 +43,7 @@ export function errorHandler(
   );
 
   res.status(500).json({
-    error: 'Internal server error',
+    error: err.message || 'Internal server error',
     code: 'INTERNAL_ERROR',
   });
 }

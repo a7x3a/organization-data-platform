@@ -90,6 +90,15 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   if (!collector) throw new AppError(404, 'Collector not found', 'COLLECTOR_NOT_FOUND');
   if (!collector.enabled) throw new AppError(400, 'Collector is disabled', 'COLLECTOR_DISABLED');
 
+  // Verify user exists if userId is passed
+  let validUserId: string | null = null;
+  if (userId) {
+    const userExists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (userExists) {
+      validUserId = userExists.id;
+    }
+  }
+
   const datePrefix = new Date().toISOString().slice(0, 10);
   const latestRun = await prisma.collectionRun.findFirst({
     where: { runId: { startsWith: `${datePrefix}_run_` } },
@@ -107,7 +116,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
       runId,
       status: RunStatus.PENDING,
       collectorVersion: collector.version,
-      createdById: userId,
+      createdById: validUserId,
     },
   });
 
@@ -115,18 +124,22 @@ export async function startCollectionRun(collectorId: string, userId: string) {
 
   // Per-User Telegram Session support: If Telegram collector, attach user's session credentials
   let telegramCredentials: Record<string, unknown> | undefined = undefined;
-  if (collector.type === 'TELEGRAM') {
-    const userSession = await prisma.userTelegramSession.findUnique({
-      where: { userId },
-    });
-    if (userSession && userSession.sessionString) {
-      telegramCredentials = {
-        sessionString: userSession.sessionString,
-        apiId: userSession.apiId,
-        apiHash: userSession.apiHash,
-        phoneNumber: userSession.phoneNumber,
-        isVerified: userSession.isVerified,
-      };
+  if (collector.type === 'TELEGRAM' && validUserId) {
+    try {
+      const userSession = await prisma.userTelegramSession.findUnique({
+        where: { userId: validUserId },
+      });
+      if (userSession && userSession.sessionString) {
+        telegramCredentials = {
+          sessionString: userSession.sessionString,
+          apiId: userSession.apiId,
+          apiHash: userSession.apiHash,
+          phoneNumber: userSession.phoneNumber,
+          isVerified: userSession.isVerified,
+        };
+      }
+    } catch (err) {
+      logger.warn({ err, userId: validUserId }, 'failed_to_fetch_user_telegram_session');
     }
   }
 
@@ -152,19 +165,21 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   );
 
   logger.info(
-    { runId: run.id, jobId: job.id, collectorId, userId, hasUserTelegram: !!telegramCredentials },
+    { runId: run.id, jobId: job.id, collectorId, userId: validUserId, hasUserTelegram: !!telegramCredentials },
     'collection_run_queued'
   );
 
-  await prisma.auditLog.create({
-    data: {
-      userId,
-      action: 'run.started',
-      entityType: 'CollectionRun',
-      entityId: run.id,
-      metadata: { runId: run.runId, collectorId },
-    },
-  });
+  if (validUserId) {
+    await prisma.auditLog.create({
+      data: {
+        userId: validUserId,
+        action: 'run.started',
+        entityType: 'CollectionRun',
+        entityId: run.id,
+        metadata: { runId: run.runId, collectorId },
+      },
+    });
+  }
 
   return {
     runId: run.runId,

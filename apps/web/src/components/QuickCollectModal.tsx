@@ -200,15 +200,29 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
         // 1. Find or create Source for Telegram
         let sourceId = sourcesData?.data?.find((s) => s.slug === slug || s.baseUrl.includes(channel))?.id;
         if (!sourceId) {
-          const newSource = await createSource.mutateAsync({
-            name: collectionName.trim() ? `Telegram: ${collectionName.trim()}` : `Telegram: @${channel}`,
-            slug,
-            baseUrl: `https://t.me/${channel}`,
-            description: `Telegram Channel Collector for @${channel}`,
-            enabled: true,
-            robotsPolicy: RobotsPolicy.RESPECT,
-          });
-          sourceId = newSource.id;
+          try {
+            const newSource = await createSource.mutateAsync({
+              name: collectionName.trim() ? `Telegram: ${collectionName.trim()}` : `Telegram: @${channel}`,
+              slug,
+              baseUrl: `https://t.me/${channel}`,
+              description: `Telegram Channel Collector for @${channel}`,
+              enabled: true,
+              robotsPolicy: RobotsPolicy.RESPECT,
+            });
+            sourceId = newSource.id;
+          } catch (err: any) {
+            const res = await apiClient.get('/sources?pageSize=100');
+            const found = res.data?.data?.find((s: any) => s.slug === slug || s.baseUrl.includes(channel));
+            if (found) {
+              sourceId = found.id;
+            } else {
+              throw err;
+            }
+          }
+        }
+
+        if (!sourceId) {
+          throw new Error('Failed to create or find source for this Telegram channel');
         }
 
         // 2. Create TELEGRAM Collector
@@ -254,15 +268,29 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
       let sourceId = sourcesData?.data?.find((s) => s.slug === slug || s.baseUrl.includes(hostname))?.id;
       if (!sourceId) {
         const sourceName = collectionName.trim() || hostname;
-        const newSource = await createSource.mutateAsync({
-          name: sourceName,
-          slug,
-          baseUrl: `${parsedUrl.protocol}//${hostname}`,
-          description: `Auto-created source for ${hostname}`,
-          enabled: true,
-          robotsPolicy: RobotsPolicy.RESPECT,
-        });
-        sourceId = newSource.id;
+        try {
+          const newSource = await createSource.mutateAsync({
+            name: sourceName,
+            slug,
+            baseUrl: `${parsedUrl.protocol}//${hostname}`,
+            description: `Auto-created source for ${hostname}`,
+            enabled: true,
+            robotsPolicy: RobotsPolicy.RESPECT,
+          });
+          sourceId = newSource.id;
+        } catch (err: any) {
+          const res = await apiClient.get('/sources?pageSize=100');
+          const found = res.data?.data?.find((s: any) => s.slug === slug || s.baseUrl.includes(hostname));
+          if (found) {
+            sourceId = found.id;
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      if (!sourceId) {
+        throw new Error('Failed to create or find source for this URL');
       }
 
       const collectorName = collectionName.trim()
