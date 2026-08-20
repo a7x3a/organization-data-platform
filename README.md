@@ -65,24 +65,18 @@ docker compose up --build -d
 
 ---
 
-### Step 5: Access the Dashboard (IP or Custom Local URL)
+### Step 5: Access the Dashboard (Direct URL Without Port)
 
-The web dashboard is served on port **`8088`**.
+The web dashboard is bound to standard HTTP port **`80`**, so no port number is needed in the browser!
 
-#### Option A: Direct Local IP Access
-1. Find your Server PC's IP address:
-   - **Windows:** Run `ipconfig` in Command Prompt (e.g. `192.168.1.50`).
-   - **Linux:** Run `hostname -I`.
-2. Open in browser: `http://<YOUR_SERVER_IP>:8088` (e.g., `http://192.168.1.50:8088`).
-
-#### Option B: Access via Custom URL `http://qai.local:8088` (Recommended)
+#### Option A: Access via Custom URL `http://qai.local` (Recommended)
 
 1. **On the Server / Host PC (Running Docker)**:
    Open **PowerShell as Administrator** and run:
    ```powershell
    Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n127.0.0.1 qai.local`n" -Force
    ```
-   Now you can open: **`http://qai.local:8088`**
+   Now you can open: **`http://qai.local`**
 
 2. **On other PCs / Laptops on the same Wi-Fi / LAN**:
    Open **PowerShell as Administrator** and run:
@@ -90,7 +84,13 @@ The web dashboard is served on port **`8088`**.
    # Replace 192.168.1.50 with your server PC's actual local IP address:
    Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n192.168.1.50 qai.local`n" -Force
    ```
-   Now any device on the network can open: **`http://qai.local:8088`**
+   Now any device on the network can open: **`http://qai.local`**
+
+#### Option B: Direct Local IP Access
+1. Find your Server PC's IP address:
+   - **Windows:** Run `ipconfig` in Command Prompt (e.g. `192.168.1.50`).
+   - **Linux:** Run `hostname -I`.
+2. Open in browser: `http://<YOUR_SERVER_IP>` (e.g., `http://192.168.1.50`).
 
 ---
 
@@ -99,7 +99,6 @@ The web dashboard is served on port **`8088`**.
 | Role | Username | Default Password |
 | :--- | :--- | :--- |
 | **Administrator** | `admin` | `admin12345` |
-| **Alternate Admin** | `a7x3a` | `admin12345` |
 
 > 💡 *Once logged in, you can change passwords or manage users from the **Users** tab.*
 
@@ -173,7 +172,7 @@ docker compose logs -f
 ```
 organization-data-platform/
 ├── apps/
-│   └── web/                      # React + Vite dashboard (served via Nginx on port 8088)
+│   └── web/                      # React + Vite dashboard (served via Nginx on port 80)
 ├── services/
 │   ├── api/                      # Express + TypeScript REST API (port 4000)
 │   └── scraper/                  # Python worker (Playwright, Scrapling, yt-dlp, Telethon)
