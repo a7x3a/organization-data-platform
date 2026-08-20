@@ -108,6 +108,39 @@ docker compose up --build -d
 
 ---
 
+## 🔄 Clean Reset & Rebuild (Fix Broken or Stale Builds)
+
+If a previous Docker build failed, corrupted cache layers, or containers fail to start (e.g., stale entrypoints or cache mismatch), run this complete clean rebuild:
+
+### 1. Stop and remove existing containers:
+```bash
+docker compose down --remove-orphans
+```
+
+### 2. (Optional) Wipe database volumes for a fresh start:
+> ⚠️ **Warning:** This removes existing database data so fresh migrations and default admins re-initialize from scratch.
+```bash
+docker compose down -v --remove-orphans
+```
+
+### 3. Rebuild all images from scratch (ignoring old cache):
+```bash
+docker compose build --no-cache
+```
+
+### 4. Start all services in the background:
+```bash
+docker compose up -d
+```
+
+### 5. Check container health:
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+---
+
 ## 📥 How Files Are Downloaded, Filtered & Categorized
 
 ```

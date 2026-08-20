@@ -64,10 +64,11 @@ COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
 # Copy entrypoint script
 COPY services/api/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Non-root user for security
-RUN groupadd --gid 1001 nodejs && \
-    useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home nodejs && \
-    chmod +x /app/docker-entrypoint.sh
+# Strip CRLF (Windows line endings) and set execution permissions
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && \
+    chmod +x /app/docker-entrypoint.sh && \
+    groupadd --gid 1001 nodejs && \
+    useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home nodejs
 
 USER nodejs
 
