@@ -77,7 +77,20 @@ New-NetIPAddress -InterfaceAlias "Wi-Fi" -IPAddress 10.10.0.118 -PrefixLength 16
 Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses ("1.1.1.1", "8.8.8.8")
 ```
 
-#### 2. Access via Custom URL `http://qai.local` (Recommended)
+#### 2. Open Windows Firewall & Network Sharing
+On your Server PC, run in **PowerShell as Administrator** to allow other computers on your network to connect and ping:
+```powershell
+# Set Wi-Fi network profile to Private (enables local sharing)
+Set-NetConnectionProfile -InterfaceAlias "Wi-Fi" -NetworkCategory Private
+
+# Allow incoming Ping (ICMP)
+New-NetFirewallRule -DisplayName "Allow Ping ICMPv4" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow
+
+# Allow incoming Port 80 (Web Dashboard)
+New-NetFirewallRule -DisplayName "ODP Platform Port 80" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow
+```
+
+#### 3. Access via Custom URL `http://qai.local` (Recommended)
 
 1. **On the Server / Host PC (Running Docker)**:
    Open **PowerShell as Administrator** and run:
@@ -94,7 +107,7 @@ Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses ("1.1.1.1", 
    ```
    Now any device on the network can open: **`http://qai.local`**
 
-#### 3. Remote Access via Tailscale (Optional)
+#### 4. Remote Access via Tailscale (Optional)
 If you use [Tailscale](https://tailscale.com), your server's Tailscale IP (e.g. `100.127.128.53`) is 100% static and accessible securely from anywhere in the world. You can map it in hosts:
 ```powershell
 Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n100.127.128.53 qai.local`n" -Force
