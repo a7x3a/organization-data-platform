@@ -95,7 +95,7 @@ services:
     container_name: odp-web
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "8088:80"
     depends_on:
       - api
     networks:
