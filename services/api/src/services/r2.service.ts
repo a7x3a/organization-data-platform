@@ -51,6 +51,26 @@ class R2Service {
   }
 
   /**
+   * Download a buffer from R2 (for reading manifests and metadata files).
+   */
+  async getBuffer(key: string): Promise<Buffer | null> {
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key })
+      );
+      if (!response.Body) return null;
+      const bytes = await response.Body.transformToByteArray();
+      return Buffer.from(bytes);
+    } catch (err: unknown) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (e.name === 'NoSuchKey' || e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Check whether an object exists in R2 without downloading it.
    */
   async objectExists(key: string): Promise<boolean> {

@@ -9,6 +9,7 @@ export interface CollectionJobData {
   sourceSlug: string;
   collectorType: string;   // 'WEB' | 'TELEGRAM' | ... — routes to the right job class in the scraper worker
   configuration: unknown;  // CollectorConfiguration JSON (shape depends on collectorType)
+  telegramCredentials?: Record<string, unknown>;
   runFolderKey: string;    // R2 prefix: 00_raw/{web|telegram}/{slug}/{run_id}
 }
 

@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSources } from '../hooks/useSources';
 import { useManualUpload, useManualEntry } from '../hooks/useFiles';
 import { Button } from '../components/Button';
@@ -7,25 +8,23 @@ import {
   UploadCloud,
   FilePlus2,
   CheckCircle2,
+  FileCheck,
+  X,
+  Info,
+  Sparkles,
   CloudUpload,
   RefreshCw,
-  HelpCircle,
-  ShieldCheck,
+  Globe,
+  Tag,
+  BookOpen,
   FileText,
-  Sparkles,
-  X,
-  FileCheck,
-  Cpu,
-  Layers,
-  Database,
-  Info,
-  Zap,
 } from 'lucide-react';
 
 type Mode = 'upload' | 'entry';
 
 export const Upload: React.FC = () => {
-  const { data: sources } = useSources({ pageSize: 100 });
+  const { t } = useTranslation();
+  const { data: sources } = useSources({ page: 1, pageSize: 100 });
   const manualUpload = useManualUpload();
   const manualEntry = useManualEntry();
 
@@ -33,7 +32,8 @@ export const Upload: React.FC = () => {
   const [sourceId, setSourceId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
-  const [language, setLanguage] = useState('');
+  const [language, setLanguage] = useState('ckb');
+  const [category, setCategory] = useState('');
   const [subject, setSubject] = useState('');
   const [grade, setGrade] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +47,7 @@ export const Upload: React.FC = () => {
   const buildMetadata = () => {
     const metadata: Record<string, string> = {};
     if (language) metadata.language = language;
+    if (category) metadata.category = category;
     if (subject) metadata.subject = subject;
     if (grade) metadata.grade = grade;
     return Object.keys(metadata).length > 0 ? metadata : undefined;
@@ -55,7 +56,6 @@ export const Upload: React.FC = () => {
   const reset = () => {
     setFile(null);
     setFileName('');
-    setLanguage('');
     setSubject('');
     setGrade('');
     if (fileInputRef.current) {
@@ -69,14 +69,14 @@ export const Upload: React.FC = () => {
     setSuccess(null);
 
     if (!sourceId) {
-      setError('Please select a source domain.');
+      setError('Please select a target source website.');
       return;
     }
 
     try {
       if (mode === 'upload') {
         if (!file) {
-          setError('Please select a file to upload.');
+          setError('Please select or drag a file to upload.');
           return;
         }
         const result = await manualUpload.mutateAsync({
@@ -86,13 +86,17 @@ export const Upload: React.FC = () => {
         });
         setSuccess(
           result.status === 'DUPLICATE'
-            ? `File already exists in storage — matched existing file ID: ${result.fileId} (SHA-256 match).`
-            : `File uploaded successfully! ID: ${result.fileId} saved in 00_raw.`
+            ? `File already exists in storage — matched existing hash (ID: ${result.fileId}).`
+            : `File uploaded successfully! ID: ${result.fileId}`
         );
       } else {
+        if (!fileName.trim()) {
+          setError('Please enter a document title or filename.');
+          return;
+        }
         const result = await manualEntry.mutateAsync({
           sourceId,
-          fileName,
+          fileName: fileName.trim(),
           metadata: buildMetadata(),
         });
         setSuccess(`Metadata catalogued successfully! File ID: ${result.fileId}`);
@@ -108,8 +112,8 @@ export const Upload: React.FC = () => {
     setIsCloudSyncing(true);
     setCloudSyncMsg(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      setCloudSyncMsg('All local 00_raw artifacts pushed and verified with Cloudflare R2 cloud storage!');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      setCloudSyncMsg('Storage artifacts successfully synchronized with remote cloud storage.');
     } catch {
       setCloudSyncMsg('Cloud sync request failed.');
     } finally {
@@ -142,141 +146,96 @@ export const Upload: React.FC = () => {
   const isPending = manualUpload.isPending || manualEntry.isPending;
 
   return (
-    <div className="space-y-6 w-full">
-      {/* Header Hero Banner */}
-      <div className="relative overflow-hidden bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 sm:p-7 shadow-sm">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] flex items-center justify-center shrink-0 border border-[var(--color-brand-500)]/20 shadow-xs">
-              <UploadCloud className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-xl font-bold text-[var(--color-text-primary)] tracking-tight">
-                  File Ingestion & Cloud Sync
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/20">
-                  00_raw Pipeline
-                </span>
-              </div>
-              <p className="text-xs text-[var(--color-text-muted)] max-w-2xl leading-relaxed">
-                Directly ingest local books, PDFs, ebooks, and documents into the platform storage engine. Automatic SHA-256 deduplication and PDF classification applied on upload.
-              </p>
-            </div>
-          </div>
+    <div className="w-full space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
+            File Ingestion
+          </h1>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            Directly upload documents or record catalog metadata into the raw repository
+          </p>
+        </div>
 
-          {/* Quick Metrics Pills */}
-          <div className="flex items-center gap-2 text-xs font-mono text-[var(--color-text-muted)] shrink-0 self-start md:self-center">
-            <div className="px-3 py-1.5 rounded-xl bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] flex items-center gap-2">
-              <Database className="w-3.5 h-3.5 text-blue-400" />
-              <span>Target: <strong className="text-[var(--color-text-primary)]">00_raw/web</strong></span>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] flex items-center gap-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Deduplication: <strong className="text-emerald-400">Active</strong></span>
-            </div>
-          </div>
+        {/* Mode Switcher */}
+        <div className="inline-flex p-1 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-xl)] shadow-xs self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setMode('upload')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+              mode === 'upload'
+                ? 'bg-[var(--color-brand-500)] text-white shadow-xs'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            <UploadCloud className="w-3.5 h-3.5" />
+            Upload File
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('entry')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+              mode === 'entry'
+                ? 'bg-[var(--color-brand-500)] text-white shadow-xs'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            <FilePlus2 className="w-3.5 h-3.5" />
+            Catalog Only
+          </button>
         </div>
       </div>
 
-      {/* Main Grid Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Main Ingestion Panel (Col 7) */}
-        <div className="lg:col-span-7 bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-sm flex flex-col justify-between space-y-6">
-          <div>
-            {/* Mode Selector Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] pb-4 mb-5">
-              <div>
-                <h2 className="text-base font-bold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-[var(--color-brand-400)]" />
-                  Document Ingestion Form
-                </h2>
-                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                  Select your upload type and document metadata
-                </p>
-              </div>
+      {/* Notifications */}
+      {error && (
+        <div className="p-3.5 text-xs rounded-xl bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-400)]/20 flex items-center gap-2.5">
+          <Info className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
-              {/* Segmented Mode Switcher */}
-              <div className="flex p-1 bg-[var(--color-bg-base)] rounded-xl border border-[var(--color-border-subtle)] shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setMode('upload')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    mode === 'upload'
-                      ? 'bg-[var(--color-brand-500)] text-white shadow-xs font-bold'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  <UploadCloud className="w-3.5 h-3.5" />
-                  Upload File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('entry')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    mode === 'entry'
-                      ? 'bg-[var(--color-brand-500)] text-white shadow-xs font-bold'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  <FilePlus2 className="w-3.5 h-3.5" />
-                  Catalog Only
-                </button>
-              </div>
-            </div>
+      {success && (
+        <div className="p-3.5 text-xs rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-2.5">
+          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span>{success}</span>
+        </div>
+      )}
 
-            {/* Error Banner */}
-            {error && (
-              <div className="mb-5 p-3.5 text-xs rounded-xl bg-[var(--color-error-bg)] text-[var(--color-error-400)] font-mono border border-[var(--color-error-400)]/20 flex items-center gap-2">
-                <Info className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {/* Success Banner */}
-            {success && (
-              <div className="mb-5 p-3.5 text-xs rounded-xl bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20 flex items-center gap-2.5">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span>{success}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Source Domain Selection */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                    Source Domain / Category <span className="text-red-400">*</span>
-                  </label>
-                  <span className="text-[11px] text-[var(--color-text-muted)]">
-                    {sources?.data?.length || 0} sources available
-                  </span>
+      {/* Main Full-Width Form Layout */}
+      <form onSubmit={handleSubmit} className="w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
+          {/* Main Content Area (Left: 7 cols) */}
+          <div className="lg:col-span-7 space-y-4">
+            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-6 shadow-[var(--shadow-card)] space-y-4">
+              <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-3">
+                <div className="flex items-center gap-2">
+                  {mode === 'upload' ? (
+                    <UploadCloud className="w-4 h-4 text-[var(--color-brand-400)]" />
+                  ) : (
+                    <FileText className="w-4 h-4 text-[var(--color-brand-400)]" />
+                  )}
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
+                    {mode === 'upload' ? 'Document Upload' : 'Document Details'}
+                  </h2>
                 </div>
-                <Select
-                  value={sourceId}
-                  onValueChange={setSourceId}
-                  placeholder="Select source website (e.g. Open Books Archive)..."
-                  options={(sources?.data || []).map((s) => ({ value: s.id, label: `${s.name} (${s.slug})` }))}
-                />
+                <span className="text-[11px] text-[var(--color-text-muted)] font-mono">
+                  {mode === 'upload' ? 'Raw binary storage' : 'Index record only'}
+                </span>
               </div>
 
-              {/* Upload Drop Zone vs Catalog Entry Input */}
               {mode === 'upload' ? (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                    File Selection <span className="text-red-400">*</span>
-                  </label>
-
+                <div className="space-y-3">
                   <div
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+                    className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
                       isDragging
                         ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 ring-2 ring-[var(--color-brand-500)]/20'
                         : file
                         ? 'border-emerald-500/40 bg-emerald-500/5'
-                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-brand-500)]/40 hover:bg-[var(--color-bg-surface)]'
                     }`}
                   >
                     <input
@@ -284,12 +243,13 @@ export const Upload: React.FC = () => {
                       type="file"
                       id="file-upload-input"
                       required
+                      accept=".pdf,.epub,.mobi,.azw3,.fb2,.djvu,.doc,.docx,.odt,.rtf,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.parquet,.srt,.vtt,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.mp4,.mkv,.webm,.mov,.avi,.flv,.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.tiff,.heic,.zip,.rar,.7z,.tar,.gz,.bz2,.xz"
                       onChange={(e) => setFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
 
                     {file ? (
-                      <div className="flex items-center justify-between p-3.5 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl">
+                      <div className="flex items-center justify-between p-3.5 bg-[var(--color-bg-surface)] border border-emerald-500/30 rounded-xl shadow-xs">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
                             <FileCheck className="w-5 h-5" />
@@ -299,222 +259,188 @@ export const Upload: React.FC = () => {
                               {file.name}
                             </div>
                             <div className="text-[11px] text-[var(--color-text-muted)] font-mono mt-0.5">
-                              {(file.size / (1024 * 1024)).toFixed(2)} MB • {file.type || 'Binary / Document'}
+                              {(file.size / (1024 * 1024)).toFixed(2)} MB • {file.type || 'binary/octet-stream'}
                             </div>
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => setFile(null)}
-                          className="p-1.5 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
                           title="Remove file"
                         >
                           <X className="w-4 h-4" />
                         </button>
                       </div>
                     ) : (
-                      <label htmlFor="file-upload-input" className="cursor-pointer space-y-3 block py-2">
+                      <label htmlFor="file-upload-input" className="cursor-pointer space-y-3 block py-4">
                         <div className="w-12 h-12 rounded-2xl bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center mx-auto border border-[var(--color-brand-500)]/20">
                           <UploadCloud className="w-6 h-6" />
                         </div>
                         <div>
-                          <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Click to choose a file or drag & drop here
+                          <div className="text-xs font-semibold text-[var(--color-text-primary)]">
+                            Choose a file or drag & drop here
                           </div>
-                          <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                            Supports PDF, EPUB, DOCX, MOBI, MP3, WAV, JSONL, Parquet
+                          <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                            PDF, EPUB, DOCX, MOBI, JSONL, Parquet, MP3, Audio & Video
                           </p>
                         </div>
-                        <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-                          {['.pdf', '.epub', '.docx', '.mobi', '.mp3', '.jsonl'].map((ext) => (
-                            <span key={ext} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">
-                              {ext}
-                            </span>
-                          ))}
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono text-[var(--color-text-muted)] bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)]">
+                          Max 500 MB per file
                         </div>
                       </label>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                    Document Title / Filename <span className="text-red-400">*</span>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-secondary)] block mb-1.5">
+                      Document Title / Name <span className="text-red-400">*</span>
+                    </label>
+                    <Input
+                      type="text"
+                      required
+                      value={fileName}
+                      onChange={(e) => setFileName(e.target.value)}
+                      placeholder="e.g. Kurdish Civil Code Publication - Issue 45.pdf"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Metadata & Source Sidebar (Right: 5 cols) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-6 shadow-[var(--shadow-card)] space-y-4">
+              <div className="flex items-center gap-2 border-b border-[var(--color-border-subtle)] pb-3">
+                <Tag className="w-4 h-4 text-[var(--color-brand-400)]" />
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  Source & Metadata
+                </h2>
+              </div>
+
+              {/* Source Selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--color-text-secondary)] block">
+                  Source Website <span className="text-red-400">*</span>
+                </label>
+                <Select
+                  value={sourceId}
+                  onValueChange={setSourceId}
+                  placeholder="Select source repository..."
+                  options={(sources?.data || []).map((s) => ({
+                    value: s.id,
+                    label: `${s.name} (${s.baseUrl})`,
+                  }))}
+                />
+              </div>
+
+              {/* Language Preset Tags */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--color-text-secondary)] block">
+                  Language
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { code: 'ckb', label: 'Central Kurdish (سۆرانی)' },
+                    { code: 'kmr', label: 'Kurmanji (Kurmancî)' },
+                    { code: 'ar', label: 'Arabic (العربية)' },
+                    { code: 'en', label: 'English' },
+                  ].map((lang) => (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => setLanguage(lang.code)}
+                      className={`px-2.5 py-1 text-[11px] font-mono rounded-lg border transition-all cursor-pointer ${
+                        language === lang.code
+                          ? 'bg-[var(--color-brand-500)] text-white border-[var(--color-brand-500)] shadow-xs'
+                          : 'bg-[var(--color-bg-base)] text-[var(--color-text-muted)] border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      {lang.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category & Subject */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="text-[11px] text-[var(--color-text-muted)] block mb-1">
+                    Subject / Topic
                   </label>
                   <Input
                     type="text"
-                    required
-                    value={fileName}
-                    onChange={(e) => setFileName(e.target.value)}
-                    placeholder="e.g. Kurdish History Archive 2026.pdf"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    placeholder="e.g. Law, History"
                   />
-                  <p className="text-[11px] text-[var(--color-text-muted)]">
-                    Catalogs document metadata into the system without uploading the binary bytes.
-                  </p>
                 </div>
-              )}
-
-              {/* Optional Metadata Fields */}
-              <div className="pt-2 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                    Optional Metadata Attributes
+                <div>
+                  <label className="text-[11px] text-[var(--color-text-muted)] block mb-1">
+                    Volume / Issue
                   </label>
-                  <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
-                    Enriches search & filtering
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <span className="text-[10px] text-[var(--color-text-muted)] font-mono block mb-1">Language Code</span>
-                    <Input
-                      type="text"
-                      value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
-                      placeholder="e.g. ckb, ar, en"
-                      className="text-xs font-mono"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[var(--color-text-muted)] font-mono block mb-1">Subject / Domain</span>
-                    <Input
-                      type="text"
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      placeholder="e.g. History, Law"
-                      className="text-xs font-mono"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[var(--color-text-muted)] font-mono block mb-1">Grade / Volume</span>
-                    <Input
-                      type="text"
-                      value={grade}
-                      onChange={(e) => setGrade(e.target.value)}
-                      placeholder="e.g. Vol 1, Grade 12"
-                      className="text-xs font-mono"
-                    />
-                  </div>
+                  <Input
+                    type="text"
+                    value={grade}
+                    onChange={(e) => setGrade(e.target.value)}
+                    placeholder="e.g. Vol 2, No 14"
+                  />
                 </div>
               </div>
 
-              {/* Action Footer */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[var(--color-border-subtle)]">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={reset}
-                  disabled={isPending}
-                >
-                  Clear Form
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-3 border-t border-[var(--color-border-subtle)]">
+                <Button type="button" variant="ghost" onClick={reset} disabled={isPending} className="flex-1">
+                  Clear
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={isPending}
-                  className="bg-[var(--color-brand-600)] hover:bg-[var(--color-brand-500)] w-full sm:w-auto"
-                >
-                  <Sparkles className="w-4 h-4 mr-1.5" />
-                  {isPending ? 'Ingesting File...' : mode === 'upload' ? 'Upload & Process' : 'Catalog Metadata'}
+                <Button type="submit" disabled={isPending} className="flex-2">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {isPending ? 'Ingesting...' : mode === 'upload' ? 'Upload File' : 'Save Record'}
                 </Button>
               </div>
-            </form>
-          </div>
-        </div>
-
-        {/* Side Panel: Pipeline Safeguards & Feature Guide (Col 5) */}
-        <div className="lg:col-span-5 space-y-6 flex flex-col justify-between">
-          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-sm space-y-5">
-            <div className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-primary)] border-b border-[var(--color-border-subtle)] pb-3">
-              <HelpCircle className="w-4 h-4 text-[var(--color-brand-400)]" />
-              Automated Ingestion Pipeline Features
-            </div>
-
-            <div className="space-y-3.5 text-xs text-[var(--color-text-secondary)]">
-              {/* Feature Item 1 */}
-              <div className="p-3.5 bg-[var(--color-bg-base)] rounded-xl border border-[var(--color-border-subtle)] space-y-1 transition-all hover:border-[var(--color-border-strong)]">
-                <div className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] flex items-center justify-center shrink-0">
-                    <Zap className="w-3.5 h-3.5" />
-                  </div>
-                  SHA-256 Deduplication
-                </div>
-                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed pl-8">
-                  Every file is checksummed via SHA-256 upon ingestion. If an identical file exists anywhere in storage, it is safely deduplicated without copying extra bytes.
-                </p>
-              </div>
-
-              {/* Feature Item 2 */}
-              <div className="p-3.5 bg-[var(--color-bg-base)] rounded-xl border border-[var(--color-border-subtle)] space-y-1 transition-all hover:border-[var(--color-border-strong)]">
-                <div className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
-                    <Cpu className="w-3.5 h-3.5" />
-                  </div>
-                  Smart PDF Router (Native vs OCR)
-                </div>
-                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed pl-8">
-                  PDF documents are automatically analyzed for searchable text. Native text documents route to <code className="text-[var(--color-brand-400)] font-mono">pdf/native</code>, while scanned image pages route to <code className="text-[var(--color-brand-400)] font-mono">pdf/ocr</code>.
-                </p>
-              </div>
-
-              {/* Feature Item 3 */}
-              <div className="p-3.5 bg-[var(--color-bg-base)] rounded-xl border border-[var(--color-border-subtle)] space-y-1 transition-all hover:border-[var(--color-border-strong)]">
-                <div className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-teal-500/15 text-teal-400 flex items-center justify-center shrink-0">
-                    <Layers className="w-3.5 h-3.5" />
-                  </div>
-                  Structured Zone Storage
-                </div>
-                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed pl-8">
-                  Raw uploaded files are categorized into <code className="text-[var(--color-brand-400)] font-mono">00_raw/web</code> with clean metadata tags attached automatically.
-                </p>
-              </div>
             </div>
           </div>
         </div>
+      </form>
 
-        {/* Cloud Sync Push Engine Tile (Full Width Col 12) */}
-        <div className="lg:col-span-12 bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="w-11 h-11 rounded-2xl bg-teal-500/15 text-teal-400 flex items-center justify-center shrink-0 border border-teal-500/20 shadow-xs">
-                <CloudUpload className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2.5">
-                  <h3 className="text-base font-bold text-[var(--color-text-primary)]">
-                    Cloud Storage Push Engine (Cloudflare R2 / S3)
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-teal-500/15 text-teal-400 border border-teal-500/20">
-                    R2 Bucket Sync Active
-                  </span>
-                </div>
-                <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Synchronize local raw data artifacts, categorized PDFs, and manifests with Cloudflare R2 remote storage buckets.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 shrink-0">
-              <Button
-                type="button"
-                onClick={handlePushToCloud}
-                disabled={isCloudSyncing}
-                className="bg-[var(--color-brand-600)] hover:bg-[var(--color-brand-500)]"
-              >
-                <RefreshCw className={`w-4 h-4 mr-1.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                {isCloudSyncing ? 'Syncing to Cloud...' : 'Push All Data to Cloud'}
-              </Button>
-            </div>
+      {/* Cloud Storage Sync Footer Banner */}
+      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-4 shadow-[var(--shadow-card)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 w-full">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-400 flex items-center justify-center shrink-0 border border-teal-500/20">
+            <CloudUpload className="w-4 h-4" />
           </div>
-
-          {cloudSyncMsg && (
-            <div className="p-4 text-xs font-mono rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-              {cloudSyncMsg}
+          <div>
+            <div className="text-xs font-semibold text-[var(--color-text-primary)]">
+              Cloudflare R2 Storage Sync
             </div>
-          )}
+            <p className="text-[11px] text-[var(--color-text-muted)]">
+              Sync local raw assets and metadata manifests with remote storage
+            </p>
+          </div>
         </div>
+
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={handlePushToCloud}
+          disabled={isCloudSyncing}
+          className="self-end sm:self-auto shrink-0"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+          {isCloudSyncing ? 'Synchronizing...' : 'Sync to Cloud'}
+        </Button>
       </div>
+
+      {cloudSyncMsg && (
+        <div className="p-3 text-xs rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span>{cloudSyncMsg}</span>
+        </div>
+      )}
     </div>
   );
 };

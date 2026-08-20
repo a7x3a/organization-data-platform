@@ -8,7 +8,7 @@ Playwright is NOT launched here.
 import asyncio
 import re
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 from urllib.parse import urlparse
 
 import httpx
@@ -16,6 +16,7 @@ import structlog
 
 from app.discovery.extractor import (
     extract_page_links,
+    extract_page_links_with_context,
     extract_resource_urls,
     extract_sitemap_locs,
 )
@@ -41,12 +42,18 @@ class CrawlConfig:
     request_timeout_seconds: int = 30
     max_retries: int = 3
     robots_enabled: bool = True
+    use_scrapling: bool = False
+    stealth_mode: bool = False
 
 
 @dataclass
 class DiscoveredFile:
     url: str
     depth: int
+    context_name: Optional[str] = None
+    page_title: Optional[str] = None
+    page_url: Optional[str] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -105,6 +112,24 @@ def get_effective_allowed_domains(start_urls: list[str], allowed_domains: list[s
     return list(domains)
 
 
+def transform_cloud_storage_url(url: str) -> str:
+    """
+    Transform cloud storage share URLs (Google Drive, Dropbox) into direct download URLs.
+    """
+    if "drive.google.com" in url or "docs.google.com" in url:
+        # Convert https://drive.google.com/file/d/FILE_ID/view... -> https://drive.google.com/uc?export=download&id=FILE_ID
+        match = re.search(r"/file/d/([a-zA-Z0-9_-]+)", url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
+    elif "dropbox.com" in url:
+        if "dl=0" in url:
+            return url.replace("dl=0", "dl=1")
+        elif "dl=1" not in url and "?" not in url:
+            return f"{url}?dl=1"
+    return url
+
+
 def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     """
     Check if a URL points to a downloadable file based on file extension, query parameters, or path segments.
@@ -112,6 +137,7 @@ def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     If `allowed_extensions` is configured, only matching extensions are accepted.
     If `allowed_extensions` is empty, match against DOWNLOADABLE_EXTENSIONS.
     Website theme assets (.css, .js, .svg, .ico, .woff, .ttf) are explicitly ignored.
+    Also handles Wix document storage paths (usrfiles.com/ugd, wixstatic.com/docs) and Google Drive download links.
     """
     parsed = urlparse(url)
     path = parsed.path.lower()
@@ -121,6 +147,31 @@ def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     if any(path.endswith(ignored) for ignored in (".css", ".js", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot")):
         return False
 
+    # Special handling for Wix document CDN (usrfiles.com/ugd/..., static.wixstatic.com/docs/...)
+    if "usrfiles.com" in url or "wixstatic.com/docs" in url or "wixstatic.com/media" in url:
+        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar")):
+            return True
+        if "/ugd/" in path or "/docs/" in path:
+            return True
+
+    # Special handling for Kurdistan Government CDN & document storage (cdn.gov.krd, *.gov.krd/storage/...)
+    if "cdn.gov.krd" in url or "gov.krd" in url:
+        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar", ".csv", ".json")):
+            return True
+        if "/storage/" in path or "/files/" in path or "/documents/" in path or "/uploads/" in path or "/media/" in path or "/archive/" in path:
+            return True
+
+    # Special handling for Kurdipedia library & file storage (kurdipedia.org/files/...)
+    if "kurdipedia.org" in url:
+        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar", ".csv", ".txt")):
+            return True
+        if "/files/books/" in path or "/files/documents/" in path or "/files/" in path:
+            return True
+
+    # Special handling for Google Drive & Dropbox downloads
+    if ("drive.google.com" in url or "docs.google.com" in url) and ("export=download" in query or "/file/d/" in path or "/uc" in path):
+        return True
+
     targets = [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in allowed_extensions] if allowed_extensions else DOWNLOADABLE_EXTENSIONS
 
     # 1. Path extension check (e.g. /books/history.pdf)
@@ -129,6 +180,8 @@ def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
 
     # 2. Query parameter check (e.g. /download.php?file=book.pdf or ?format=pdf)
     if query:
+        if "export=download" in query or "dl=1" in query or "download=true" in query:
+            return True
         for ext in targets:
             clean_ext = ext.lstrip(".")
             if f".{clean_ext}" in query or f"format={clean_ext}" in query or f"type={clean_ext}" in query or f"file={clean_ext}" in query:
@@ -150,6 +203,30 @@ def url_matches_pattern(url: str, patterns: list[str]) -> bool:
     return any(re.search(pattern, url) for pattern in patterns)
 
 
+KNOWN_CDN_DOMAINS = {
+    "cdn.gov.krd",    # Kurdistan Regional Government Asset CDN
+    "gov.krd",        # Kurdistan Government Domain & Storage
+    "kurdipedia.org", # Kurdipedia Digital Library & File Repository
+    "usrfiles.com",   # Wix user document CDN (usrfiles.com/ugd/...)
+    "wixstatic.com",  # Wix media & static asset CDN
+    "wix.com",
+    "wixsite.com",
+    "vercel-storage.com",
+    "amazonaws.com",
+    "googleapis.com",
+    "drive.google.com",
+    "docs.google.com",
+    "cloudflarestorage.com",
+    "r2.dev",
+    "cloudinary.com",
+    "archive.org",
+    "dropbox.com",
+    "mediafire.com",
+    "wikimedia.org",
+    "githubusercontent.com",
+}
+
+
 def is_allowed_domain(url: str, allowed_domains: list[str]) -> bool:
     """Return True if the URL's domain is in the allowed list (or list is empty)."""
     if not allowed_domains:
@@ -165,6 +242,20 @@ def is_allowed_domain(url: str, allowed_domains: list[str]) -> bool:
         if clean_host == clean_d or clean_host.endswith(f".{clean_d}") or clean_d.endswith(f".{clean_host}"):
             return True
     return False
+
+
+def is_allowed_resource_domain(url: str, allowed_domains: list[str]) -> bool:
+    """
+    Return True if the resource URL (PDF, audio, document) is allowed.
+    Resource files hosted on trusted cloud storage/CDNs linked from target pages are permitted.
+    """
+    if is_allowed_domain(url, allowed_domains):
+        return True
+    hostname = (urlparse(url).hostname or "").lower()
+    if not hostname:
+        return False
+    return any(hostname == cdn or hostname.endswith(f".{cdn}") for cdn in KNOWN_CDN_DOMAINS)
+
 
 
 _BLOCKED_HOSTNAMES = {
@@ -237,8 +328,9 @@ async def crawl(
     queue: asyncio.Queue = asyncio.Queue()
 
     headers = {
-        "User-Agent": "ODP-Collector/1.0 (+https://github.com/org/data-platform)",
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,ku;q=0.8,ar;q=0.7",
     }
 
     delay = config.request_delay_ms / 1000.0
@@ -358,47 +450,100 @@ async def crawl(
                         normalized = normalize_url(resource_url, base_url=url)
                         if normalized is None or normalized in visited:
                             continue
-                        if not is_allowed_domain(normalized, effective_allowed_domains):
-                            continue
                         if await is_private_address(normalized):
                             continue
                         if url_matches_pattern(normalized, config.excluded_url_patterns):
                             continue
 
                         if is_downloadable_url(normalized, config.allowed_extensions):
-                            visited.add(normalized)
-                            result.files_discovered.append(DiscoveredFile(url=normalized, depth=depth))
-                            log.debug("file_discovered", url=normalized, via="embedded_resource")
+                            if is_allowed_resource_domain(normalized, effective_allowed_domains):
+                                visited.add(normalized)
+                                result.files_discovered.append(DiscoveredFile(url=normalized, depth=depth))
+                                log.debug("file_discovered", url=normalized, via="embedded_resource")
+                                if on_file_found:
+                                    await on_file_found()
                         else:
-                            extra_page_candidates.add(normalized)
+                            if is_allowed_domain(normalized, effective_allowed_domains):
+                                extra_page_candidates.add(normalized)
+
+                    # Automatic REST API probe for SPA sites (e.g. ktebstan.net)
+                    if "ktebstan.net" in url.lower():
+                        api_endpoint = "https://www.ktebstan.net/api/books?page=1&limit=500&sortBy=download&sortOrder=desc"
+                        try:
+                            api_res = await client.get(api_endpoint)
+                            if api_res.status_code == 200:
+                                api_data = api_res.json()
+                                books = api_data.get("books", []) if isinstance(api_data, dict) else api_data
+                                for book in books:
+                                    file_name = book.get("file_url")
+                                    audio_url = book.get("audio_file_url")
+                                    if file_name and isinstance(file_name, str):
+                                        full_pdf_url = f"https://z4l1g0tev5tfrvnx.public.blob.vercel-storage.com/{file_name}"
+                                        if full_pdf_url not in visited:
+                                            visited.add(full_pdf_url)
+                                            result.files_discovered.append(DiscoveredFile(url=full_pdf_url, depth=depth + 1))
+                                            if on_file_found:
+                                                await on_file_found()
+                                    if audio_url and isinstance(audio_url, str):
+                                        if audio_url not in visited:
+                                            visited.add(audio_url)
+                                            result.files_discovered.append(DiscoveredFile(url=audio_url, depth=depth + 1))
+                                            if on_file_found:
+                                                await on_file_found()
+                        except Exception as api_err:
+                            log.warning("spa_api_probe_failed", url=url, error=str(api_err))
+
+                    # Diagnostic log if HTML body is very small (< 2.5KB) with no downloadable files
+                    if len(html) < 2500 and not result.files_discovered:
+                        log.info("spa_shell_detected_recommend_browser_or_scrapling", url=url, html_bytes=len(html))
 
                     if depth >= config.max_depth:
                         return
 
-                    # Extract links from HTML — plus any non-file embedded
-                    # resources above that look like more pages rather than
-                    # downloadable content (normalize_url is idempotent, so
-                    # re-normalizing the already-normalized candidates here
-                    # is harmless).
-                    for link in extract_page_links(html, url) | extra_page_candidates:
+                    # Extract links with rich context from HTML
+                    page_link_contexts = extract_page_links_with_context(html, url)
+                    for link, ctx in page_link_contexts:
                         link_url = normalize_url(link, base_url=url)
                         if link_url is None:
                             continue
-                        if link_url in visited:
-                            continue
-                        if not is_allowed_domain(link_url, effective_allowed_domains):
-                            continue
-                        if await is_private_address(link_url):
-                            continue
-                        if config.allowed_url_patterns and not url_matches_pattern(
-                            link_url, config.allowed_url_patterns
-                        ):
-                            continue
-                        if url_matches_pattern(link_url, config.excluded_url_patterns):
+
+                        # Check if link target is a downloadable file
+                        if is_downloadable_url(link_url, config.allowed_extensions):
+                            if is_allowed_resource_domain(link_url, effective_allowed_domains):
+                                if not url_matches_pattern(link_url, config.excluded_url_patterns):
+                                    if not any(df.url == link_url for df in result.files_discovered):
+                                        result.files_discovered.append(
+                                            DiscoveredFile(
+                                                url=link_url,
+                                                depth=depth,
+                                                context_name=ctx.get("best_name"),
+                                                page_title=ctx.get("page_title"),
+                                                page_url=url,
+                                                metadata=ctx,
+                                            )
+                                        )
+                                        log.debug("file_discovered_with_context", url=link_url, context=ctx.get("best_name"))
+                                        if on_file_found:
+                                            await on_file_found()
                             continue
 
-                        visited.add(link_url)
-                        await queue.put((link_url, depth + 1))
+                        # Navigation page / route traversal (menus, categories, pagination)
+                        if link_url not in visited and is_allowed_domain(link_url, effective_allowed_domains):
+                            if not await is_private_address(link_url):
+                                if not config.allowed_url_patterns or url_matches_pattern(link_url, config.allowed_url_patterns):
+                                    if not url_matches_pattern(link_url, config.excluded_url_patterns):
+                                        visited.add(link_url)
+                                        await queue.put((link_url, depth + 1))
+
+                    # Also queue extra non-file embedded candidates (if any)
+                    for cand in extra_page_candidates:
+                        c_url = normalize_url(cand, base_url=url)
+                        if c_url and c_url not in visited and is_allowed_domain(c_url, effective_allowed_domains):
+                            if not await is_private_address(c_url):
+                                if not config.allowed_url_patterns or url_matches_pattern(c_url, config.allowed_url_patterns):
+                                    if not url_matches_pattern(c_url, config.excluded_url_patterns):
+                                        visited.add(c_url)
+                                        await queue.put((c_url, depth + 1))
 
                 except httpx.TooManyRedirects:
                     log.warning("too_many_redirects", url=url)

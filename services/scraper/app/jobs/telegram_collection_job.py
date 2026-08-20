@@ -102,7 +102,8 @@ class TelegramCollectionJob:
             )
 
             try:
-                client = build_client()
+                telegram_creds = self._data.get("telegramCredentials")
+                client = build_client(telegram_creds)
             except TelegramNotConfiguredError as exc:
                 log.error("telegram_not_configured", error=str(exc))
                 await self._pipeline.report_file_error(None, "UNKNOWN", str(exc))
@@ -113,9 +114,8 @@ class TelegramCollectionJob:
             try:
                 if not await client.is_user_authorized():
                     message = (
-                        "Telegram session is not authorized — the saved session string is "
-                        "missing, expired, or was revoked. Run `python -m scripts.telegram_login` "
-                        "again to generate a fresh one."
+                        "Telegram session is not authorized — the user session is missing, "
+                        "expired, or was revoked. Please verify and authenticate your Telegram account."
                     )
                     log.error("telegram_session_not_authorized", run_id=self._run_db_id)
                     await self._pipeline.report_file_error(None, "UNKNOWN", message)
@@ -171,6 +171,8 @@ class TelegramCollectionJob:
                 None, "UNKNOWN", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             )
             await self._finalize(manifest, metadata, status="FAILED")
+        finally:
+            await self._pipeline.cleanup()
 
     async def _finalize(
         self,
@@ -179,17 +181,37 @@ class TelegramCollectionJob:
         *,
         status: str,
     ) -> None:
-        """Upload metadata.jsonl and manifest.json, then update run status."""
+        """Upload metadata.jsonl, category metadata/manifests, and manifest.json, then update run status."""
         completed_at = datetime.now(timezone.utc)
 
+        # Upload main root metadata.jsonl
         meta_path = metadata.finalize()
         try:
             storage.upload_file(meta_path, metadata.r2_key, "application/jsonl")
         except Exception as e:
             log.error("metadata_upload_failed", error=str(e))
-        finally:
-            metadata.cleanup()
 
+        # Upload subfolder per-category metadata.jsonl files
+        cat_files = metadata.finalize_categories()
+        for cat_dir, (cat_path, cat_r2_key) in cat_files.items():
+            try:
+                storage.upload_file(cat_path, cat_r2_key, "application/jsonl")
+                log.info("category_metadata_uploaded", category=cat_dir, r2_key=cat_r2_key)
+            except Exception as e:
+                log.error("category_metadata_upload_failed", category=cat_dir, error=str(e))
+
+        metadata.cleanup()
+
+        # Upload subfolder per-category manifest.json files
+        cat_manifests = manifest.build_category_manifests(status=status, completed_at=completed_at)
+        for cat_name, (cat_bytes, cat_r2_key) in cat_manifests.items():
+            try:
+                storage.upload_bytes(cat_bytes, cat_r2_key, "application/json")
+                log.info("category_manifest_uploaded", category=cat_name, r2_key=cat_r2_key)
+            except Exception as e:
+                log.error("category_manifest_upload_failed", category=cat_name, error=str(e))
+
+        # Upload main root manifest.json
         manifest_bytes = manifest.to_json(status=status, completed_at=completed_at)
         try:
             storage.upload_bytes(manifest_bytes, manifest.r2_key, "application/json")

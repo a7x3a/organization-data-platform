@@ -146,14 +146,33 @@ class MediaDownloader:
         filename = os.path.basename(path) or "downloaded_media.mp3"
         dest_path = os.path.join(self.temp_dir, filename)
 
+        # Stream download — never buffer entire file in memory
+        max_size = settings.max_file_size_bytes
+        chunk_size = 64 * 1024  # 64 KB
+        total_size = 0
+
         async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            with open(dest_path, "wb") as f:
-                f.write(response.content)
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "")
+
+                with open(dest_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size):
+                        total_size += len(chunk)
+                        if total_size > max_size:
+                            f.close()
+                            try:
+                                os.unlink(dest_path)
+                            except OSError:
+                                pass
+                            raise MediaDownloaderError(
+                                f"Media file exceeds {max_size} bytes at {url}"
+                            )
+                        f.write(chunk)
 
         ext = os.path.splitext(dest_path)[1].lower()
-        content_type = response.headers.get("content-type", f"audio/{ext.lstrip('.')}")
+        if not content_type:
+            content_type = f"audio/{ext.lstrip('.')}" if ext in {".mp3", ".wav", ".m4a", ".ogg", ".flac"} else f"video/{ext.lstrip('.')}"
 
         return MediaDownloadResult(
             local_path=dest_path,

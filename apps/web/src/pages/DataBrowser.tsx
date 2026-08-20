@@ -5,6 +5,7 @@ import { useHealth } from '../hooks/useHealth';
 import { runsApi } from '../api/runs';
 import { filesApi } from '../api/files';
 import { FileStatusBadge } from '../components/FileStatusBadge';
+import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -31,6 +32,63 @@ import {
   Info,
   Filter,
 } from 'lucide-react';
+
+// Data Intelligence helpers
+function getLanguageInfo(file: CollectedFile): { name: string; code: string } | null {
+  const lang = (file.metadata as Record<string, unknown>)?.language as Record<string, unknown> | undefined;
+  if (!lang?.language_name || !lang?.language) return null;
+  return { name: lang.language_name as string, code: lang.language as string };
+}
+
+function getQualityScore(file: CollectedFile): number | null {
+  const quality = (file.metadata as Record<string, unknown>)?.quality as Record<string, unknown> | undefined;
+  if (!quality?.score) return null;
+  return quality.score as number;
+}
+
+function getKurdishCategory(file: CollectedFile): { category: string; confidence: number } | null {
+  const cat = (file.metadata as Record<string, unknown>)?.kurdish_category as Record<string, unknown> | undefined;
+  if (!cat?.category || cat.category === 'unknown' || cat.category === 'general') return null;
+  return { category: cat.category as string, confidence: (cat.confidence as number) || 0 };
+}
+
+function QualityBar({ score }: { score: number }) {
+  const color = score >= 80 ? 'bg-[var(--color-success-400)]' : score >= 50 ? 'bg-[var(--color-warning-400)]' : 'bg-[var(--color-danger-400)]';
+  return (
+    <div className="flex items-center gap-1.5" title={`Quality: ${score}/100`}>
+      <div className="w-12 h-1.5 rounded-full bg-[var(--color-bg-base)] overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${score}%` }} />
+      </div>
+      <span className="text-[10px] font-mono text-[var(--color-text-muted)]">{score}</span>
+    </div>
+  );
+}
+
+function LanguageBadge({ name }: { name: string }) {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-info-500)]/10 text-[var(--color-info-400)] border border-[var(--color-info-500)]/20">
+      {name}
+    </span>
+  );
+}
+
+function CategoryBadge({ category, confidence }: { category: string; confidence: number }) {
+  const colors: Record<string, string> = {
+    history: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    law: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    literature: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    religion: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    science: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+    education: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+    politics: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  };
+  const cls = colors[category] || 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${cls}`} title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>
+      {category}
+    </span>
+  );
+}
 
 function categoryOf(file: CollectedFile): string {
   if (file.r2Key && file.r2Key.includes('/')) {
@@ -97,10 +155,10 @@ const FileDetailModal: React.FC<{
   onDeleteRequest: () => void;
 }> = ({ file, onClose, onEdit, onDeleteRequest }) => {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-2xl)] p-6 max-w-lg w-full shadow-2xl space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-2xl)] shadow-2xl overflow-hidden my-auto">
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border-subtle)] pb-4">
+        <div className="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2.5 rounded-[var(--radius-xl)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex-shrink-0">
               <FileText className="w-5 h-5" />
@@ -114,16 +172,21 @@ const FileDetailModal: React.FC<{
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] p-1 cursor-pointer">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Details List */}
-        <div className="space-y-3 text-xs">
+        {/* Scrollable Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3 text-xs">
           <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
             <span className="text-[var(--color-text-muted)] font-medium">Status</span>
             <FileStatusBadge status={file.status} />
+          </div>
+
+          <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
+            <span className="text-[var(--color-text-muted)] font-medium">Review Status</span>
+            <FileApprovalBadge status={file.approvalStatus} />
           </div>
 
           <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
@@ -177,8 +240,8 @@ const FileDetailModal: React.FC<{
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-3 border-t border-[var(--color-border-subtle)] gap-2">
+        {/* Pinned Footer */}
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] gap-2">
           <div className="flex gap-2">
             <Button
               variant="secondary"
@@ -241,28 +304,30 @@ const EditFileModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-2xl overflow-hidden my-auto">
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
           <h3 className="text-base font-semibold text-[var(--color-text-primary)]">Edit File Name</h3>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+          <button onClick={onClose} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
-              File Name
-            </label>
-            <input
-              type="text"
-              value={fileName}
-              onChange={(e) => setFileName(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-500)]"
-              required
-            />
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+                File Name
+              </label>
+              <input
+                type="text"
+                value={fileName}
+                onChange={(e) => setFileName(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-500)]"
+                required
+              />
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
             <Button variant="ghost" size="sm" onClick={onClose} type="button">
               Cancel
             </Button>
@@ -285,47 +350,82 @@ const UploadModal: React.FC<{
 }> = ({ sourceId, sourceName, onClose, onSuccess }) => {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
     setIsUploading(true);
+    setError(null);
     try {
       await filesApi.manualUpload({ sourceId, file });
       onSuccess();
       onClose();
-    } catch {
-      // Error handled
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error || 'Upload failed. Please try again.');
     } finally {
       setIsUploading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-[var(--color-text-primary)]">
-            Upload File to {sourceName}
-          </h3>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-2xl overflow-hidden my-auto">
+        {/* Header */}
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
+          <div>
+            <h3 className="text-base font-semibold text-[var(--color-text-primary)]">
+              Upload to {sourceName}
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              Files are deduplicated automatically via SHA-256
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <form onSubmit={handleUpload} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
-              Select File
-            </label>
-            <input
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="w-full text-xs text-[var(--color-text-muted)] file:mr-4 file:py-2 file:px-4 file:rounded-[var(--radius-md)] file:border-0 file:text-xs file:font-semibold file:bg-[var(--color-bg-elevated)] file:text-[var(--color-text-primary)] hover:file:bg-[var(--color-bg-base)] cursor-pointer"
-              required
-            />
+
+        <form onSubmit={handleUpload} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Error Banner */}
+            {error && (
+              <div className="p-3 text-xs rounded-[var(--radius-md)] bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-400)]/20 flex items-center gap-2">
+                <Info className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                Select File <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="file"
+                accept=".pdf,.epub,.mobi,.azw3,.fb2,.djvu,.doc,.docx,.odt,.rtf,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.parquet,.srt,.vtt,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.mp4,.mkv,.webm,.mov,.avi,.flv,.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.tiff,.heic,.zip,.rar,.7z,.tar,.gz,.bz2,.xz"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full text-xs text-[var(--color-text-muted)] file:mr-4 file:py-2 file:px-4 file:rounded-[var(--radius-md)] file:border-0 file:text-xs file:font-semibold file:bg-[var(--color-bg-elevated)] file:text-[var(--color-text-primary)] hover:file:bg-[var(--color-bg-base)] cursor-pointer"
+                required
+              />
+            </div>
+
+            {/* File type hints */}
+            <div className="flex flex-wrap gap-1.5">
+              {['.pdf', '.epub', '.docx', '.mp3', '.parquet'].map((ext) => (
+                <span key={ext} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">
+                  {ext}
+                </span>
+              ))}
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono text-[var(--color-text-muted)]">
+                + 40 more
+              </span>
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" size="sm" onClick={onClose} type="button">
+
+          {/* Pinned Footer */}
+          <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+            <Button variant="ghost" size="sm" onClick={onClose} type="button" disabled={isUploading}>
               Cancel
             </Button>
             <Button variant="primary" size="sm" disabled={isUploading || !file} type="submit">
@@ -388,10 +488,16 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
               </>
             )}
           </div>
+          <div className="flex items-center gap-1.5 mt-1">
+            {getLanguageInfo(file) && <LanguageBadge name={getLanguageInfo(file)!.name} />}
+            {getQualityScore(file) !== null && <QualityBar score={getQualityScore(file)!} />}
+            {getKurdishCategory(file) && <CategoryBadge category={getKurdishCategory(file)!.category} confidence={getKurdishCategory(file)!.confidence} />}
+          </div>
         </button>
 
         {/* Quick Action Buttons */}
         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+          <FileApprovalBadge status={file.approvalStatus} />
           <FileStatusBadge status={file.status} />
           <Button
             variant="ghost"

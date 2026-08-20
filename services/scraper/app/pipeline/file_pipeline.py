@@ -19,6 +19,7 @@ import os
 from typing import Any, Optional
 
 import httpx
+import redis.asyncio as aioredis
 import structlog
 
 from app.config.settings import settings
@@ -45,6 +46,21 @@ class FilePipeline:
         self._run_db_id = run_db_id
         self._source_id = source_id
         self._run_folder_key = run_folder_key
+        self._redis_pool: Optional[aioredis.ConnectionPool] = None
+        self._cancelled: bool = False
+        self._last_cancelled_check: float = 0.0
+
+    def _get_redis_pool(self) -> aioredis.ConnectionPool:
+        if self._redis_pool is None:
+            self._redis_pool = aioredis.ConnectionPool.from_url(
+                settings.redis_url, decode_responses=False
+            )
+        return self._redis_pool
+
+    async def cleanup(self) -> None:
+        if self._redis_pool is not None:
+            await self._redis_pool.aclose()
+            self._redis_pool = None
 
     # ─── Pre-download check ────────────────────────────────────
 
@@ -98,18 +114,55 @@ class FilePipeline:
                 await self.report_progress(manifest)
                 return
 
-            extra_metadata = None
+            extra_metadata = {}
             is_pdf = (result.mime_type == "application/pdf") or (
                 result.extension and result.extension.lower() == ".pdf"
             )
+
+            # Extract text for analysis
+            extracted_text = ""
             if is_pdf and os.path.exists(result.temp_path):
                 from app.media.pdf_processor import extract_and_classify_pdf
 
                 pdf_res = extract_and_classify_pdf(result.temp_path)
-                extra_metadata = {"pdf_extraction": pdf_res.to_dict()}
+                extra_metadata["pdf_extraction"] = pdf_res.to_dict()
                 category = pdf_res.folder_path
+                extracted_text = pdf_res.text_content if hasattr(pdf_res, "text_content") else ""
             else:
                 category = categorize_file(result.mime_type, result.extension, temp_path=result.temp_path)
+
+            # Data Intelligence: language detection, quality scoring, Kurdish categorization
+            if os.path.exists(result.temp_path):
+                try:
+                    from app.media.language_detector import detect_language, extract_text_from_file
+                    from app.media.quality_scorer import score_quality
+                    from app.media.kurdish_categorizer import categorize_content
+
+                    # Extract text if not already done (non-PDF files)
+                    if not extracted_text:
+                        extracted_text = extract_text_from_file(result.temp_path, result.mime_type)
+
+                    # Language detection
+                    if extracted_text:
+                        lang_result = detect_language(extracted_text)
+                        extra_metadata["language"] = lang_result.to_dict()
+
+                    # Quality scoring
+                    quality_result = score_quality(
+                        result.temp_path,
+                        text_content=extracted_text,
+                        mime_type=result.mime_type,
+                        metadata=extra_metadata,
+                    )
+                    extra_metadata["quality"] = quality_result.to_dict()
+
+                    # Kurdish content categorization
+                    if extracted_text:
+                        cat_result = categorize_content(extracted_text, extra_metadata)
+                        extra_metadata["kurdish_category"] = cat_result.to_dict()
+
+                except Exception as e:
+                    log.warning("data_intelligence_failed", url=result.source_url, error=str(e))
 
             r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
 
@@ -149,7 +202,11 @@ class FilePipeline:
                 extra_metadata=extra_metadata,
             )
 
-            manifest.record_file_downloaded()
+            manifest.record_file_downloaded(
+                category=category,
+                file_name=result.file_name,
+                file_size=result.file_size,
+            )
             log.info(
                 "file_collected",
                 url=result.source_url,
@@ -176,32 +233,28 @@ class FilePipeline:
             log.error("run_status_update_failed", run_id=self._run_db_id, error=str(e))
 
     async def is_cancelled(self) -> bool:
-        if getattr(self, "_cancelled", False):
+        if self._cancelled:
             return True
 
         now = asyncio.get_event_loop().time()
-        last_check = getattr(self, "_last_cancelled_check", 0.0)
-        if now - last_check < 0.5:
-            return getattr(self, "_cancelled", False)
+        if now - self._last_cancelled_check < 0.5:
+            return self._cancelled
 
         self._last_cancelled_check = now
 
         try:
-            import redis.asyncio as aioredis
-
-            r = aioredis.from_url(settings.redis_url)
-            val = await r.get(f"cancel_run:{self._run_db_id}")
-            await r.aclose()
-            if val:
-                self._cancelled = True
-                return True
+            async with aioredis.Redis(connection_pool=self._get_redis_pool()) as r:
+                val = await r.get(f"cancel_run:{self._run_db_id}")
+                if val:
+                    self._cancelled = True
+                    return True
         except Exception:
             pass
 
         try:
-            r = await self._api.get(f"/api/runs/{self._run_db_id}")
-            r.raise_for_status()
-            data = r.json()
+            resp = await self._api.get(f"/api/runs/{self._run_db_id}")
+            resp.raise_for_status()
+            data = resp.json()
             status = data.get("status")
             if status in ("CANCEL_REQUESTED", "CANCELLED"):
                 self._cancelled = True
@@ -218,28 +271,24 @@ class FilePipeline:
         Returns True if cancelled while waiting.
         """
         try:
-            import redis.asyncio as aioredis
-            r = aioredis.from_url(settings.redis_url)
-            while True:
-                if await self.is_cancelled():
-                    await r.aclose()
-                    return True
+            async with aioredis.Redis(connection_pool=self._get_redis_pool()) as r:
+                while True:
+                    if await self.is_cancelled():
+                        return True
 
-                val = await r.get(f"pause_run:{self._run_db_id}")
-                if not val:
-                    # Also check API status as fallback
-                    res = await self._api.get(f"/api/runs/{self._run_db_id}")
-                    if res.status_code == 200:
-                        st = res.json().get("status")
-                        if st != "PAUSED":
+                    val = await r.get(f"pause_run:{self._run_db_id}")
+                    if not val:
+                        # Also check API status as fallback
+                        res = await self._api.get(f"/api/runs/{self._run_db_id}")
+                        if res.status_code == 200:
+                            st = res.json().get("status")
+                            if st != "PAUSED":
+                                break
+                        else:
                             break
-                    else:
-                        break
 
-                log.info("collection_run_paused_waiting", run_id=self._run_db_id)
-                await asyncio.sleep(2)
-
-            await r.aclose()
+                    log.info("collection_run_paused_waiting", run_id=self._run_db_id)
+                    await asyncio.sleep(2)
         except Exception as e:
             log.warning("pause_check_error", run_id=self._run_db_id, error=str(e))
 

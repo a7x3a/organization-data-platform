@@ -156,3 +156,85 @@ export async function listUsers() {
   const users = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
   return users.map(toPublicUser);
 }
+
+export async function getUserById(id: string) {
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  return toPublicUser(user);
+}
+
+export async function updateUser(
+  id: string,
+  input: {
+    name?: string;
+    email?: string | null;
+    password?: string;
+    roles?: UserRole[];
+    isActive?: boolean;
+  },
+  currentUserId?: string
+) {
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+
+  // Prevent user from deactivating themselves
+  if (input.isActive === false && currentUserId && id === currentUserId) {
+    throw new AppError(400, 'You cannot deactivate your own account', 'CANNOT_DEACTIVATE_SELF');
+  }
+
+  // Prevent removing the last active Admin
+  if (input.roles && target.roles.includes(UserRole.ADMIN) && !input.roles.includes(UserRole.ADMIN)) {
+    const otherAdmins = await prisma.user.count({
+      where: {
+        roles: { has: UserRole.ADMIN },
+        isActive: true,
+        id: { not: id },
+      },
+    });
+    if (otherAdmins === 0) {
+      throw new AppError(400, 'Cannot remove the last active Admin role', 'LAST_ADMIN_REQUIRED');
+    }
+  }
+
+  let passwordHash: string | undefined;
+  if (input.password && input.password.trim()) {
+    passwordHash = await hashPassword(input.password);
+  }
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.email !== undefined && { email: input.email }),
+      ...(input.roles !== undefined && { roles: input.roles }),
+      ...(input.isActive !== undefined && { isActive: input.isActive }),
+      ...(passwordHash && { passwordHash }),
+    },
+  });
+
+  return toPublicUser(updated);
+}
+
+export async function deleteUser(id: string, currentUserId?: string) {
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+
+  if (currentUserId && id === currentUserId) {
+    throw new AppError(400, 'You cannot delete your own account', 'CANNOT_DELETE_SELF');
+  }
+
+  if (target.roles.includes(UserRole.ADMIN)) {
+    const otherAdmins = await prisma.user.count({
+      where: {
+        roles: { has: UserRole.ADMIN },
+        isActive: true,
+        id: { not: id },
+      },
+    });
+    if (otherAdmins === 0) {
+      throw new AppError(400, 'Cannot delete the last active Admin user', 'LAST_ADMIN_REQUIRED');
+    }
+  }
+
+  await prisma.user.delete({ where: { id } });
+}

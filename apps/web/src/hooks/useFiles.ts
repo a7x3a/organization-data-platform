@@ -8,7 +8,9 @@ export function useFiles(
     collectionRunId?: string;
     sourceId?: string;
     status?: string;
+    approvalStatus?: string;
     sha256?: string;
+    sourceUrl?: string;
   },
   options?: {
     refetchInterval?: number | false;
@@ -71,6 +73,76 @@ export function useDeleteFile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useApproveFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) => filesApi.approve(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useRejectFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) => filesApi.reject(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useBulkApproveFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fileIds, notes }: { fileIds: string[]; notes?: string }) =>
+      filesApi.bulkApprove(fileIds, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useBulkRejectFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fileIds, notes }: { fileIds: string[]; notes?: string }) =>
+      filesApi.bulkReject(fileIds, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useApproveRunFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, notes }: { runId: string; notes?: string }) =>
+      filesApi.approveRunFiles(runId, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useRejectRunFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, notes }: { runId: string; notes?: string }) =>
+      filesApi.rejectRunFiles(runId, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
     },
   });
 }

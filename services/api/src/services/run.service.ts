@@ -11,13 +11,30 @@ function generateRunId(datePrefix: string, seq: number): string {
   return `${datePrefix}_run_${String(seq).padStart(6, '0')}`;
 }
 
-export async function listRuns(query: {
-  page?: string;
-  pageSize?: string;
-  collectorId?: string;
-  sourceId?: string;
-  status?: string;
-}) {
+interface CurrentUser {
+  sub: string;
+  roles: string[];
+}
+
+function assertCanManageRun(run: { createdById: string | null }, currentUser?: CurrentUser) {
+  if (!currentUser) return;
+  if (currentUser.roles.includes('ADMIN')) return;
+  if (run.createdById && run.createdById !== currentUser.sub) {
+    throw new AppError(403, 'You do not have permission to modify or control this run. You can only view its progress and logs.', 'FORBIDDEN');
+  }
+}
+
+export async function listRuns(
+  query: {
+    page?: string;
+    pageSize?: string;
+    collectorId?: string;
+    sourceId?: string;
+    status?: string;
+    approvalStatus?: string;
+  },
+  _currentUser?: CurrentUser
+) {
   const pagination = parsePagination(query);
   const { skip, take } = toPrismaSkipTake(pagination);
 
@@ -25,7 +42,9 @@ export async function listRuns(query: {
   if (query.collectorId) where.collectorId = query.collectorId;
   if (query.sourceId) where.sourceId = query.sourceId;
   if (query.status) where.status = query.status;
+  if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
 
+  // Visibility: All authenticated users can see all runs across all users
   const [data, total] = await prisma.$transaction([
     prisma.collectionRun.findMany({
       where,
@@ -35,6 +54,8 @@ export async function listRuns(query: {
       include: {
         collector: { select: { id: true, name: true, type: true } },
         source: { select: { id: true, name: true, slug: true } },
+        createdBy: { select: { id: true, name: true, username: true } },
+        approvedBy: { select: { id: true, name: true, username: true } },
       },
     }),
     prisma.collectionRun.count({ where }),
@@ -43,20 +64,19 @@ export async function listRuns(query: {
   return buildPaginatedResult(data, total, pagination);
 }
 
-export async function getRunById(id: string) {
+export async function getRunById(id: string, _currentUser?: CurrentUser) {
   const run = await prisma.collectionRun.findUnique({
     where: { id },
     include: {
       collector: { select: { id: true, name: true, type: true, configuration: true } },
       source: { select: { id: true, name: true, slug: true, baseUrl: true } },
-      // Capped rather than unbounded — a pathological run (thousands of
-      // per-file failures) shouldn't turn every run-detail fetch into an
-      // unbounded row scan. Newest first: the reason a run is FAILED is
-      // almost always one of its most recent errors, not its first.
+      createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
       errors: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   });
   if (!run) throw new AppError(404, 'Collection run not found', 'RUN_NOT_FOUND');
+
   return run;
 }
 
@@ -70,20 +90,6 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   if (!collector) throw new AppError(404, 'Collector not found', 'COLLECTOR_NOT_FOUND');
   if (!collector.enabled) throw new AppError(400, 'Collector is disabled', 'COLLECTOR_DISABLED');
 
-  // Sequence numbers are derived from the highest existing runId for today,
-  // never from a row count — count() breaks the moment any run is deleted
-  // (deleteRun makes that possible now), since the next "count + 1" can
-  // collide with a runId that still exists. runId's numeric suffix is
-  // zero-padded, so string-descending order matches numeric order.
-  //
-  // Deliberately NOT scoped to collectorId — CollectionRun.runId is a single
-  // globally-unique column (schema.prisma), not unique per collector. Scoping
-  // this lookup by collectorId meant two different collectors both starting
-  // their first run of the day computed the same "next" sequence (1 each),
-  // both tried to create "..._run_000001", and the second one 500'd on a
-  // unique-constraint violation — which is exactly what silently broke every
-  // *other* collector's first run after any one collector had already taken
-  // run_000001 for the day.
   const datePrefix = new Date().toISOString().slice(0, 10);
   const latestRun = await prisma.collectionRun.findFirst({
     where: { runId: { startsWith: `${datePrefix}_run_` } },
@@ -93,7 +99,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   const nextSeq = latestRun ? parseInt(latestRun.runId.split('_run_')[1], 10) + 1 : 1;
   const runId = generateRunId(datePrefix, nextSeq);
 
-  // Create the run record
+  // Create the run record attached to the launching user
   const run = await prisma.collectionRun.create({
     data: {
       collectorId,
@@ -101,16 +107,29 @@ export async function startCollectionRun(collectorId: string, userId: string) {
       runId,
       status: RunStatus.PENDING,
       collectorVersion: collector.version,
+      createdById: userId,
     },
   });
 
-  // R2 zone per collector type — 00_raw/web/... for WEB, 00_raw/telegram/...
-  // for TELEGRAM, matching the platform's storage layout (see
-  // WEB_COLLECTION_PLATFORM_PLAN.md §5). Falls back to 'web' for any other
-  // (not-yet-implemented) collector type rather than producing an invalid key.
   const zone = collector.type === 'TELEGRAM' ? 'telegram' : 'web';
 
-  // Enqueue the BullMQ job
+  // Per-User Telegram Session support: If Telegram collector, attach user's session credentials
+  let telegramCredentials: Record<string, unknown> | undefined = undefined;
+  if (collector.type === 'TELEGRAM') {
+    const userSession = await prisma.userTelegramSession.findUnique({
+      where: { userId },
+    });
+    if (userSession && userSession.sessionString) {
+      telegramCredentials = {
+        sessionString: userSession.sessionString,
+        apiId: userSession.apiId,
+        apiHash: userSession.apiHash,
+        phoneNumber: userSession.phoneNumber,
+        isVerified: userSession.isVerified,
+      };
+    }
+  }
+
   const job = await collectionQueue.add(
     'collection.start',
     {
@@ -120,6 +139,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
       sourceSlug: collector.source.slug,
       collectorType: collector.type,
       configuration: collector.configuration,
+      telegramCredentials,
       runFolderKey: `00_raw/${zone}/${collector.source.slug}/${runId}`,
     },
     {
@@ -132,11 +152,10 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   );
 
   logger.info(
-    { runId: run.id, jobId: job.id, collectorId, userId },
+    { runId: run.id, jobId: job.id, collectorId, userId, hasUserTelegram: !!telegramCredentials },
     'collection_run_queued'
   );
 
-  // Audit log
   await prisma.auditLog.create({
     data: {
       userId,
@@ -156,14 +175,11 @@ export async function startCollectionRun(collectorId: string, userId: string) {
 
 const ACTIVE_STATUSES: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
 
-// Deleting a run only ever removes the run record + its own error log rows
-// (CollectionError cascades). CollectedFile.collectionRunId is ON DELETE SET
-// NULL, never a cascade delete — a run being cleared out of the list can
-// never take a genuinely collected file down with it.
 import { storageProvider } from './storage';
 
-export async function deleteRun(id: string, deleteFiles: boolean = false) {
-  const run = await getRunById(id);
+export async function deleteRun(id: string, deleteFiles: boolean = false, currentUser?: CurrentUser) {
+  const run = await getRunById(id, currentUser);
+  assertCanManageRun(run, currentUser);
 
   if (ACTIVE_STATUSES.includes(run.status as RunStatus)) {
     throw new AppError(
@@ -195,8 +211,9 @@ export async function deleteRun(id: string, deleteFiles: boolean = false) {
   await prisma.collectionRun.delete({ where: { id: run.id } });
 }
 
-export async function cancelRun(id: string, userId: string) {
+export async function cancelRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.CANCELLED) {
     return run;
@@ -252,8 +269,9 @@ export async function cancelRun(id: string, userId: string) {
   return updated;
 }
 
-export async function forceCancelRun(id: string, userId: string) {
+export async function forceCancelRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   try {
     const job = (await collectionQueue.getJob(`collection-${run.id}`)) || (await collectionQueue.getJob(`collection-${run.runId}`));
@@ -298,15 +316,16 @@ export async function forceCancelRun(id: string, userId: string) {
   return updated;
 }
 
-export async function pauseRun(id: string, userId: string) {
+export async function pauseRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.PAUSED) {
     return run;
   }
 
   const pausableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
-  if (!pausableStatuses.includes(run.status as RunStatus)) {
+  if (!cancellableStatusesCheck(run.status as RunStatus)) {
     throw new AppError(
       400,
       `Cannot pause a run with status: ${run.status}`,
@@ -339,8 +358,13 @@ export async function pauseRun(id: string, userId: string) {
   return updated;
 }
 
-export async function resumeRun(id: string, userId: string) {
+function cancellableStatusesCheck(status: RunStatus) {
+  return [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED].includes(status);
+}
+
+export async function resumeRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.RUNNING) {
     return run;
@@ -376,6 +400,74 @@ export async function resumeRun(id: string, userId: string) {
   });
 
   logger.info({ runId: run.id, userId }, 'collection_run_resumed');
+  return updated;
+}
+
+export async function approveRun(id: string, userId: string, notes?: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
+
+  const updated = await prisma.collectionRun.update({
+    where: { id: run.id },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      collector: { select: { id: true, name: true, type: true } },
+      source: { select: { id: true, name: true, slug: true } },
+      createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.approved',
+      entityType: 'CollectionRun',
+      entityId: run.id,
+      metadata: { runId: run.runId, notes },
+    },
+  });
+
+  logger.info({ runId: run.id, userId }, 'collection_run_approved');
+  return updated;
+}
+
+export async function rejectRun(id: string, userId: string, notes?: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
+
+  const updated = await prisma.collectionRun.update({
+    where: { id: run.id },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      collector: { select: { id: true, name: true, type: true } },
+      source: { select: { id: true, name: true, slug: true } },
+      createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.rejected',
+      entityType: 'CollectionRun',
+      entityId: run.id,
+      metadata: { runId: run.runId, notes },
+    },
+  });
+
+  logger.info({ runId: run.id, userId }, 'collection_run_rejected');
   return updated;
 }
 

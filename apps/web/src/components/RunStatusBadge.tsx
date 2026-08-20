@@ -23,7 +23,7 @@ export const RunStatusBadge: React.FC<RunStatusBadgeProps> = ({ status }) => {
   const label = t(labelKey, status);
 
   return (
-    <span className={`text-xs font-medium ${styles[status] || styles[RunStatus.PENDING]}`}>
+    <span className={`text-xs font-medium whitespace-nowrap inline-block ${styles[status] || styles[RunStatus.PENDING]}`}>
       {label}
     </span>
   );

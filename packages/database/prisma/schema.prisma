@@ -24,6 +24,12 @@ enum UserRole {
   SERVICE_ACCOUNT
 }
 
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum RobotsPolicy {
   RESPECT
   IGNORE
@@ -93,12 +99,34 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  roles         UserRole[]
-  auditLogs     AuditLog[]
-  uploadedFiles CollectedFile[]
+  roles           UserRole[]
+  auditLogs       AuditLog[]
+  uploadedFiles   CollectedFile[]
+  approvedFiles   CollectedFile[]       @relation("ApprovedFiles")
+  createdRuns     CollectionRun[]       @relation("UserCollectionRuns")
+  approvedRuns    CollectionRun[]       @relation("ApprovedRuns")
+  telegramSession UserTelegramSession?
 
   @@index([username])
   @@map("users")
+}
+
+model UserTelegramSession {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  phoneNumber    String?
+  sessionString  String
+  apiId          Int?
+  apiHash        String?
+  isVerified     Boolean   @default(false)
+  lastVerifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_telegram_sessions")
 }
 
 // ─── Source ──────────────────────────────────────────────────
@@ -152,24 +180,31 @@ model Collector {
 // ─── Collection Run ───────────────────────────────────────────
 
 model CollectionRun {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   collectorId      String
   sourceId         String
-  runId            String    @unique // e.g. "2026-08-12_run_000001"
-  status           RunStatus @default(PENDING)
+  runId            String         @unique // e.g. "2026-08-12_run_000001"
+  status           RunStatus      @default(PENDING)
+  approvalStatus   ApprovalStatus @default(PENDING)
+  approvedById     String?
+  approvedAt       DateTime?
+  approvalNotes    String?
   startedAt        DateTime?
   completedAt      DateTime?
-  filesFound       Int       @default(0)
-  filesDownloaded  Int       @default(0)
-  filesSkipped     Int       @default(0)
-  filesDuplicate   Int       @default(0)
-  filesFailed      Int       @default(0)
-  pagesCrawled     Int       @default(0)
-  errorCount       Int       @default(0)
-  collectorVersion String    @default("1.0.0")
+  filesFound       Int            @default(0)
+  filesDownloaded  Int            @default(0)
+  filesSkipped     Int            @default(0)
+  filesDuplicate   Int            @default(0)
+  filesFailed      Int            @default(0)
+  pagesCrawled     Int            @default(0)
+  errorCount       Int            @default(0)
+  collectorVersion String         @default("1.0.0")
   manifestR2Key    String?
-  createdAt        DateTime  @default(now())
+  createdById      String?
+  createdAt        DateTime       @default(now())
 
+  createdBy      User?             @relation("UserCollectionRuns", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy     User?             @relation("ApprovedRuns", fields: [approvedById], references: [id], onDelete: SetNull)
   collector      Collector         @relation(fields: [collectorId], references: [id])
   source         Source            @relation(fields: [sourceId], references: [id])
   collectedFiles CollectedFile[]
@@ -177,6 +212,9 @@ model CollectionRun {
 
   @@index([collectorId])
   @@index([sourceId])
+  @@index([createdById])
+  @@index([approvedById])
+  @@index([approvalStatus])
   @@index([status])
   @@index([startedAt])
   @@index([createdAt])
@@ -200,19 +238,24 @@ model CollectedFile {
   fileSize          BigInt? // bytes
   sha256            String?
   r2Key             String?
-  status            FileStatus  @default(DISCOVERED)
-  origin            FileOrigin  @default(SCRAPED)
+  status            FileStatus     @default(DISCOVERED)
+  origin            FileOrigin     @default(SCRAPED)
+  approvalStatus    ApprovalStatus @default(PENDING)
+  approvedById      String?
+  approvedAt        DateTime?
+  approvalNotes     String?
   metadata          Json? // optional semantic metadata (language, subject, grade, ...) — user-supplied only, never AI-inferred
   uploadedByUserId  String? // set for MANUAL_UPLOAD / MANUAL_ENTRY
   etag              String?
   lastModified      String?
-  discoveredAt      DateTime    @default(now())
+  discoveredAt      DateTime       @default(now())
   downloadedAt      DateTime?
-  createdAt         DateTime    @default(now())
+  createdAt         DateTime       @default(now())
 
   collectionRun CollectionRun?    @relation(fields: [collectionRunId], references: [id])
   source        Source            @relation(fields: [sourceId], references: [id])
   uploadedBy    User?             @relation(fields: [uploadedByUserId], references: [id])
+  approvedBy    User?             @relation("ApprovedFiles", fields: [approvedById], references: [id], onDelete: SetNull)
   errors        CollectionError[]
 
   @@index([sha256])
@@ -220,6 +263,7 @@ model CollectedFile {
   @@index([collectionRunId])
   @@index([sourceId])
   @@index([status])
+  @@index([approvalStatus])
   @@index([createdAt])
   @@map("collected_files")
 }

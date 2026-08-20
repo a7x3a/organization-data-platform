@@ -25,6 +25,7 @@ export async function listFiles(query: {
   collectionRunId?: string;
   sourceId?: string;
   status?: string;
+  approvalStatus?: string;
   sha256?: string;
   sourceUrl?: string;
 }) {
@@ -35,6 +36,7 @@ export async function listFiles(query: {
   if (query.collectionRunId) where.collectionRunId = query.collectionRunId;
   if (query.sourceId) where.sourceId = query.sourceId;
   if (query.status) where.status = query.status;
+  if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
   if (query.sourceUrl) where.sourceUrl = query.sourceUrl;
   if (query.sha256) where.sha256 = query.sha256;
 
@@ -61,6 +63,17 @@ export async function listFiles(query: {
         r2Key: true,
         status: true,
         origin: true,
+        approvalStatus: true,
+        approvedById: true,
+        approvedAt: true,
+        approvalNotes: true,
+        approvedBy: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+          },
+        },
         metadata: true,
         uploadedByUserId: true,
         discoveredAt: true,
@@ -80,6 +93,7 @@ export async function getFileById(id: string) {
     include: {
       collectionRun: { select: { id: true, runId: true, status: true } },
       source: { select: { id: true, name: true, slug: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
     },
   });
   if (!file) throw new AppError(404, 'File not found', 'FILE_NOT_FOUND');
@@ -250,22 +264,116 @@ export async function updateFile(id: string, input: UpdateFileInput) {
 // collection run's raw output can now be permanently destroyed after the
 // fact, which every other deletion path in this codebase was built to avoid.
 export async function deleteFile(id: string) {
-  const file = await getFileById(id); // throws 404 if not found
+  const file = await prisma.collectedFile.findUnique({
+    where: { id },
+    include: { collectionRun: { include: { source: true } } },
+  });
+  if (!file) throw new AppError(404, 'File not found', 'FILE_NOT_FOUND');
 
   if (file.r2Key) {
     try {
       await storageProvider.delete(file.r2Key);
     } catch (err) {
-      // A storage-side failure (object already gone, transient R2 error)
-      // should not leave an orphaned DB record that the UI can never clear —
-      // log and continue, same "don't let a secondary failure block the
-      // primary operation" pattern the scraper's own _finalize() uses for
-      // manifest/metadata uploads.
       logger.error({ err, fileId: id, r2Key: file.r2Key }, 'file_storage_delete_failed');
     }
   }
 
   await prisma.collectedFile.delete({ where: { id } });
+
+  // If this file belonged to a collection run, update the run's metadata.jsonl & manifest.json in storage
+  if (file.collectionRun) {
+    const run = file.collectionRun;
+    const runFolderKey = run.manifestR2Key
+      ? run.manifestR2Key.substring(0, run.manifestR2Key.lastIndexOf('/'))
+      : run.source
+      ? `00_raw/web/${run.source.slug}/${run.runId}`
+      : null;
+
+    if (runFolderKey) {
+      try {
+        // 1. Update root metadata.jsonl
+        const metaKey = `${runFolderKey}/metadata.jsonl`;
+        const metaBuf = await storageProvider.getBuffer(metaKey);
+        if (metaBuf) {
+          const lines = metaBuf.toString('utf-8').split('\n').filter((l) => l.trim().length > 0);
+          const updatedLines = lines.filter((l) => {
+            try {
+              const obj = JSON.parse(l);
+              if (obj.sha256 && file.sha256 && obj.sha256.toLowerCase() === file.sha256.toLowerCase()) return false;
+              if (obj.file_id && file.fileId && obj.file_id === file.fileId) return false;
+              if (obj.file_name && file.fileName && obj.file_name === file.fileName) return false;
+              return true;
+            } catch {
+              return true;
+            }
+          });
+          const newContent = updatedLines.length > 0 ? updatedLines.join('\n') + '\n' : '';
+          await storageProvider.upload(metaKey, Buffer.from(newContent, 'utf-8'), 'application/jsonl');
+          logger.info({ metaKey }, 'metadata_jsonl_updated_after_file_deletion');
+        }
+
+        // 2. Update category metadata.jsonl (if present)
+        if (file.r2Key) {
+          const catDir = file.r2Key.substring(0, file.r2Key.lastIndexOf('/'));
+          if (catDir && catDir !== runFolderKey) {
+            const catMetaKey = `${catDir}/metadata.jsonl`;
+            const catMetaBuf = await storageProvider.getBuffer(catMetaKey);
+            if (catMetaBuf) {
+              const catLines = catMetaBuf.toString('utf-8').split('\n').filter((l) => l.trim().length > 0);
+              const updatedCatLines = catLines.filter((l) => {
+                try {
+                  const obj = JSON.parse(l);
+                  if (obj.sha256 && file.sha256 && obj.sha256.toLowerCase() === file.sha256.toLowerCase()) return false;
+                  if (obj.file_id && file.fileId && obj.file_id === file.fileId) return false;
+                  if (obj.file_name && file.fileName && obj.file_name === file.fileName) return false;
+                  return true;
+                } catch {
+                  return true;
+                }
+              });
+              const newCatContent = updatedCatLines.length > 0 ? updatedCatLines.join('\n') + '\n' : '';
+              await storageProvider.upload(catMetaKey, Buffer.from(newCatContent, 'utf-8'), 'application/jsonl');
+            }
+          }
+        }
+
+        // 3. Update manifest.json stats
+        const manifestKey = `${runFolderKey}/manifest.json`;
+        const manifestBuf = await storageProvider.getBuffer(manifestKey);
+        if (manifestBuf) {
+          try {
+            const manifest = JSON.parse(manifestBuf.toString('utf-8'));
+            if (manifest.stats) {
+              if (manifest.stats.files_downloaded > 0) manifest.stats.files_downloaded -= 1;
+              if (manifest.stats.files_found > 0) manifest.stats.files_found -= 1;
+              if (file.fileSize && manifest.stats.total_bytes) {
+                manifest.stats.total_bytes = Math.max(0, Number(manifest.stats.total_bytes) - Number(file.fileSize));
+              }
+            }
+            await storageProvider.upload(manifestKey, Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'), 'application/json');
+            logger.info({ manifestKey }, 'manifest_json_updated_after_file_deletion');
+          } catch {
+            // ignore manifest parse error
+          }
+        }
+      } catch (err) {
+        logger.error({ err, runId: run.id }, 'run_jsonl_manifest_sync_failed');
+      }
+    }
+
+    // Decrement database run counts
+    try {
+      await prisma.collectionRun.update({
+        where: { id: run.id },
+        data: {
+          filesDownloaded: { decrement: 1 },
+          filesFound: { decrement: 1 },
+        },
+      });
+    } catch {
+      // Ignore count decrement if already zero
+    }
+  }
 }
 
 export async function syncStorageDirectories() {
@@ -283,7 +391,6 @@ export async function syncStorageDirectories() {
     if (exists) {
       syncedCount++;
     } else {
-      // File no longer exists in storage (offline disk or R2 cloud) — remove orphaned DB record
       try {
         await prisma.collectedFile.delete({ where: { id: f.id } });
         prunedCount++;
@@ -293,7 +400,6 @@ export async function syncStorageDirectories() {
     }
   }
 
-  // Clean up any empty collection runs that have 0 files left
   try {
     const activeRunFiles = await prisma.collectedFile.findMany({
       where: { collectionRunId: { not: null } },
@@ -323,3 +429,196 @@ export async function syncStorageDirectories() {
     timestamp: new Date().toISOString(),
   };
 }
+
+export async function approveFile(id: string, userId: string, notes?: string) {
+  await getFileById(id);
+  const updated = await prisma.collectedFile.update({
+    where: { id },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+  return serializeFile(updated);
+}
+
+export async function rejectFile(id: string, userId: string, notes?: string) {
+  await getFileById(id);
+  const updated = await prisma.collectedFile.update({
+    where: { id },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+  return serializeFile(updated);
+}
+
+export async function bulkApproveFiles(fileIds: string[], userId: string, notes?: string) {
+  if (!fileIds.length) return { updatedCount: 0 };
+  const res = await prisma.collectedFile.updateMany({
+    where: { id: { in: fileIds } },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+  return { updatedCount: res.count };
+}
+
+export async function bulkRejectFiles(fileIds: string[], userId: string, notes?: string) {
+  if (!fileIds.length) return { updatedCount: 0 };
+  const res = await prisma.collectedFile.updateMany({
+    where: { id: { in: fileIds } },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+  return { updatedCount: res.count };
+}
+
+export async function approveRunFiles(runId: string, userId: string, notes?: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const reviewerName = user ? (user.name || user.username) : 'Admin';
+
+  // 1. Update all files in DB
+  const res = await prisma.collectedFile.updateMany({
+    where: { collectionRunId: runId },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+
+  // 2. Update the collection run in DB
+  await prisma.collectionRun.update({
+    where: { id: runId },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+
+  // 3. Update storage metadata.jsonl with approval status
+  try {
+    const run = await prisma.collectionRun.findUnique({ where: { id: runId }, include: { source: true } });
+    if (run) {
+      const runFolderKey = run.manifestR2Key
+        ? run.manifestR2Key.substring(0, run.manifestR2Key.lastIndexOf('/'))
+        : run.source
+        ? `00_raw/web/${run.source.slug}/${run.runId}`
+        : null;
+
+      if (runFolderKey) {
+        const metaKey = `${runFolderKey}/metadata.jsonl`;
+        const metaBuf = await storageProvider.getBuffer(metaKey);
+        if (metaBuf) {
+          const lines = metaBuf.toString('utf-8').split('\n').filter((l) => l.trim().length > 0);
+          const updatedLines = lines.map((l) => {
+            try {
+              const obj = JSON.parse(l);
+              obj.approval_status = 'APPROVED';
+              obj.approved_by = reviewerName;
+              obj.approved_at = new Date().toISOString();
+              if (notes) obj.approval_notes = notes;
+              return JSON.stringify(obj);
+            } catch {
+              return l;
+            }
+          });
+          await storageProvider.upload(metaKey, Buffer.from(updatedLines.join('\n') + '\n', 'utf-8'), 'application/jsonl');
+          logger.info({ metaKey }, 'metadata_jsonl_approved_in_storage');
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err, runId }, 'storage_metadata_approval_sync_failed');
+  }
+
+  return { updatedCount: res.count };
+}
+
+export async function rejectRunFiles(runId: string, userId: string, notes?: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const reviewerName = user ? (user.name || user.username) : 'Admin';
+
+  // 1. Update all files in DB
+  const res = await prisma.collectedFile.updateMany({
+    where: { collectionRunId: runId },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+
+  // 2. Update the collection run in DB
+  await prisma.collectionRun.update({
+    where: { id: runId },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+  });
+
+  // 3. Update storage metadata.jsonl with rejection status
+  try {
+    const run = await prisma.collectionRun.findUnique({ where: { id: runId }, include: { source: true } });
+    if (run) {
+      const runFolderKey = run.manifestR2Key
+        ? run.manifestR2Key.substring(0, run.manifestR2Key.lastIndexOf('/'))
+        : run.source
+        ? `00_raw/web/${run.source.slug}/${run.runId}`
+        : null;
+
+      if (runFolderKey) {
+        const metaKey = `${runFolderKey}/metadata.jsonl`;
+        const metaBuf = await storageProvider.getBuffer(metaKey);
+        if (metaBuf) {
+          const lines = metaBuf.toString('utf-8').split('\n').filter((l) => l.trim().length > 0);
+          const updatedLines = lines.map((l) => {
+            try {
+              const obj = JSON.parse(l);
+              obj.approval_status = 'REJECTED';
+              obj.approved_by = reviewerName;
+              obj.approved_at = new Date().toISOString();
+              if (notes) obj.approval_notes = notes;
+              return JSON.stringify(obj);
+            } catch {
+              return l;
+            }
+          });
+          await storageProvider.upload(metaKey, Buffer.from(updatedLines.join('\n') + '\n', 'utf-8'), 'application/jsonl');
+          logger.info({ metaKey }, 'metadata_jsonl_rejected_in_storage');
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err, runId }, 'storage_metadata_rejection_sync_failed');
+  }
+
+  return { updatedCount: res.count };
+}
+

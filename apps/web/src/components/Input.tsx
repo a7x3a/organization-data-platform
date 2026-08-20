@@ -66,10 +66,12 @@ export const Select: React.FC<SelectProps> = ({
       name={name}
     >
       <SelectPrimitive.Trigger
-        className={`w-full flex items-center justify-between gap-2 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-sm px-3 py-2 text-sm text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] focus:border-[var(--color-brand-500)] focus:ring-[0.5px] focus:ring-[var(--color-brand-500)] focus:outline-none transition-colors data-[placeholder]:text-[var(--color-text-muted)] disabled:opacity-50 disabled:pointer-events-none ${className}`}
+        className={`w-full flex items-center justify-between gap-2 h-9 bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-sm px-3 text-sm text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] focus:border-[var(--color-brand-500)] focus:ring-[0.5px] focus:ring-[var(--color-brand-500)] focus:outline-none transition-colors data-[placeholder]:text-[var(--color-text-muted)] disabled:opacity-50 disabled:pointer-events-none ${className}`}
       >
-        <SelectPrimitive.Value placeholder={placeholder} />
-        <SelectPrimitive.Icon>
+        <span className="truncate whitespace-nowrap text-left flex-1 min-w-0">
+          <SelectPrimitive.Value placeholder={placeholder} />
+        </span>
+        <SelectPrimitive.Icon className="shrink-0">
           <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)]" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>

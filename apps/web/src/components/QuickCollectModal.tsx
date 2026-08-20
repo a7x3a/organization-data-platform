@@ -5,7 +5,7 @@ import { useCreateSource, useSources } from '../hooks/useSources';
 import { useCreateCollector, useRunCollector } from '../hooks/useCollectors';
 import { Button } from './Button';
 import { Input } from './Input';
-import { Zap, BookOpen, FileText, Music, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor } from 'lucide-react';
+import { Zap, BookOpen, FileText, Music, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor, Video, Image, Archive } from 'lucide-react';
 import { RobotsPolicy } from '@odp/shared-types';
 import { TelegramSetupModal } from './TelegramSetupModal';
 
@@ -14,7 +14,7 @@ interface QuickCollectModalProps {
   onClose: () => void;
 }
 
-type PresetType = 'books' | 'documents' | 'audio' | 'datasets' | 'all';
+type PresetType = 'books' | 'documents' | 'audio' | 'video' | 'images' | 'datasets' | 'archives' | 'all';
 
 const PRESETS: { id: PresetType; label: string; description: string; icon: React.ElementType; extensions: string[] }[] = [
   {
@@ -22,28 +22,49 @@ const PRESETS: { id: PresetType; label: string; description: string; icon: React
     label: 'Books & Ebooks',
     description: 'PDF books, EPUB ebooks, MOBI, and AZW3 documents',
     icon: BookOpen,
-    extensions: ['.pdf', '.epub', '.mobi', '.azw3', '.fb2'],
+    extensions: ['.pdf', '.epub', '.mobi', '.azw3', '.fb2', '.djvu'],
   },
   {
     id: 'documents',
-    label: 'Research Documents',
-    description: 'Word DOCX, PDF reports, ODT, and office files',
+    label: 'Office Documents',
+    description: 'Word DOCX, PDF reports, ODT, and office text files',
     icon: FileText,
-    extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md'],
-  },
-  {
-    id: 'audio',
-    label: 'Audiobooks & Media',
-    description: 'MP3, WAV, FLAC, and audio lectures',
-    icon: Music,
-    extensions: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'],
+    extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.pages'],
   },
   {
     id: 'datasets',
     label: 'Data & Knowledge',
     description: 'Parquet, JSONL, CSV, TSV, and XML datasets',
     icon: Database,
-    extensions: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml'],
+    extensions: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'],
+  },
+  {
+    id: 'audio',
+    label: 'Audio & Recordings',
+    description: 'MP3, WAV, FLAC, M4A, and speech audio files',
+    icon: Music,
+    extensions: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'],
+  },
+  {
+    id: 'video',
+    label: 'Video & Footage',
+    description: 'MP4, MKV, WebM, and high definition video files',
+    icon: Video,
+    extensions: ['.mp4', '.mkv', '.avi', '.mov', '.webm'],
+  },
+  {
+    id: 'images',
+    label: 'Images & Photos',
+    description: 'JPG, PNG, WebP, SVG, and high resolution scans',
+    icon: Image,
+    extensions: ['.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif'],
+  },
+  {
+    id: 'archives',
+    label: 'Archives & Bundles',
+    description: 'ZIP, RAR, 7Z, and compressed package archives',
+    icon: Archive,
+    extensions: ['.zip', '.rar', '.7z', '.tar', '.gz'],
   },
   {
     id: 'all',
@@ -63,12 +84,32 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
 
   const [url, setUrl] = useState('');
   const [collectionName, setCollectionName] = useState('');
-  const [selectedPreset, setSelectedPreset] = useState<PresetType>('books');
+  const [selectedPresets, setSelectedPresets] = useState<PresetType[]>(['books']);
   const [useBrowser, setUseBrowser] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTelegramSetup, setShowTelegramSetup] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<{ is_authorized: boolean } | null>(null);
+
+  const togglePreset = (id: PresetType) => {
+    if (id === 'all') {
+      if (selectedPresets.includes('all')) {
+        setSelectedPresets(['books']);
+      } else {
+        setSelectedPresets(['all']);
+      }
+      return;
+    }
+    setSelectedPresets((prev) => {
+      const withoutAll = prev.filter((p) => p !== 'all');
+      if (withoutAll.includes(id)) {
+        const filtered = withoutAll.filter((p) => p !== id);
+        return filtered.length > 0 ? filtered : ['books'];
+      } else {
+        return [...withoutAll, id];
+      }
+    });
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -114,7 +155,33 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
     }
 
     const tgTarget = detectTelegramTarget(url);
-    const presetInfo = PRESETS.find((p) => p.id === selectedPreset);
+    const isAll = selectedPresets.includes('all');
+    const effectiveExtensions = isAll
+      ? []
+      : Array.from(
+          new Set(
+            PRESETS.filter((p) => selectedPresets.includes(p.id)).flatMap((p) => p.extensions)
+          )
+        );
+
+    const tgMediaTypes: Array<'photo' | 'video' | 'audio' | 'document'> = isAll
+      ? ['photo', 'video', 'audio', 'document']
+      : Array.from(
+          new Set(
+            selectedPresets.flatMap((p) => {
+              if (p === 'audio') return ['audio', 'document'];
+              if (p === 'video') return ['video', 'document'];
+              if (p === 'images') return ['photo', 'document'];
+              return ['document'];
+            }) as Array<'photo' | 'video' | 'audio' | 'document'>
+          )
+        );
+
+    const presetNames = isAll
+      ? 'All Media'
+      : PRESETS.filter((p) => selectedPresets.includes(p.id))
+          .map((p) => p.label.split(' ')[0])
+          .join(' + ');
 
     setIsSubmitting(true);
     try {
@@ -147,14 +214,7 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
         // 2. Create TELEGRAM Collector
         const collectorName = collectionName.trim()
           ? `${collectionName.trim()} (@${channel})`
-          : `Telegram @${channel} (${presetInfo?.label || 'Collector'})`;
-
-        const tgMediaTypes: Array<'photo' | 'video' | 'audio' | 'document'> =
-          selectedPreset === 'audio'
-            ? ['audio', 'document']
-            : selectedPreset === 'all'
-            ? ['photo', 'video', 'audio', 'document']
-            : ['document'];
+          : `Telegram @${channel} (${presetNames || 'Collector'})`;
 
         const newCollector = await createCollector.mutateAsync({
           sourceId,
@@ -166,7 +226,7 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
             messageLimit: 1000,
             downloadMedia: true,
             includeMediaTypes: tgMediaTypes,
-            allowedExtensions: presetInfo?.extensions || [],
+            allowedExtensions: effectiveExtensions,
           },
         });
 
@@ -206,21 +266,22 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
       }
 
       const collectorName = collectionName.trim()
-        ? `${collectionName.trim()} (${presetInfo?.label || 'Collector'})`
-        : `${hostname} - ${presetInfo?.label || 'Collector'}`;
+        ? `${collectionName.trim()} (${presetNames || 'Collector'})`
+        : `${hostname} - ${presetNames || 'Collector'}`;
 
       const isMediaUrl =
         hostname.includes('youtube.com') ||
         hostname.includes('youtu.be') ||
         /\.(mp4|mp3|wav|m4a|ogg|flac|webm|mkv)$/i.test(parsedUrl.pathname) ||
-        selectedPreset === 'audio';
+        selectedPresets.includes('audio') ||
+        selectedPresets.includes('video');
 
       const collectorConfig: any = {
         startUrls: [parsedUrl.href],
         allowedDomains: [hostname],
         allowedUrlPatterns: [],
         excludedUrlPatterns: [],
-        allowedExtensions: presetInfo?.extensions || [],
+        allowedExtensions: effectiveExtensions,
         allowedMimeTypes: [],
         maxDepth: 4,
         maxPages: 1000,
@@ -347,28 +408,39 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                Select Collection Preset
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                  Select File Categories / Presets <span className="text-[var(--color-text-muted)] font-normal">(Multi-Select)</span>
+                </label>
+                <span className="text-[11px] font-mono text-[var(--color-brand-400)] font-medium">
+                  {selectedPresets.includes('all') ? 'All Formats' : `${selectedPresets.length} selected`}
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {PRESETS.map((preset) => {
                   const Icon = preset.icon;
-                  const isSelected = selectedPreset === preset.id;
+                  const isSelected = selectedPresets.includes(preset.id);
                   return (
                     <button
                       key={preset.id}
                       type="button"
-                      onClick={() => setSelectedPreset(preset.id)}
-                      className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors ${isSelected
+                      onClick={() => togglePreset(preset.id)}
+                      className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors cursor-pointer ${isSelected
                           ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-text-primary)] font-medium'
                           : 'border-[var(--color-border)] bg-[var(--color-bg-base)] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]'
                         }`}
                     >
                       <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? 'text-[var(--color-brand-400)]' : ''}`} />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium truncate flex items-center justify-between">
                           <span>{preset.label}</span>
-                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[var(--color-brand-400)] shrink-0 ml-1" />}
+                          <div className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                            isSelected
+                              ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)] text-white'
+                              : 'border-[var(--color-border)] bg-transparent'
+                          }`}>
+                            {isSelected && <CheckCircle2 className="w-3 h-3" />}
+                          </div>
                         </div>
                         <div className="text-[11px] text-[var(--color-text-muted)] leading-tight mt-0.5 line-clamp-2">
                           {preset.description}
@@ -392,41 +464,20 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
                 />
               </div>
 
-              <div
-                onClick={() => setUseBrowser(!useBrowser)}
-                className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${
-                  useBrowser
-                    ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
-                    : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                    useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]'
-                  }`}>
-                    <Globe className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-semibold">
-                      <span>Force Playwright Browser</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
-                        useBrowser ? 'bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)]'
-                      }`}>
-                        JS SPAs
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
-                      Headless Chromium browser rendering for dynamic JavaScript apps
-                    </p>
-                  </div>
+              <div className="flex items-center gap-3 p-3.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)]">
+                <div className="w-8 h-8 rounded-lg bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)] flex items-center justify-center shrink-0">
+                  <Monitor className="w-4 h-4" />
                 </div>
-
-                <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                  useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
-                }`}>
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    useBrowser ? 'translate-x-4' : 'translate-x-0'
-                  }`} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                    <span>Autonomous Engine Selection</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
+                      Auto
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                    HTTP, Playwright Chromium & Scrapling Stealth automatically activate when JS rendering or Cloudflare protection is detected.
+                  </p>
                 </div>
               </div>
             </div>

@@ -172,6 +172,25 @@ export function isMediaCollector(
   return collector.type === CollectorType.MEDIA;
 }
 
+export enum ApprovalStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
+export interface UserTelegramSession {
+  id: string;
+  userId: string;
+  phoneNumber?: string | null;
+  sessionString?: string;
+  apiId?: number | null;
+  apiHash?: string | null;
+  isVerified: boolean;
+  lastVerifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CollectionRun {
   id: string;
   collectorId: string;
@@ -180,6 +199,13 @@ export interface CollectionRun {
   source?: Pick<Source, 'id' | 'name' | 'slug'>;
   runId: string;
   status: RunStatus;
+  approvalStatus: ApprovalStatus;
+  approvedById?: string | null;
+  approvedAt?: string | null;
+  approvalNotes?: string | null;
+  approvedBy?: { id: string; name: string; username: string } | null;
+  createdById?: string | null;
+  createdBy?: { id: string; name: string; username: string } | null;
   startedAt: string | null;
   completedAt: string | null;
   filesFound: number;
@@ -218,6 +244,11 @@ export interface CollectedFile {
   r2Key: string | null;
   status: FileStatus;
   origin: FileOrigin;
+  approvalStatus: ApprovalStatus;
+  approvedById?: string | null;
+  approvedAt?: string | null;
+  approvalNotes?: string | null;
+  approvedBy?: { id: string; name: string; username: string } | null;
   metadata: Record<string, unknown> | null;
   uploadedByUserId: string | null;
   etag: string | null;
@@ -286,6 +317,14 @@ export interface CreateUserRequest {
   name: string;
   email?: string;
   roles: UserRole[];
+}
+
+export interface UpdateUserRequest {
+  name?: string;
+  email?: string | null;
+  password?: string;
+  roles?: UserRole[];
+  isActive?: boolean;
 }
 
 export interface LoginResponse {

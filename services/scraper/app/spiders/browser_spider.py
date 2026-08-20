@@ -11,7 +11,7 @@ import httpx
 import structlog
 from playwright.async_api import async_playwright, Browser, Page
 
-from app.discovery.extractor import extract_resource_urls, extract_sitemap_locs
+from app.discovery.extractor import extract_resource_urls, extract_sitemap_locs, extract_urls_from_json_data
 from app.discovery.robots import RobotsCache
 from app.spiders.http_spider import (
     CrawlConfig,
@@ -19,6 +19,7 @@ from app.spiders.http_spider import (
     DiscoveredFile,
     get_effective_allowed_domains,
     is_allowed_domain,
+    is_allowed_resource_domain,
     is_downloadable_url,
     is_private_address,
     url_matches_pattern,
@@ -26,6 +27,7 @@ from app.spiders.http_spider import (
 from app.normalize.url_normalizer import normalize_url
 
 log = structlog.get_logger(__name__)
+
 
 
 async def crawl_with_browser(
@@ -53,7 +55,7 @@ async def crawl_with_browser(
     # small, fast text requests that don't need a browser tab, even though
     # the actual pages below are rendered with Playwright.
     robots_client = httpx.AsyncClient(
-        headers={"User-Agent": "ODP-Collector/1.0 (+https://github.com/org/data-platform)"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
         timeout=10,
     )
     robots = RobotsCache(robots_client)
@@ -194,21 +196,49 @@ async def _run_browser_crawl(
 
                         page = await context.new_page()
 
-                        # Intercept download attempts instead of navigating
+                        # Intercept download attempts and API JSON responses
                         downloaded_urls: list[str] = []
 
                         async def handle_download(download):
                             downloaded_urls.append(download.url)
                             await download.cancel()
 
+                        async def handle_response(response):
+                            try:
+                                content_type = response.headers.get("content-type", "")
+                                if "json" in content_type or "/api/" in response.url or "json" in response.url:
+                                    try:
+                                        json_data = await response.json()
+                                        json_urls = extract_urls_from_json_data(json_data, url)
+                                        for json_url in json_urls:
+                                            norm_json = normalize_url(json_url, base_url=url)
+                                            if norm_json and norm_json not in visited:
+                                                if is_downloadable_url(norm_json, config.allowed_extensions):
+                                                    if is_allowed_resource_domain(norm_json, effective_allowed_domains):
+                                                        visited.add(norm_json)
+                                                        result.files_discovered.append(DiscoveredFile(url=norm_json, depth=depth))
+                                                        log.info("file_discovered_via_api_response", url=norm_json, api=response.url)
+                                                        if on_file_found:
+                                                            await on_file_found()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+
                         page.on("download", handle_download)
+                        page.on("response", handle_response)
 
                         try:
                             await page.goto(
                                 url,
                                 timeout=config.request_timeout_seconds * 1000,
-                                wait_until="domcontentloaded",
+                                wait_until="networkidle" if "ktebstan.net" in url or "wixsite.com" in url or "kurdipedia.org" in url else "domcontentloaded",
                             )
+                            from app.spiders.cf_bypass import handle_cloudflare_challenge
+                            await handle_cloudflare_challenge(page, max_wait_seconds=15)
+                            # Scroll page to trigger lazy loading / dynamic rendering
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            await asyncio.sleep(1.0)
                         except Exception:
                             pass
 
@@ -229,18 +259,12 @@ async def _run_browser_crawl(
 
                         # Embedded resources (images, video/audio sources,
                         # embedded objects, feed enclosures, inline-script
-                        # URLs) from the fully rendered DOM — same extractor
-                        # http_spider uses, applied to Playwright's rendered
-                        # HTML instead of the raw response body. This is what
-                        # a JS-heavy site needs: its download buttons/media
-                        # tags often don't exist until after rendering.
+                        # URLs) from the fully rendered DOM
                         rendered_html = await page.content()
                         extra_page_candidates: set[str] = set()
                         for resource_url in extract_resource_urls(rendered_html, url):
                             normalized = normalize_url(resource_url, base_url=url)
                             if normalized is None or normalized in visited:
-                                continue
-                            if not is_allowed_domain(normalized, effective_allowed_domains):
                                 continue
                             if await is_private_address(normalized):
                                 continue
@@ -248,35 +272,74 @@ async def _run_browser_crawl(
                                 continue
 
                             if is_downloadable_url(normalized, config.allowed_extensions):
-                                visited.add(normalized)
-                                result.files_discovered.append(
-                                    DiscoveredFile(url=normalized, depth=depth)
-                                )
-                                log.debug(
-                                    "file_discovered", url=normalized, via="embedded_resource"
-                                )
-                                if on_file_found:
-                                    await on_file_found()
+                                if is_allowed_resource_domain(normalized, effective_allowed_domains):
+                                    visited.add(normalized)
+                                    result.files_discovered.append(
+                                        DiscoveredFile(url=normalized, depth=depth)
+                                    )
+                                    log.debug(
+                                        "file_discovered", url=normalized, via="embedded_resource"
+                                    )
+                                    if on_file_found:
+                                        await on_file_found()
                             else:
-                                extra_page_candidates.add(normalized)
+                                if is_allowed_domain(normalized, effective_allowed_domains):
+                                    extra_page_candidates.add(normalized)
 
                         if depth >= config.max_depth:
                             return
 
-                        # Extract links & download targets from rendered DOM
-                        links = await page.eval_on_selector_all(
-                            "a[href], [download], [data-href], [data-download], [data-url]",
-                            "els => els.map(el => el.href || el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-download') || el.getAttribute('data-url')).filter(Boolean)",
+                        page_title = ""
+                        try:
+                            page_title = await page.title()
+                        except Exception:
+                            pass
+
+                        # Extract links, titles & download targets from rendered DOM
+                        links_data = await page.eval_on_selector_all(
+                            "a[href], [download], [data-href], [data-download], [data-url], [data-document-url], [data-media-id], [data-uri]",
+                            r"""els => els.map(el => {
+                                let target = el.href || el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-download') || el.getAttribute('data-url') || el.getAttribute('data-document-url') || el.getAttribute('data-uri');
+                                if (target && (target.startsWith('ugd/') || target.includes('usrfiles.com')) && !target.startsWith('http')) {
+                                    target = 'https://usrfiles.com/' + target.replace(/^[\/]+/, '');
+                                }
+                                let text = (el.textContent || '').trim();
+                                let title = el.getAttribute('title') || el.getAttribute('aria-label') || '';
+                                return { target, text, title };
+                            }).filter(x => Boolean(x.target))""",
                         )
 
-                        for raw_link_url in [*links, *extra_page_candidates]:
+                        from app.spiders.http_spider import transform_cloud_storage_url
+
+                        for item in links_data:
+                            raw_link_url = item.get("target") if isinstance(item, dict) else item
                             if not isinstance(raw_link_url, str):
                                 continue
-                            link_url = normalize_url(raw_link_url, base_url=url)
-                            if link_url is None:
+                            transformed_url = transform_cloud_storage_url(raw_link_url)
+                            link_url = normalize_url(transformed_url, base_url=url)
+                            if link_url is None or link_url in visited:
                                 continue
-                            if link_url in visited:
+
+                            ctx_name = item.get("text") or item.get("title") or page_title if isinstance(item, dict) else page_title
+
+                            if is_downloadable_url(link_url, config.allowed_extensions):
+                                if is_allowed_resource_domain(link_url, effective_allowed_domains):
+                                    if not url_matches_pattern(link_url, config.excluded_url_patterns):
+                                        visited.add(link_url)
+                                        result.files_discovered.append(
+                                            DiscoveredFile(
+                                                url=link_url,
+                                                depth=depth,
+                                                context_name=ctx_name,
+                                                page_title=page_title,
+                                                page_url=url,
+                                            )
+                                        )
+                                        log.info("file_discovered_via_dom", url=link_url, context=ctx_name)
+                                        if on_file_found:
+                                            await on_file_found()
                                 continue
+
                             if not is_allowed_domain(link_url, effective_allowed_domains):
                                 continue
                             if await is_private_address(link_url):

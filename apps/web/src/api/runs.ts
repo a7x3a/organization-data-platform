@@ -43,4 +43,14 @@ export const runsApi = {
     const deleteFiles = typeof payload === 'object' ? payload.deleteFiles : false;
     await apiClient.delete(`/runs/${id}`, { params: { deleteFiles } });
   },
+
+  approve: async ({ id, notes }: { id: string; notes?: string }) => {
+    const res = await apiClient.post<CollectionRun>(`/runs/${id}/approve`, { notes });
+    return res.data;
+  },
+
+  reject: async ({ id, notes }: { id: string; notes?: string }) => {
+    const res = await apiClient.post<CollectionRun>(`/runs/${id}/reject`, { notes });
+    return res.data;
+  },
 };

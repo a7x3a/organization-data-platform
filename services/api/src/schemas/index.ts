@@ -33,6 +33,27 @@ export const createUserSchema = z.object({
     .min(1, 'At least one role is required'),
 });
 
+export const updateUserSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  email: z.string().email().optional().nullable(),
+  password: z.string().min(8).optional(),
+  roles: z
+    .array(
+      z.enum([
+        'ADMIN',
+        'DATA_MANAGER',
+        'COLLECTOR',
+        'REVIEWER',
+        'ML_ENGINEER',
+        'RESEARCHER',
+        'SERVICE_ACCOUNT',
+      ])
+    )
+    .min(1, 'At least one role is required')
+    .optional(),
+  isActive: z.boolean().optional(),
+});
+
 // ─── Pagination ───────────────────────────────────────────────
 
 export const paginationSchema = z.object({
@@ -58,12 +79,31 @@ export const listRunsQuerySchema = paginationSchema.extend({
   collectorId: z.string().optional(),
   sourceId: z.string().optional(),
   status: z.string().optional(),
+  approvalStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+});
+
+export const approveRejectRunSchema = z.object({
+  notes: z.string().max(2000).optional(),
+});
+
+export const approveRejectFileSchema = z.object({
+  notes: z.string().max(2000).optional(),
+});
+
+export const bulkFileApprovalSchema = z.object({
+  fileIds: z.array(z.string().min(1)).min(1),
+  notes: z.string().max(2000).optional(),
+});
+
+export const runFilesApprovalSchema = z.object({
+  notes: z.string().max(2000).optional(),
 });
 
 export const listFilesQuerySchema = paginationSchema.extend({
   collectionRunId: z.string().optional(),
   sourceId: z.string().optional(),
   status: z.string().optional(),
+  approvalStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   sha256: z.string().optional(),
   sourceUrl: z.string().optional(),
 });
@@ -266,6 +306,7 @@ export const manualEntrySchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateUserInput = z.infer<typeof createUserSchema>;
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;
 export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;

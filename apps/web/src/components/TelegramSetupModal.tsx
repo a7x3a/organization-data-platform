@@ -265,14 +265,37 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
               </div>
 
               <div className="flex items-center justify-between pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setStep('phone')}
-                >
-                  Re-authenticate / Change Account
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setStep('phone')}
+                  >
+                    Re-authenticate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={async () => {
+                      setLoading(true);
+                      try {
+                        await apiClient.post('/telegram/disconnect');
+                        setStatus(null);
+                        setStep('phone');
+                        setSuccessMsg('Telegram session disconnected.');
+                      } catch (err: any) {
+                        setError(err?.response?.data?.message || err?.message || 'Failed to disconnect');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
                 <Button type="button" variant="primary" size="sm" onClick={onClose}>
                   Done
                 </Button>

@@ -1,241 +1,158 @@
-# Organization Data Platform
+# Organization Data Platform (ODP)
 
-> **Production-Grade Data Collection & Processing Platform**
-> Automated web, Telegram, media/voice transcription, and document collection with quality inspection, hashing, and Cloudflare R2 / local immutable storage.
-
----
-
-## Architecture
-
-```
-                 React + Vite Web Dashboard (apps/web)
-                                  │
-                                  ▼
-                   Express REST API (services/api)
-                                  │
-                     ┌────────────┴────────────┐
-                     ▼                         ▼
-            PostgreSQL (16)               Redis (7)
-            (metadata/state)             (BullMQ queue)
-                                               │
-                                               ▼
-                                      Python Scraper Worker
-                                       (services/scraper)
-                                               │
-                ┌──────────────────────────────┼──────────────────────────────┐
-                ▼                              ▼                              ▼
-      Web Crawling Engine            Telegram Channel Scraper       Media & Voice Transcriber
-    (Playwright + Scrapy)                  (Telethon)                 (yt-dlp + Gemini API)
-                │                              │                              │
-                └──────────────────────────────┼──────────────────────────────┘
-                                               │
-                                               ▼
-                                      Immutable Storage
-                                (Cloudflare R2 / Local 00_raw)
-```
+A unified, automated platform for harvesting, processing, categorizing, transcribing, and storing digital resources (Documents, Web pages, Telegram channels, Media/Voice audio, Ebooks, and Datasets).
 
 ---
 
-## Monorepo Layout
+## 🎯 Key Capabilities
+
+- **Multi-Source Scraping**: Harvest content from standard websites, JavaScript SPAs, Wix sites (`usrfiles.com`), Cloudflare-protected sites, and Telegram channels.
+- **Adaptive Stealth Engine**: Powered by **Scrapling** and **Playwright Chromium** with automatic Cloudflare Turnstile challenge solving.
+- **Smart File Filtering & Categorization**: Automatically filters non-content assets, checks file types, inspects text density in PDFs, detects languages, and categorizes content.
+- **Media & Audio Datasets**: Download YouTube videos and podcasts via `yt-dlp`, chunk audio, and transcribe them into Speech-to-Text (STT) and Text-to-Speech (TTS) datasets.
+- **Deduplication & Immutable Storage**: Deduplicates files by SHA-256 hash and writes structured `metadata.jsonl` and `manifest.json` reports to Cloudflare R2 or local storage.
+
+---
+
+## 🚀 Server Installation & Network Deployment Guide
+
+Follow these steps to deploy and run the platform on your server PC so that any computer on your local network (LAN or Wi-Fi) can access the dashboard.
+
+### Step 1: Prerequisites on the Server PC
+Make sure the server PC has the following installed:
+- **Docker** & **Docker Compose** ([Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) or `docker-ce` + `docker-compose-plugin` for Linux).
+- Ensure Docker is running.
+
+---
+
+### Step 2: Copy the Project to Your Server
+Either clone via Git or copy the project folder to your server PC:
+```bash
+git clone <YOUR_GIT_REPO_URL> organization-data-platform
+cd organization-data-platform
+```
+*(If copying the folder manually, you can omit `node_modules`, `.venv`, and `.git` folders to keep transfer fast).*
+
+---
+
+### Step 3: Configure `.env`
+Create your `.env` configuration from the template:
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+```
+
+**Linux / macOS:**
+```bash
+cp .env.example .env
+```
+
+Open `.env` and verify key settings (the defaults work out of the box for local storage):
+- `STORAGE_PROVIDER=local` (stores all downloads in `./storage` on the server disk).
+- `AUTH_ACCESS_SECRET` & `AUTH_REFRESH_SECRET` (generate any random secret strings for security).
+
+---
+
+### Step 4: Start All Services with Docker
+Build and launch all 5 microservices in the background:
+
+```bash
+docker compose up --build -d
+```
+
+> **Automated Setup:** On startup, the database migrations run automatically and the default admin user is created.
+
+---
+
+### Step 5: Access the Dashboard from Any Device on Your Network
+
+1. **Find your Server PC's IP address:**
+   - **Windows:** Open Command Prompt/PowerShell and run `ipconfig` (find your **IPv4 Address**, e.g., `192.168.1.150`).
+   - **Linux:** Run `hostname -I` or `ip addr show`.
+
+2. **Ensure Port 3000 is open in Firewall:**
+   - Allow inbound traffic on TCP port **3000** through your server's firewall.
+
+3. **Open in any Browser:**
+   Navigate to:
+   ```
+   http://<YOUR_SERVER_IP>:3000
+   ```
+   *(Example: `http://192.168.1.150:3000`)*
+
+---
+
+### 🔑 Default Login Credentials
+
+| Role | Username | Default Password |
+| :--- | :--- | :--- |
+| **Administrator** | `admin` | `admin12345` |
+| **Alternate Admin** | `a7x3a` | `admin12345` |
+
+> 💡 *Once logged in, you can change passwords or manage users from the **Users** tab.*
+
+---
+
+## 🛠️ Handy Server Management Commands
+
+| Action | Command |
+| :--- | :--- |
+| **Check container status** | `docker compose ps` |
+| **View real-time logs** | `docker compose logs -f` |
+| **View scraper engine logs** | `docker compose logs -f scraper` |
+| **View API logs** | `docker compose logs -f api` |
+| **Restart all services** | `docker compose restart` |
+| **Stop all services** | `docker compose down` |
+| **Update & Rebuild** | `git pull && docker compose up --build -d` |
+
+---
+
+## 📥 How Files Are Downloaded, Filtered & Categorized
+
+```
+┌─────────────────┐     ┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
+│  1. Discovery   │ ──► │  2. Filtering &     │ ──► │ 3. Download &        │ ──► │ 4. Categorize &  │
+│  & Domain Check │     │     FileType Rules  │     │    Deduplication     │     │    Store Metadata│
+└─────────────────┘     └─────────────────────┘     └──────────────────────┘     └──────────────────┘
+```
+
+1. **Discovery & Domain Safety**: Confines crawling to target domains, permits trusted CDNs (`cdn.gov.krd`, `usrfiles.com`, `drive.google.com`, etc.), with built-in SSRF protection against private IP probing.
+2. **File Filtering & Rules**: Extracts documents (`.pdf`, `.epub`, `.docx`), audio/video (`.mp3`, `.wav`, `.mp4`), and datasets (`.csv`, `.parquet`, `.jsonl`) while eliminating web assets (`.css`, `.js`, `.woff`).
+3. **Streaming Download & Deduplication**: Streams downloads to conserve RAM and computes SHA-256 hashes to prevent redundant downloads.
+4. **Classification & Categorization**: Differentiates native digital PDFs from scanned image PDFs, detects languages (Kurdish, Arabic, English, Persian), and applies Kurdish topic classification with clean Unicode preservation.
+
+---
+
+## 📂 Project Structure
 
 ```
 organization-data-platform/
 ├── apps/
-│   └── web/                   # React + Vite frontend dashboard (Port 3000)
+│   └── web/                      # React + Vite dashboard (served via Nginx on port 3000)
 ├── services/
-│   ├── api/                   # Express + TypeScript REST API (Port 4000)
-│   └── scraper/               # Python collection worker (Web, Telegram, Media, PDF)
+│   ├── api/                      # Express + TypeScript REST API (port 4000)
+│   └── scraper/                  # Python worker (Playwright, Scrapling, yt-dlp, Telethon)
 ├── packages/
-│   ├── database/              # Prisma schema, migrations, and database client
-│   └── shared-types/          # Shared TypeScript interfaces & enums
-├── infra/
-│   └── docker/                # Nginx configuration and Docker init scripts
-├── docker-compose.yml         # Production Docker Compose orchestration
-└── docker-compose.dev.yml     # Development Docker Compose stack
+│   ├── database/                 # Prisma ORM schema & PostgreSQL migrations
+│   └── shared-types/             # Shared TypeScript models & enums
+├── storage/                      # Local persistent storage for scraped content & manifests
+├── docker-compose.yml            # Production deployment orchestration
+└── docker-compose.dev.yml        # Local development orchestration with hot reloading
 ```
 
 ---
 
-## Features & Capabilities
+## 💻 Local Development Mode
 
-- **PDF Extraction & Quality Classifier**:
-  - Automatically inspects fetched PDF documents.
-  - Measures printable text density, text yield, and page quality score.
-  - Automatically routes high-quality digital text PDFs to `pdf/native` and scanned/image PDFs to `pdf/ocr`.
-- **Media, YouTube & Voice Transcription Pipeline**:
-  - Downloads YouTube videos, direct video/audio URLs, and local media using `yt-dlp`.
-  - Splits audio into 30-second chunks using `AudioChunker`.
-  - Transcribes audio chunks using Google Gemini API (or offline fallback) into Speech-to-Text (`stt_dataset.jsonl`), Text-to-Speech (`tts_dataset.jsonl`), and full verbatim transcripts.
-- **Telegram Channel Collector**:
-  - Iterates Telegram channel messages via user account session (Telethon).
-  - Downloads channel media and records message artifacts.
-- **Web Crawler Engine**:
-  - Supports both standard HTTP streaming crawler and Playwright browser crawler for JavaScript SPAs.
-
----
-
-## Docker & Compose Commands (Reference)
-
-### 1. Production Docker Compose (Full Stack)
-
-Start all services (PostgreSQL, Redis, API, Scraper, Web):
+If you are developing locally with hot reloading enabled:
 
 ```bash
-# Build and start all services in detached mode
-docker compose up --build -d
-
-# View live logs for all services
-docker compose logs -f
-
-# View status of running containers
-docker compose ps
-
-# View logs for a specific service (e.g. scraper or api)
-docker compose logs -f scraper
-
-# Stop and remove containers and networks
-docker compose down
-
-# Stop and remove containers, networks, and volumes
-docker compose down -v
-```
-
-> *Note: For legacy Docker Compose v1, replace `docker compose` with `docker-compose`.*
-
----
-
-### 2. Development Docker Compose Stack
-
-Run database, Redis, API, and scraper in development mode with live code mounts:
-
-```bash
-# Start development stack
 docker compose -f docker-compose.dev.yml up --build -d
-
-# View scraper logs in development
-docker compose -f docker-compose.dev.yml logs -f scraper
-
-# Stop development stack
-docker compose -f docker-compose.dev.yml down
 ```
 
----
-
-### 3. Individual Docker Build & Run Commands
-
-If you need to build and run containers individually:
-
-#### Express API Service (`services/api`)
-```bash
-# Build API image
-docker build -t odp-api -f services/api/Dockerfile .
-
-# Run API container
-docker run -d \
-  --name odp-api \
-  -p 4000:4000 \
-  --env-file .env \
-  odp-api
-```
-
-#### Python Scraper Worker (`services/scraper`)
-```bash
-# Build Scraper image
-docker build -t odp-scraper -f services/scraper/Dockerfile .
-
-# Run Scraper container
-docker run -d \
-  --name odp-scraper \
-  --env-file .env \
-  odp-scraper
-```
-
-#### React Web Dashboard (`apps/web`)
-```bash
-# Build Web Dashboard image
-docker build -t odp-web -f apps/web/Dockerfile .
-
-# Run Web Dashboard container
-docker run -d \
-  --name odp-web \
-  -p 3000:80 \
-  odp-web
-```
-
----
-
-## Local Quick Start (Without Full Docker)
-
-### Prerequisites
-- Node.js 20+
-- Python 3.12+
-- Docker Desktop (for Postgres & Redis)
-
-### Step 1: Configure Environment
-```bash
-cp .env.example .env
-# Fill in AUTH_ACCESS_SECRET, AUTH_REFRESH_SECRET, and storage settings
-```
-
-### Step 2: Start Postgres & Redis Services
-```bash
-docker compose up -d postgres redis
-```
-
-### Step 3: Run Database Migrations
-```bash
-npm run db:migrate
-```
-
-### Step 4: Start Web & API Development Servers
-```bash
-npm run dev
-```
-
-### Step 5: Start Python Scraper Worker
-On Windows:
-```cmd
-cd services/scraper
-.venv\Scripts\python.exe -m app.main
-```
-
-On Linux / macOS:
+Run Scraper unit and integration tests:
 ```bash
 cd services/scraper
-source .venv/bin/activate
-python -m app.main
+.venv\Scripts\python.exe -m pytest tests/
 ```
-
----
-
-## Testing & Verification
-
-Run the Python scraper unit test suite (87+ tests):
-
-```bash
-# Windows
-cd services/scraper
-.venv\Scripts\python.exe -m pytest -v
-
-# Linux / macOS
-cd services/scraper
-pytest -v
-```
-
----
-
-## Environment Variables Reference
-
-| Variable | Description | Default |
-|---|---|---|
-| `NODE_ENV` | Runtime environment (`development` / `production`) | `development` |
-| `DATABASE_URL` | PostgreSQL connection URL | `postgresql://odp_user:odp_password@postgres:5432/odp_db` |
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379` |
-| `STORAGE_PROVIDER` | Storage backend (`local` or `r2`) | `local` |
-| `LOCAL_STORAGE_DIR` | Directory for local file storage | `/app/storage` |
-| `R2_ENDPOINT` | Cloudflare R2 S3 Endpoint URL | — |
-| `R2_BUCKET` | Cloudflare R2 bucket name | `organization-data` |
-| `TELEGRAM_API_ID` | Telegram API ID from my.telegram.org | — |
-| `TELEGRAM_API_HASH` | Telegram API Hash from my.telegram.org | — |
-| `TELEGRAM_SESSION_STRING` | User authorization session string | — |
-| `GEMINI_API_KEY` | Google Gemini API key for audio transcription | — |

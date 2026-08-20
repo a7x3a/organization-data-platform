@@ -67,14 +67,31 @@ def extract_filename(url: str, content_disposition: Optional[str] = None) -> str
     %D8%A6%D8%A7%D8%B4%D8%AA%DB%8C) — without unquote() every non-ASCII
     filename gets stored under a garbled, unreadable name instead of its
     real text.
+    Handles RFC 5987 filename*=UTF-8''... header formatting.
     """
     if content_disposition:
+        # Check RFC 5987 encoding (filename*=UTF-8''...)
+        utf8_match = re.search(r"filename\*\s*=\s*utf-8''([^;\n]+)", content_disposition, re.IGNORECASE)
+        if utf8_match:
+            return os.path.basename(unquote(utf8_match.group(1).strip()))
+
+        # Check standard filename=...
         match = re.search(r'filename[^;=\n]*=([\'"]?)([^\1;]+)\1', content_disposition)
         if match:
             return os.path.basename(unquote(match.group(2).strip()))
 
     parsed = urlparse(url)
     basename = os.path.basename(unquote(parsed.path))
+    ext = os.path.splitext(basename)[1].lower()
+    
+    # If basename is missing an extension or is a generic script page (.php, .asp, etc.), check query string
+    if (not ext or ext in (".php", ".asp", ".aspx", ".jsp", ".cgi", ".html", ".htm", ".cfm")) and parsed.query:
+        query_match = re.search(r'(?:file|filename|name|dn|title)=([^\&\#]+)', parsed.query, re.IGNORECASE)
+        if query_match:
+            candidate = os.path.basename(unquote(query_match.group(1).strip()))
+            if os.path.splitext(candidate)[1]:
+                return candidate
+
     return basename if basename else "unknown"
 
 
@@ -181,7 +198,7 @@ def categorize_file(
     temp_path: Optional[str] = None,
 ) -> str:
     """
-    Return the storage subfolder ('pdf/native/decoded', 'pdf/native/encoded', 'pdf/ocr', 'audio', ...) for a file.
+    Return the storage subfolder ('pdf/native/decoded', 'pdf/native/encoded', 'pdf/ocr', 'documents', 'ebooks', ...) for a file.
     PDF files are automatically inspected and sub-categorized into 'pdf/native/decoded', 'pdf/native/encoded', or 'pdf/ocr'.
     """
     clean_ext = ""
@@ -190,6 +207,7 @@ def categorize_file(
         if clean_ext and not clean_ext.startswith("."):
             clean_ext = f".{clean_ext}"
 
+    # 1. PDF special handling (with extraction & OCR categorization)
     is_pdf = (mime_type == "application/pdf") or (clean_ext == ".pdf")
     if is_pdf:
         if temp_path and os.path.exists(temp_path):
@@ -199,8 +217,13 @@ def categorize_file(
             return pdf_result.folder_path
         return "pdf/native/decoded"
 
+    # 2. Check Extension mapping first if clean_ext is a known non-generic extension
+    if clean_ext and clean_ext in _CATEGORY_BY_EXTENSION:
+        return _CATEGORY_BY_EXTENSION[clean_ext]
+
+    # 3. Check MIME type prefix / pattern mapping
     if mime_type:
-        mime_clean = mime_type.lower()
+        mime_clean = mime_type.lower().split(";")[0].strip()
         if mime_clean == "application/pdf":
             return "pdf/native/decoded"
         if mime_clean.startswith("audio/"):
@@ -209,31 +232,63 @@ def categorize_file(
             return "video"
         if mime_clean.startswith("image/"):
             return "images"
+        if mime_clean.startswith("text/vtt") or "subrip" in mime_clean:
+            return "subtitles"
         if mime_clean.startswith("text/"):
             return "text"
-        if "zip" in mime_clean or "rar" in mime_clean or "tar" in mime_clean or "compressed" in mime_clean:
+        if "epub" in mime_clean or "mobipocket" in mime_clean or "fictionbook" in mime_clean or "djvu" in mime_clean:
+            return "ebooks"
+        if "wordprocessingml" in mime_clean or "msword" in mime_clean or "opendocument.text" in mime_clean or "rtf" in mime_clean:
+            return "documents"
+        if "spreadsheet" in mime_clean or "excel" in mime_clean or "opendocument.spreadsheet" in mime_clean or mime_clean == "text/csv":
+            return "spreadsheets"
+        if "presentation" in mime_clean or "powerpoint" in mime_clean or "opendocument.presentation" in mime_clean:
+            return "presentations"
+        if any(tok in mime_clean for tok in ("zip", "rar", "tar", "compressed", "gzip", "7z")):
             return "archives"
-
-    if clean_ext:
-        category = _CATEGORY_BY_EXTENSION.get(clean_ext)
-        if category:
-            return category
+        if any(tok in mime_clean for tok in ("json", "xml", "parquet", "feather")):
+            return "data"
 
     return "other"
 
 
 def detect_mime(file_path: str, declared: Optional[str] = None) -> Optional[str]:
-    """Detect MIME type from file content (magic bytes), fall back to declared."""
+    """Detect MIME type from file content (magic bytes), fall back to declared header or extension."""
+    detected = None
     try:
         import magic
         detected = magic.from_file(file_path, mime=True)
-        return detected
+        if detected and detected not in ("application/octet-stream", "binary/octet-stream"):
+            return detected
     except Exception:
-        # Fall back to content-type header or mimetypes module
-        if declared:
-            return declared.split(";")[0].strip()
-        ext = os.path.splitext(file_path)[1]
-        return mimetypes.guess_type(f"file{ext}")[0]
+        pass
+
+    if declared:
+        clean_declared = declared.split(";")[0].strip().lower()
+        if clean_declared and clean_declared not in ("application/octet-stream", "binary/octet-stream"):
+            return clean_declared
+
+    if detected:
+        return detected
+
+    ext = os.path.splitext(file_path)[1]
+    guessed = mimetypes.guess_type(f"file{ext}")[0]
+    return guessed or declared or "application/octet-stream"
+
+
+_GENERIC_TITLES = {
+    "untitled", "document", "microsoft word", "word document", "print", "scan",
+    "adobe indesign", "pdf document", "download", "file", "blank", "new document",
+    "page", "home", "index", "داگرتن", "کلیک بکە", "فایل"
+}
+
+
+def is_generic_title(title: str) -> bool:
+    """True if title is empty, too short, or a standard boilerplate/generic string."""
+    if not title or len(title.strip()) < 3:
+        return True
+    t = title.strip().lower()
+    return any(gen in t for gen in _GENERIC_TITLES)
 
 
 async def download_file(
@@ -243,6 +298,7 @@ async def download_file(
     max_size_bytes: Optional[int] = None,
     timeout: int = 30,
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+    preferred_name: Optional[str] = None,
 ) -> DownloadResult:
     """
     Stream-download a file, compute SHA-256 incrementally, and save to a temp file.
@@ -250,7 +306,7 @@ async def download_file(
     Raises DownloadError, FileTooLargeError, or InvalidContentError on failure.
     """
     max_bytes = max_size_bytes or settings.max_file_size_bytes
-    log.info("download_started", url=url)
+    log.info("download_started", url=url, preferred_name=preferred_name)
 
     os.makedirs(settings.temp_dir, exist_ok=True)
 
@@ -260,13 +316,22 @@ async def download_file(
     final_url = url
     temp_path: Optional[str] = None
 
+    parsed_url = urlparse(url)
+    origin_referer = f"{parsed_url.scheme}://{parsed_url.netloc}/" if parsed_url.scheme and parsed_url.netloc else url
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,ku;q=0.8,ar;q=0.7",
-        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Referer": origin_referer,
+        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
     }
     try:
         async with client.stream(
@@ -276,10 +341,22 @@ async def download_file(
             timeout=timeout,
             follow_redirects=True,
         ) as response:
-            if response.status_code != 200:
-                raise DownloadError(
-                    f"HTTP {response.status_code} for {url}"
-                )
+            if response.status_code == 403:
+                # Fallback: retry with exact document URL as referer
+                fallback_headers = dict(headers)
+                fallback_headers["Referer"] = url
+                async with client.stream(
+                    "GET",
+                    url,
+                    headers=fallback_headers,
+                    timeout=timeout,
+                    follow_redirects=True,
+                ) as fallback_resp:
+                    if fallback_resp.status_code != 200:
+                        raise DownloadError(f"HTTP {fallback_resp.status_code} for {url}")
+                    response = fallback_resp
+            elif response.status_code != 200:
+                raise DownloadError(f"HTTP {response.status_code} for {url}")
 
             final_url = str(response.url)
             declared_mime = response.headers.get("content-type")
@@ -299,10 +376,6 @@ async def download_file(
                 async for chunk in response.aiter_bytes(CHUNK_SIZE):
                     total_size += len(chunk)
                     if total_size > max_bytes:
-                        # Don't unlink here — the file handle is still open, and
-                        # deleting an open file is a PermissionError on Windows
-                        # (POSIX allows it; this must work on both). Stop writing
-                        # and let the `with` block close it first.
                         too_large = True
                         break
                     hasher.update(chunk)
@@ -314,14 +387,6 @@ async def download_file(
                             cancelled = True
                             break
     except httpx.HTTPError as e:
-        # Network-level failures (timeout, connection reset, TLS errors, …) —
-        # distinct from the HTTP-status DownloadError above. Unlike a bad
-        # status code, these aren't raised until the temp file's `with` block
-        # (and the streaming response) has already unwound and closed, so
-        # unlinking here is safe on Windows. Without this, one flaky/slow
-        # file kills the whole run instead of just failing that one file —
-        # str(e) is often empty for these exceptions, so fall back to the
-        # exception's type name.
         if temp_path:
             try:
                 os.unlink(temp_path)
@@ -345,9 +410,10 @@ async def download_file(
     mime_type = detect_mime(temp_path, declared_mime)
     extension = os.path.splitext(file_name)[1].lower() or None
 
-    # Prefer the document's own embedded title over its URL-derived name
-    # when one exists — URLs are often opaque slugs even when the file
-    # itself carries a real, readable book/document title.
+    # Priority for naming:
+    # 1. Embedded title inside PDF/EPUB/DOCX (if present and not generic)
+    # 2. Contextual page/anchor name (preferred_name e.g. "وەقایعی کوردستان ژمارە ٣٤٥")
+    # 3. Decoded, sanitized URL / Content-Disposition filename
     extracted_title = None
     if mime_type == "application/pdf" or extension == ".pdf":
         extracted_title = extract_pdf_title(temp_path)
@@ -356,10 +422,14 @@ async def download_file(
     elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or extension == ".docx":
         extracted_title = extract_docx_title(temp_path)
 
-    if extracted_title:
+    if extracted_title and not is_generic_title(extracted_title):
         clean_title = sanitize_filename(extracted_title)
         if clean_title and clean_title != "unnamed":
             file_name = clean_title + (extension or "")
+    elif preferred_name and not is_generic_title(preferred_name):
+        clean_preferred = sanitize_filename(preferred_name)
+        if clean_preferred and clean_preferred != "unnamed":
+            file_name = clean_preferred + (extension or "")
 
     log.info(
         "download_completed",

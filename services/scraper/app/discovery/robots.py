@@ -16,7 +16,7 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-_USER_AGENT = "ODP-Collector/1.0 (+https://github.com/org/data-platform)"
+_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 
 class RobotsCache:
@@ -57,10 +57,10 @@ class RobotsCache:
                 # No robots.txt (404) or a server error — conventionally
                 # treated as "no restrictions" by well-behaved crawlers,
                 # same as most real-world crawlers do for a missing file.
-                parser.allow_all = True
+                parser.parse([])
         except Exception as exc:
             log.debug("robots_fetch_failed", domain=domain, error=str(exc))
-            parser.allow_all = True
+            parser.parse([])
 
         self._parsers[domain] = parser
         self._sitemaps[domain] = sitemaps

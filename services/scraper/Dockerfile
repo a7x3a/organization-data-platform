@@ -5,7 +5,6 @@ WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -14,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Installing it after requirements.txt meant every routine dependency
 # change (e.g. adding one pure-Python package) invalidated this layer's
 # cache too, forcing a full Chromium re-download on the next build.
-RUN pip install --no-cache-dir --user playwright==1.44.0 && \
+RUN pip install --no-cache-dir --user "playwright>=1.44.0" && \
     /root/.local/bin/playwright install chromium --with-deps
 
 COPY services/scraper/requirements.txt .

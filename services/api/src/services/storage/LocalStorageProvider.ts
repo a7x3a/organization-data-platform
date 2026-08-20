@@ -23,11 +23,20 @@ export class LocalStorageProvider implements StorageProvider {
     return resolved;
   }
 
-  async upload(key: string, body: Buffer, _contentType: string): Promise<void> {
+  async upload(key: string, body: Buffer | string, _contentType: string): Promise<void> {
     const filePath = this.resolveKey(key);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, body);
     logger.info({ key }, 'local_storage_upload_completed');
+  }
+
+  async getBuffer(key: string): Promise<Buffer | null> {
+    try {
+      return await fs.readFile(this.resolveKey(key));
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === 'ENOENT') return null;
+      throw err;
+    }
   }
 
   async exists(key: string): Promise<boolean> {
