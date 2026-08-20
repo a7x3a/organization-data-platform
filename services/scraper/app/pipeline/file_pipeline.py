@@ -202,7 +202,11 @@ class FilePipeline:
                 extra_metadata=extra_metadata,
             )
 
-            manifest.record_file_downloaded()
+            manifest.record_file_downloaded(
+                category=category,
+                file_name=result.file_name,
+                file_size=result.file_size,
+            )
             log.info(
                 "file_collected",
                 url=result.source_url,

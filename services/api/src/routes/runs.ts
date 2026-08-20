@@ -8,6 +8,7 @@ import {
   updateRunStatusSchema,
   recordFileSchema,
   recordErrorSchema,
+  approveRejectRunSchema,
 } from '../schemas/index';
 import * as runService from '../services/run.service';
 import * as fileService from '../services/file.service';
@@ -46,10 +47,9 @@ router.get(
   }
 );
 
-// DELETE /api/runs/:id — Data Manager+. Only terminal-status runs can be cleared
+// DELETE /api/runs/:id — Data Manager+ or run owner. Only terminal-status runs can be cleared
 router.delete(
   '/:id',
-  requireDataManager,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -69,7 +69,8 @@ router.post(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const run = await runService.cancelRun(req.params.id, req.user!.sub);
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.cancelRun(req.params.id, req.user!.sub, currentUser);
       res.json(run);
     } catch (err) {
       next(err);
@@ -83,7 +84,8 @@ router.post(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const run = await runService.forceCancelRun(req.params.id, req.user!.sub);
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.forceCancelRun(req.params.id, req.user!.sub, currentUser);
       res.json(run);
     } catch (err) {
       next(err);
@@ -97,7 +99,8 @@ router.post(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const run = await runService.pauseRun(req.params.id, req.user!.sub);
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.pauseRun(req.params.id, req.user!.sub, currentUser);
       res.json(run);
     } catch (err) {
       next(err);
@@ -111,7 +114,40 @@ router.post(
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const run = await runService.resumeRun(req.params.id, req.user!.sub);
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.resumeRun(req.params.id, req.user!.sub, currentUser);
+      res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/runs/:id/approve
+router.post(
+  '/:id/approve',
+  validate(idParamSchema, 'params'),
+  validate(approveRejectRunSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.approveRun(req.params.id, req.user!.sub, req.body.notes, currentUser);
+      res.json(run);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/runs/:id/reject
+router.post(
+  '/:id/reject',
+  validate(idParamSchema, 'params'),
+  validate(approveRejectRunSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const run = await runService.rejectRun(req.params.id, req.user!.sub, req.body.notes, currentUser);
       res.json(run);
     } catch (err) {
       next(err);

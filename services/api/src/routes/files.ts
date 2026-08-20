@@ -10,6 +10,9 @@ import {
   manualUploadBodySchema,
   manualEntrySchema,
   updateFileSchema,
+  approveRejectFileSchema,
+  bulkFileApprovalSchema,
+  runFilesApprovalSchema,
 } from '../schemas/index';
 import * as fileService from '../services/file.service';
 import { storageProvider, LocalStorageProvider } from '../services/storage';
@@ -181,6 +184,92 @@ router.delete(
     try {
       await fileService.deleteFile(req.params.id);
       res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/:id/approve — Approve a single file
+router.post(
+  '/:id/approve',
+  validate(idParamSchema, 'params'),
+  validate(approveRejectFileSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.approveFile(req.params.id, req.user!.sub, req.body.notes);
+      res.json(file);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/:id/reject — Decline/reject a single file
+router.post(
+  '/:id/reject',
+  validate(idParamSchema, 'params'),
+  validate(approveRejectFileSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.rejectFile(req.params.id, req.user!.sub, req.body.notes);
+      res.json(file);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/bulk-approve — Bulk approve multiple files
+router.post(
+  '/bulk-approve',
+  validate(bulkFileApprovalSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.bulkApproveFiles(req.body.fileIds, req.user!.sub, req.body.notes);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/bulk-reject — Bulk decline/reject multiple files
+router.post(
+  '/bulk-reject',
+  validate(bulkFileApprovalSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.bulkRejectFiles(req.body.fileIds, req.user!.sub, req.body.notes);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/run/:runId/approve-all — Approve all files for a collection run
+router.post(
+  '/run/:runId/approve-all',
+  validate(runFilesApprovalSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.approveRunFiles(req.params.runId, req.user!.sub, req.body.notes);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/run/:runId/reject-all — Decline/reject all files for a collection run
+router.post(
+  '/run/:runId/reject-all',
+  validate(runFilesApprovalSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.rejectRunFiles(req.params.runId, req.user!.sub, req.body.notes);
+      res.json(result);
     } catch (err) {
       next(err);
     }

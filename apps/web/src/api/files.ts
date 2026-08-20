@@ -8,7 +8,9 @@ export const filesApi = {
     collectionRunId?: string;
     sourceId?: string;
     status?: string;
+    approvalStatus?: string;
     sha256?: string;
+    sourceUrl?: string;
   }) => {
     const res = await apiClient.get<PaginatedResponse<CollectedFile>>('/files', { params });
     return res.data;
@@ -60,6 +62,36 @@ export const filesApi = {
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/files/${id}`);
+  },
+
+  approve: async (id: string, notes?: string): Promise<CollectedFile> => {
+    const res = await apiClient.post<CollectedFile>(`/files/${id}/approve`, { notes });
+    return res.data;
+  },
+
+  reject: async (id: string, notes?: string): Promise<CollectedFile> => {
+    const res = await apiClient.post<CollectedFile>(`/files/${id}/reject`, { notes });
+    return res.data;
+  },
+
+  bulkApprove: async (fileIds: string[], notes?: string): Promise<{ updatedCount: number }> => {
+    const res = await apiClient.post<{ updatedCount: number }>('/files/bulk-approve', { fileIds, notes });
+    return res.data;
+  },
+
+  bulkReject: async (fileIds: string[], notes?: string): Promise<{ updatedCount: number }> => {
+    const res = await apiClient.post<{ updatedCount: number }>('/files/bulk-reject', { fileIds, notes });
+    return res.data;
+  },
+
+  approveRunFiles: async (runId: string, notes?: string): Promise<{ updatedCount: number }> => {
+    const res = await apiClient.post<{ updatedCount: number }>(`/files/run/${runId}/approve-all`, { notes });
+    return res.data;
+  },
+
+  rejectRunFiles: async (runId: string, notes?: string): Promise<{ updatedCount: number }> => {
+    const res = await apiClient.post<{ updatedCount: number }>(`/files/run/${runId}/reject-all`, { notes });
+    return res.data;
   },
 
   syncStorage: async (): Promise<{

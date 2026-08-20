@@ -18,7 +18,7 @@ import httpx
 import structlog
 from scrapling import AsyncFetcher, StealthyFetcher, Selector
 
-from app.discovery.extractor import extract_resource_urls
+from app.discovery.extractor import extract_resource_urls, extract_page_links_with_context
 from app.discovery.robots import RobotsCache
 from app.normalize.url_normalizer import normalize_url
 from app.spiders.http_spider import (
@@ -194,12 +194,10 @@ async def crawl_with_scrapling(
                                         if on_file_found:
                                             await on_file_found()
 
-                # Extract links for next crawl depth
+                # Extract links with rich context for next crawl depth
                 if depth < config.max_depth:
-                    scrapling_selector = Selector(content=html_body) if isinstance(html_body, str) else res
-                    page_links = extract_scrapling_links(scrapling_selector, res_url)
-
-                    for link in page_links:
+                    page_link_contexts = extract_page_links_with_context(html_body, res_url)
+                    for link, ctx in page_link_contexts:
                         norm_link = normalize_url(link, res_url)
                         if not norm_link or await is_private_address(norm_link):
                             continue
@@ -210,7 +208,16 @@ async def crawl_with_scrapling(
                                 if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
                                     if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
                                         if not any(df.url == norm_link for df in result.files_discovered):
-                                            result.files_discovered.append(DiscoveredFile(url=norm_link, depth=depth + 1))
+                                            result.files_discovered.append(
+                                                DiscoveredFile(
+                                                    url=norm_link,
+                                                    depth=depth + 1,
+                                                    context_name=ctx.get("best_name"),
+                                                    page_title=ctx.get("page_title"),
+                                                    page_url=res_url,
+                                                    metadata=ctx,
+                                                )
+                                            )
                                             if on_file_found:
                                                 await on_file_found()
                             continue

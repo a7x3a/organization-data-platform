@@ -20,7 +20,7 @@ Telethon media download there) differ between collector types.
 import asyncio
 import random
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 import structlog
@@ -141,7 +141,7 @@ class CollectionJob:
             # Autonomous Auto-Engine & Stealth Detection:
             # If the user hasn't explicitly set spider options, inspect start URLs for known JS/SPA/Anti-Bot sites
             # (Wix, Vercel, Netlify, WordPress.com, Cloudflare, etc.) and automatically activate Scrapling & Stealth Playwright.
-            known_js_domains = ("wixsite.com", "wix.com", "usrfiles.com", "vercel.app", "netlify.app", "notion.site", "gitbook.io", "medium.com")
+            known_js_domains = ("gov.krd", "wixsite.com", "wix.com", "usrfiles.com", "vercel.app", "netlify.app", "notion.site", "gitbook.io", "medium.com", "archive.org")
             start_urls = self._cfg.get("startUrls", [])
             auto_js_site = any(any(dom in url.lower() for dom in known_js_domains) for url in start_urls)
 
@@ -239,16 +239,15 @@ class CollectionJob:
 
             async def bounded_process(discovered) -> None:
                 async with semaphore:
-                    # Checked again here (not just at the top of run()) so a
-                    # cancellation mid-run stops new downloads from starting
-                    # as soon as a semaphore slot frees up, rather than only
-                    # between whole crawl batches.
                     if await self._pipeline.wait_if_paused():
                         raise DownloadCancelled(f"Cancelled while paused: {discovered.url}")
                     if await self._pipeline.is_cancelled():
                         raise DownloadCancelled(f"Cancelled before starting {discovered.url}")
+                    
+                    pref_name = getattr(discovered, "context_name", None) or getattr(discovered, "page_title", None)
                     await self._process_file(
                         discovered.url,
+                        preferred_name=pref_name,
                         http_client=http_client,
                         manifest=manifest,
                         metadata=metadata,
@@ -283,10 +282,6 @@ class CollectionJob:
 
         except Exception as exc:
             log.error("collection_failed", run_id=self._run_db_id, error=str(exc))
-            # Without this, a run that fails before/outside per-file error
-            # reporting (a bad collector config, a crawl-phase crash) shows
-            # up in the UI as "FAILED" with no visible reason at all — the
-            # only trace was this container's own stdout log.
             await self._pipeline.report_file_error(
                 None, "UNKNOWN", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             )
@@ -299,12 +294,13 @@ class CollectionJob:
         self,
         url: str,
         *,
+        preferred_name: Optional[str] = None,
         http_client: httpx.AsyncClient,
         manifest: ManifestWriter,
         metadata: MetadataWriter,
     ) -> None:
         """Download, hash, deduplicate, upload one file — with smart retry."""
-        if await self._pipeline.skip_if_known_url(url, extract_filename(url), manifest):
+        if await self._pipeline.skip_if_known_url(url, preferred_name or extract_filename(url), manifest):
             return
 
         max_retries = self._cfg.get("maxRetries", settings.default_max_retries)
@@ -317,6 +313,7 @@ class CollectionJob:
                     client=http_client,
                     max_size_bytes=settings.max_file_size_bytes,
                     should_cancel=self._pipeline.is_cancelled,
+                    preferred_name=preferred_name,
                 )
                 await self._pipeline.process_downloaded_file(result, manifest=manifest, metadata=metadata)
                 return
@@ -388,7 +385,16 @@ class CollectionJob:
 
         metadata.cleanup()
 
-        # Upload manifest.json
+        # Upload subfolder per-category manifest.json files (e.g. pdf/native/decoded/manifest.json)
+        cat_manifests = manifest.build_category_manifests(status=status, completed_at=completed_at)
+        for cat_name, (cat_bytes, cat_r2_key) in cat_manifests.items():
+            try:
+                storage.upload_bytes(cat_bytes, cat_r2_key, "application/json")
+                log.info("category_manifest_uploaded", category=cat_name, r2_key=cat_r2_key)
+            except Exception as e:
+                log.error("category_manifest_upload_failed", category=cat_name, error=str(e))
+
+        # Upload main root manifest.json
         manifest_bytes = manifest.to_json(status=status, completed_at=completed_at)
         try:
             storage.upload_bytes(manifest_bytes, manifest.r2_key, "application/json")

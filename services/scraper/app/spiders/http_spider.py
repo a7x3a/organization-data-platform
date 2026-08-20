@@ -8,7 +8,7 @@ Playwright is NOT launched here.
 import asyncio
 import re
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 from urllib.parse import urlparse
 
 import httpx
@@ -16,6 +16,7 @@ import structlog
 
 from app.discovery.extractor import (
     extract_page_links,
+    extract_page_links_with_context,
     extract_resource_urls,
     extract_sitemap_locs,
 )
@@ -49,6 +50,10 @@ class CrawlConfig:
 class DiscoveredFile:
     url: str
     depth: int
+    context_name: Optional[str] = None
+    page_title: Optional[str] = None
+    page_url: Optional[str] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -495,30 +500,50 @@ async def crawl(
                     if depth >= config.max_depth:
                         return
 
-                    # Extract links from HTML — plus any non-file embedded
-                    # resources above that look like more pages rather than
-                    # downloadable content (normalize_url is idempotent, so
-                    # re-normalizing the already-normalized candidates here
-                    # is harmless).
-                    for link in extract_page_links(html, url) | extra_page_candidates:
+                    # Extract links with rich context from HTML
+                    page_link_contexts = extract_page_links_with_context(html, url)
+                    for link, ctx in page_link_contexts:
                         link_url = normalize_url(link, base_url=url)
                         if link_url is None:
                             continue
-                        if link_url in visited:
-                            continue
-                        if not is_allowed_domain(link_url, effective_allowed_domains):
-                            continue
-                        if await is_private_address(link_url):
-                            continue
-                        if config.allowed_url_patterns and not url_matches_pattern(
-                            link_url, config.allowed_url_patterns
-                        ):
-                            continue
-                        if url_matches_pattern(link_url, config.excluded_url_patterns):
+
+                        # Check if link target is a downloadable file
+                        if is_downloadable_url(link_url, config.allowed_extensions):
+                            if is_allowed_resource_domain(link_url, effective_allowed_domains):
+                                if not url_matches_pattern(link_url, config.excluded_url_patterns):
+                                    if not any(df.url == link_url for df in result.files_discovered):
+                                        result.files_discovered.append(
+                                            DiscoveredFile(
+                                                url=link_url,
+                                                depth=depth,
+                                                context_name=ctx.get("best_name"),
+                                                page_title=ctx.get("page_title"),
+                                                page_url=url,
+                                                metadata=ctx,
+                                            )
+                                        )
+                                        log.debug("file_discovered_with_context", url=link_url, context=ctx.get("best_name"))
+                                        if on_file_found:
+                                            await on_file_found()
                             continue
 
-                        visited.add(link_url)
-                        await queue.put((link_url, depth + 1))
+                        # Navigation page / route traversal (menus, categories, pagination)
+                        if link_url not in visited and is_allowed_domain(link_url, effective_allowed_domains):
+                            if not await is_private_address(link_url):
+                                if not config.allowed_url_patterns or url_matches_pattern(link_url, config.allowed_url_patterns):
+                                    if not url_matches_pattern(link_url, config.excluded_url_patterns):
+                                        visited.add(link_url)
+                                        await queue.put((link_url, depth + 1))
+
+                    # Also queue extra non-file embedded candidates (if any)
+                    for cand in extra_page_candidates:
+                        c_url = normalize_url(cand, base_url=url)
+                        if c_url and c_url not in visited and is_allowed_domain(c_url, effective_allowed_domains):
+                            if not await is_private_address(c_url):
+                                if not config.allowed_url_patterns or url_matches_pattern(c_url, config.allowed_url_patterns):
+                                    if not url_matches_pattern(c_url, config.excluded_url_patterns):
+                                        visited.add(c_url)
+                                        await queue.put((c_url, depth + 1))
 
                 except httpx.TooManyRedirects:
                     log.warning("too_many_redirects", url=url)

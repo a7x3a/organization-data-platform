@@ -1,15 +1,25 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useFiles, useUpdateFile, useDeleteFile } from '../hooks/useFiles';
+import {
+  useFiles,
+  useUpdateFile,
+  useDeleteFile,
+  useApproveFile,
+  useRejectFile,
+  useBulkApproveFiles,
+  useBulkRejectFiles,
+} from '../hooks/useFiles';
+import { useAuth } from '../hooks/useAuth';
 import { DataTable, Column } from '../components/DataTable';
 import { FileStatusBadge } from '../components/FileStatusBadge';
+import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
-import { CollectedFile } from '@odp/shared-types';
+import { ApprovalStatus, CollectedFile, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
 import { downloadFile } from '../lib/downloadFile';
-import { Download, Pencil, Trash2, Filter, X } from 'lucide-react';
+import { Download, Pencil, Trash2, Check, X, ShieldCheck, AlertTriangle, FileCheck } from 'lucide-react';
 
 // Data Intelligence helpers
 function getLanguageInfo(file: CollectedFile): { name: string; code: string } | null {
@@ -32,23 +42,59 @@ function getKurdishCategory(file: CollectedFile): string | null {
 
 export const Files: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isAdmin = user?.roles.includes(UserRole.ADMIN);
+  const isReviewer = isAdmin || user?.roles.includes(UserRole.REVIEWER) || user?.roles.includes(UserRole.DATA_MANAGER);
+
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [approvalFilter, setApprovalFilter] = useState<string>('');
   const [languageFilter, setLanguageFilter] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
+
   const { data, isLoading } = useFiles({
     page,
     pageSize: 20,
     status: statusFilter || undefined,
+    approvalStatus: approvalFilter || undefined,
   });
+
   const updateFile = useUpdateFile();
   const deleteFile = useDeleteFile();
+  const approveFile = useApproveFile();
+  const rejectFile = useRejectFile();
+  const bulkApprove = useBulkApproveFiles();
+  const bulkReject = useBulkRejectFiles();
 
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [editingFile, setEditingFile] = useState<CollectedFile | null>(null);
   const [editFileName, setEditFileName] = useState('');
   const [editMetadataText, setEditMetadataText] = useState('');
   const [editMetadataError, setEditMetadataError] = useState('');
   const [fileToDelete, setFileToDelete] = useState<CollectedFile | null>(null);
+
+  const [approvalTarget, setApprovalTarget] = useState<{
+    action: 'APPROVE' | 'REJECT';
+    scope: 'SINGLE' | 'BULK';
+    fileId?: string;
+  } | null>(null);
+  const [approvalNote, setApprovalNote] = useState('');
+
+  const filesList = data?.data || [];
+
+  const toggleSelectAll = () => {
+    if (selectedFileIds.length === filesList.length) {
+      setSelectedFileIds([]);
+    } else {
+      setSelectedFileIds(filesList.map((f) => f.id));
+    }
+  };
+
+  const toggleSelectFile = (fileId: string) => {
+    setSelectedFileIds((prev) =>
+      prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]
+    );
+  };
 
   const openEditModal = (file: CollectedFile) => {
     setEditingFile(file);
@@ -99,7 +145,48 @@ export const Files: React.FC = () => {
     }
   };
 
+  const handleConfirmApproval = async () => {
+    if (!approvalTarget) return;
+
+    if (approvalTarget.scope === 'SINGLE' && approvalTarget.fileId) {
+      if (approvalTarget.action === 'APPROVE') {
+        await approveFile.mutateAsync({ id: approvalTarget.fileId, notes: approvalNote });
+      } else {
+        await rejectFile.mutateAsync({ id: approvalTarget.fileId, notes: approvalNote });
+      }
+    } else if (approvalTarget.scope === 'BULK') {
+      if (approvalTarget.action === 'APPROVE') {
+        await bulkApprove.mutateAsync({ fileIds: selectedFileIds, notes: approvalNote });
+      } else {
+        await bulkReject.mutateAsync({ fileIds: selectedFileIds, notes: approvalNote });
+      }
+      setSelectedFileIds([]);
+    }
+
+    setApprovalTarget(null);
+    setApprovalNote('');
+  };
+
   const columns: Column<CollectedFile>[] = [
+    {
+      header: (
+        <input
+          type="checkbox"
+          checked={filesList.length > 0 && selectedFileIds.length === filesList.length}
+          onChange={toggleSelectAll}
+          className="rounded border-[var(--color-border)] cursor-pointer"
+        />
+      ),
+      className: 'w-8 pl-3',
+      accessor: (f) => (
+        <input
+          type="checkbox"
+          checked={selectedFileIds.includes(f.id)}
+          onChange={() => toggleSelectFile(f.id)}
+          className="rounded border-[var(--color-border)] cursor-pointer"
+        />
+      ),
+    },
     {
       header: 'File ID',
       accessor: (f) => (
@@ -144,6 +231,23 @@ export const Files: React.FC = () => {
     {
       header: 'Status',
       accessor: (f) => <FileStatusBadge status={f.status} />,
+    },
+    {
+      header: 'Review',
+      className: 'whitespace-nowrap',
+      accessor: (f) => (
+        <div
+          className="inline-flex items-center gap-1.5"
+          title={f.approvedBy ? `Reviewed by ${f.approvedBy.name || f.approvedBy.username}` : undefined}
+        >
+          <FileApprovalBadge status={f.approvalStatus} />
+          {f.approvedBy && (
+            <span className="text-[10px] text-[var(--color-text-muted)] font-mono truncate max-w-[80px]">
+              @{f.approvedBy.username}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       header: 'MIME Type',
@@ -217,18 +321,18 @@ export const Files: React.FC = () => {
     },
     {
       header: t('common.actions'),
-      className: 'text-right',
+      className: 'text-right pr-3',
       accessor: (f) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex justify-end items-center gap-1">
           {f.status === 'UPLOADED' && (
             <Button
               variant="ghost"
               size="sm"
               iconOnly
               onClick={() => handleDownload(f.id)}
-              title="Download from R2 via signed URL"
+              title="Download file"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
             </Button>
           )}
           <Button variant="ghost" size="sm" iconOnly onClick={() => openEditModal(f)} title="Edit">
@@ -250,7 +354,7 @@ export const Files: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('files.title')}
@@ -258,7 +362,18 @@ export const Files: React.FC = () => {
           <p className="text-sm text-[var(--color-text-muted)]">{t('files.subtitle')}</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={approvalFilter}
+            onValueChange={setApprovalFilter}
+            className="w-40 sm:w-44"
+            options={[
+              { value: '', label: 'All Review Statuses' },
+              { value: 'PENDING', label: 'Pending Review' },
+              { value: 'APPROVED', label: 'Approved' },
+              { value: 'REJECTED', label: 'Declined' },
+            ]}
+          />
           <Select
             value={statusFilter}
             onValueChange={setStatusFilter}
@@ -302,10 +417,58 @@ export const Files: React.FC = () => {
         </div>
       </div>
 
+      {selectedFileIds.length > 0 && isReviewer && (
+        <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border)] shadow-sm">
+          <div className="text-xs font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+            <FileCheck className="w-4 h-4 text-[var(--color-brand-400)]" />
+            <span>{selectedFileIds.length} files selected</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                setApprovalTarget({
+                  action: 'APPROVE',
+                  scope: 'BULK',
+                })
+              }
+              disabled={bulkApprove.isPending}
+              className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 font-semibold"
+            >
+              <Check className="w-3.5 h-3.5 mr-1" />
+              Approve Selected
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                setApprovalTarget({
+                  action: 'REJECT',
+                  scope: 'BULK',
+                })
+              }
+              disabled={bulkReject.isPending}
+              className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10 font-semibold"
+            >
+              <X className="w-3.5 h-3.5 mr-1" />
+              Decline Selected
+            </Button>
+            <button
+              type="button"
+              onClick={() => setSelectedFileIds([])}
+              className="text-xs text-[var(--color-text-muted)] hover:underline ml-2 cursor-pointer"
+            >
+              Clear Selection
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-5 shadow-[var(--shadow-card)]">
         <DataTable
           columns={columns}
-          data={(data?.data || []).filter((f) => {
+          data={filesList.filter((f) => {
             if (languageFilter) {
               const lang = getLanguageInfo(f);
               if (!lang || lang.code !== languageFilter) return false;
@@ -330,6 +493,62 @@ export const Files: React.FC = () => {
           }
         />
       </div>
+
+      {/* Approval Confirmation Modal */}
+      {approvalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-sans">
+          <div className="relative w-full max-w-md bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              {approvalTarget.action === 'APPROVE' ? (
+                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+                {approvalTarget.action === 'APPROVE' ? 'Approve Files' : 'Decline Files'}
+              </h2>
+            </div>
+
+            <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+              {approvalTarget.scope === 'BULK'
+                ? `${approvalTarget.action === 'APPROVE' ? 'Approve' : 'Decline'} ${selectedFileIds.length} selected files.`
+                : `${approvalTarget.action === 'APPROVE' ? 'Approve' : 'Decline'} this file.`}
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">Review Notes (Optional)</label>
+              <textarea
+                value={approvalNote}
+                onChange={(e) => setApprovalNote(e.target.value)}
+                placeholder="e.g. Verified text extraction and quality..."
+                rows={3}
+                className="w-full text-xs p-3 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-400)]"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setApprovalTarget(null)}
+                disabled={approveFile.isPending || rejectFile.isPending || bulkApprove.isPending || bulkReject.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant={approvalTarget.action === 'APPROVE' ? 'primary' : 'danger'}
+                size="sm"
+                onClick={handleConfirmApproval}
+                disabled={approveFile.isPending || rejectFile.isPending || bulkApprove.isPending || bulkReject.isPending}
+              >
+                Confirm {approvalTarget.action === 'APPROVE' ? 'Approval' : 'Decline'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editingFile && (
@@ -415,3 +634,4 @@ export const Files: React.FC = () => {
     </div>
   );
 };
+

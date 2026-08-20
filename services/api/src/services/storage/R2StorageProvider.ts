@@ -5,8 +5,12 @@ import type { StorageProvider } from './StorageProvider';
 // StorageProvider contract as LocalStorageProvider. Business logic never
 // touches the S3 client directly.
 export class R2StorageProvider implements StorageProvider {
-  async upload(key: string, body: Buffer, contentType: string): Promise<void> {
+  async upload(key: string, body: Buffer | string, contentType: string): Promise<void> {
     await r2Service.uploadBuffer(key, body, contentType);
+  }
+
+  async getBuffer(key: string): Promise<Buffer | null> {
+    return r2Service.getBuffer(key);
   }
 
   async exists(key: string): Promise<boolean> {

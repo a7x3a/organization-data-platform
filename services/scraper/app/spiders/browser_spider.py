@@ -289,21 +289,30 @@ async def _run_browser_crawl(
                         if depth >= config.max_depth:
                             return
 
-                        # Extract links & download targets from rendered DOM
-                        links = await page.eval_on_selector_all(
+                        page_title = ""
+                        try:
+                            page_title = await page.title()
+                        except Exception:
+                            pass
+
+                        # Extract links, titles & download targets from rendered DOM
+                        links_data = await page.eval_on_selector_all(
                             "a[href], [download], [data-href], [data-download], [data-url], [data-document-url], [data-media-id], [data-uri]",
-                            """els => els.map(el => {
+                            r"""els => els.map(el => {
                                 let target = el.href || el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-download') || el.getAttribute('data-url') || el.getAttribute('data-document-url') || el.getAttribute('data-uri');
                                 if (target && (target.startsWith('ugd/') || target.includes('usrfiles.com')) && !target.startsWith('http')) {
-                                    return 'https://usrfiles.com/' + target.replace(/^[\/]+/, '');
+                                    target = 'https://usrfiles.com/' + target.replace(/^[\/]+/, '');
                                 }
-                                return target;
-                            }).filter(Boolean)""",
+                                let text = (el.textContent || '').trim();
+                                let title = el.getAttribute('title') || el.getAttribute('aria-label') || '';
+                                return { target, text, title };
+                            }).filter(x => Boolean(x.target))""",
                         )
 
                         from app.spiders.http_spider import transform_cloud_storage_url
 
-                        for raw_link_url in [*links, *extra_page_candidates]:
+                        for item in links_data:
+                            raw_link_url = item.get("target") if isinstance(item, dict) else item
                             if not isinstance(raw_link_url, str):
                                 continue
                             transformed_url = transform_cloud_storage_url(raw_link_url)
@@ -311,14 +320,22 @@ async def _run_browser_crawl(
                             if link_url is None or link_url in visited:
                                 continue
 
+                            ctx_name = item.get("text") or item.get("title") or page_title if isinstance(item, dict) else page_title
+
                             if is_downloadable_url(link_url, config.allowed_extensions):
                                 if is_allowed_resource_domain(link_url, effective_allowed_domains):
                                     if not url_matches_pattern(link_url, config.excluded_url_patterns):
                                         visited.add(link_url)
                                         result.files_discovered.append(
-                                            DiscoveredFile(url=link_url, depth=depth)
+                                            DiscoveredFile(
+                                                url=link_url,
+                                                depth=depth,
+                                                context_name=ctx_name,
+                                                page_title=page_title,
+                                                page_url=url,
+                                            )
                                         )
-                                        log.info("file_discovered_via_dom", url=link_url)
+                                        log.info("file_discovered_via_dom", url=link_url, context=ctx_name)
                                         if on_file_found:
                                             await on_file_found()
                                 continue

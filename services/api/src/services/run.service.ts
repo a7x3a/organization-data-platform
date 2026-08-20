@@ -16,6 +16,14 @@ interface CurrentUser {
   roles: string[];
 }
 
+function assertCanManageRun(run: { createdById: string | null }, currentUser?: CurrentUser) {
+  if (!currentUser) return;
+  if (currentUser.roles.includes('ADMIN')) return;
+  if (run.createdById && run.createdById !== currentUser.sub) {
+    throw new AppError(403, 'You do not have permission to modify or control this run. You can only view its progress and logs.', 'FORBIDDEN');
+  }
+}
+
 export async function listRuns(
   query: {
     page?: string;
@@ -23,8 +31,9 @@ export async function listRuns(
     collectorId?: string;
     sourceId?: string;
     status?: string;
+    approvalStatus?: string;
   },
-  currentUser?: CurrentUser
+  _currentUser?: CurrentUser
 ) {
   const pagination = parsePagination(query);
   const { skip, take } = toPrismaSkipTake(pagination);
@@ -33,15 +42,9 @@ export async function listRuns(
   if (query.collectorId) where.collectorId = query.collectorId;
   if (query.sourceId) where.sourceId = query.sourceId;
   if (query.status) where.status = query.status;
+  if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
 
-  // Scoping: If user is logged in and not ADMIN, restrict list to runs created by this user or system/legacy runs
-  if (currentUser && !currentUser.roles.includes('ADMIN')) {
-    where.OR = [
-      { createdById: currentUser.sub },
-      { createdById: null },
-    ];
-  }
-
+  // Visibility: All authenticated users can see all runs across all users
   const [data, total] = await prisma.$transaction([
     prisma.collectionRun.findMany({
       where,
@@ -52,6 +55,7 @@ export async function listRuns(
         collector: { select: { id: true, name: true, type: true } },
         source: { select: { id: true, name: true, slug: true } },
         createdBy: { select: { id: true, name: true, username: true } },
+        approvedBy: { select: { id: true, name: true, username: true } },
       },
     }),
     prisma.collectionRun.count({ where }),
@@ -60,22 +64,18 @@ export async function listRuns(
   return buildPaginatedResult(data, total, pagination);
 }
 
-export async function getRunById(id: string, currentUser?: CurrentUser) {
+export async function getRunById(id: string, _currentUser?: CurrentUser) {
   const run = await prisma.collectionRun.findUnique({
     where: { id },
     include: {
       collector: { select: { id: true, name: true, type: true, configuration: true } },
       source: { select: { id: true, name: true, slug: true, baseUrl: true } },
       createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
       errors: { orderBy: { createdAt: 'desc' }, take: 50 },
     },
   });
   if (!run) throw new AppError(404, 'Collection run not found', 'RUN_NOT_FOUND');
-
-  // Ownership Check: Users can view and manage their own runs, ADMINs can access all
-  if (currentUser && !currentUser.roles.includes('ADMIN') && run.createdById && run.createdById !== currentUser.sub) {
-    throw new AppError(403, 'You do not have permission to view or access this run', 'FORBIDDEN');
-  }
 
   return run;
 }
@@ -113,6 +113,23 @@ export async function startCollectionRun(collectorId: string, userId: string) {
 
   const zone = collector.type === 'TELEGRAM' ? 'telegram' : 'web';
 
+  // Per-User Telegram Session support: If Telegram collector, attach user's session credentials
+  let telegramCredentials: Record<string, unknown> | undefined = undefined;
+  if (collector.type === 'TELEGRAM') {
+    const userSession = await prisma.userTelegramSession.findUnique({
+      where: { userId },
+    });
+    if (userSession && userSession.sessionString) {
+      telegramCredentials = {
+        sessionString: userSession.sessionString,
+        apiId: userSession.apiId,
+        apiHash: userSession.apiHash,
+        phoneNumber: userSession.phoneNumber,
+        isVerified: userSession.isVerified,
+      };
+    }
+  }
+
   const job = await collectionQueue.add(
     'collection.start',
     {
@@ -122,6 +139,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
       sourceSlug: collector.source.slug,
       collectorType: collector.type,
       configuration: collector.configuration,
+      telegramCredentials,
       runFolderKey: `00_raw/${zone}/${collector.source.slug}/${runId}`,
     },
     {
@@ -134,7 +152,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
   );
 
   logger.info(
-    { runId: run.id, jobId: job.id, collectorId, userId },
+    { runId: run.id, jobId: job.id, collectorId, userId, hasUserTelegram: !!telegramCredentials },
     'collection_run_queued'
   );
 
@@ -161,6 +179,7 @@ import { storageProvider } from './storage';
 
 export async function deleteRun(id: string, deleteFiles: boolean = false, currentUser?: CurrentUser) {
   const run = await getRunById(id, currentUser);
+  assertCanManageRun(run, currentUser);
 
   if (ACTIVE_STATUSES.includes(run.status as RunStatus)) {
     throw new AppError(
@@ -192,8 +211,9 @@ export async function deleteRun(id: string, deleteFiles: boolean = false, curren
   await prisma.collectionRun.delete({ where: { id: run.id } });
 }
 
-export async function cancelRun(id: string, userId: string) {
+export async function cancelRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.CANCELLED) {
     return run;
@@ -249,8 +269,9 @@ export async function cancelRun(id: string, userId: string) {
   return updated;
 }
 
-export async function forceCancelRun(id: string, userId: string) {
+export async function forceCancelRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   try {
     const job = (await collectionQueue.getJob(`collection-${run.id}`)) || (await collectionQueue.getJob(`collection-${run.runId}`));
@@ -295,15 +316,16 @@ export async function forceCancelRun(id: string, userId: string) {
   return updated;
 }
 
-export async function pauseRun(id: string, userId: string) {
+export async function pauseRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.PAUSED) {
     return run;
   }
 
   const pausableStatuses: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
-  if (!pausableStatuses.includes(run.status as RunStatus)) {
+  if (!cancellableStatusesCheck(run.status as RunStatus)) {
     throw new AppError(
       400,
       `Cannot pause a run with status: ${run.status}`,
@@ -336,8 +358,13 @@ export async function pauseRun(id: string, userId: string) {
   return updated;
 }
 
-export async function resumeRun(id: string, userId: string) {
+function cancellableStatusesCheck(status: RunStatus) {
+  return [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED].includes(status);
+}
+
+export async function resumeRun(id: string, userId: string, currentUser?: CurrentUser) {
   const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
 
   if (run.status === RunStatus.RUNNING) {
     return run;
@@ -373,6 +400,74 @@ export async function resumeRun(id: string, userId: string) {
   });
 
   logger.info({ runId: run.id, userId }, 'collection_run_resumed');
+  return updated;
+}
+
+export async function approveRun(id: string, userId: string, notes?: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
+
+  const updated = await prisma.collectionRun.update({
+    where: { id: run.id },
+    data: {
+      approvalStatus: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      collector: { select: { id: true, name: true, type: true } },
+      source: { select: { id: true, name: true, slug: true } },
+      createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.approved',
+      entityType: 'CollectionRun',
+      entityId: run.id,
+      metadata: { runId: run.runId, notes },
+    },
+  });
+
+  logger.info({ runId: run.id, userId }, 'collection_run_approved');
+  return updated;
+}
+
+export async function rejectRun(id: string, userId: string, notes?: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id);
+  assertCanManageRun(run, currentUser);
+
+  const updated = await prisma.collectionRun.update({
+    where: { id: run.id },
+    data: {
+      approvalStatus: 'REJECTED',
+      approvedById: userId,
+      approvedAt: new Date(),
+      approvalNotes: notes || null,
+    },
+    include: {
+      collector: { select: { id: true, name: true, type: true } },
+      source: { select: { id: true, name: true, slug: true } },
+      createdBy: { select: { id: true, name: true, username: true } },
+      approvedBy: { select: { id: true, name: true, username: true } },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'run.rejected',
+      entityType: 'CollectionRun',
+      entityId: run.id,
+      metadata: { runId: run.runId, notes },
+    },
+  });
+
+  logger.info({ runId: run.id, userId }, 'collection_run_rejected');
   return updated;
 }
 

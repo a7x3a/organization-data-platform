@@ -111,3 +111,27 @@ export function useDeleteRun() {
     },
   });
 }
+
+export function useApproveRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.approve,
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['runs', variables.id] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useRejectRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runsApi.reject,
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['runs', variables.id] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}

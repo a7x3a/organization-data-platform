@@ -276,6 +276,21 @@ def detect_mime(file_path: str, declared: Optional[str] = None) -> Optional[str]
     return guessed or declared or "application/octet-stream"
 
 
+_GENERIC_TITLES = {
+    "untitled", "document", "microsoft word", "word document", "print", "scan",
+    "adobe indesign", "pdf document", "download", "file", "blank", "new document",
+    "page", "home", "index", "داگرتن", "کلیک بکە", "فایل"
+}
+
+
+def is_generic_title(title: str) -> bool:
+    """True if title is empty, too short, or a standard boilerplate/generic string."""
+    if not title or len(title.strip()) < 3:
+        return True
+    t = title.strip().lower()
+    return any(gen in t for gen in _GENERIC_TITLES)
+
+
 async def download_file(
     url: str,
     *,
@@ -283,6 +298,7 @@ async def download_file(
     max_size_bytes: Optional[int] = None,
     timeout: int = 30,
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
+    preferred_name: Optional[str] = None,
 ) -> DownloadResult:
     """
     Stream-download a file, compute SHA-256 incrementally, and save to a temp file.
@@ -290,7 +306,7 @@ async def download_file(
     Raises DownloadError, FileTooLargeError, or InvalidContentError on failure.
     """
     max_bytes = max_size_bytes or settings.max_file_size_bytes
-    log.info("download_started", url=url)
+    log.info("download_started", url=url, preferred_name=preferred_name)
 
     os.makedirs(settings.temp_dir, exist_ok=True)
 
@@ -360,10 +376,6 @@ async def download_file(
                 async for chunk in response.aiter_bytes(CHUNK_SIZE):
                     total_size += len(chunk)
                     if total_size > max_bytes:
-                        # Don't unlink here — the file handle is still open, and
-                        # deleting an open file is a PermissionError on Windows
-                        # (POSIX allows it; this must work on both). Stop writing
-                        # and let the `with` block close it first.
                         too_large = True
                         break
                     hasher.update(chunk)
@@ -375,14 +387,6 @@ async def download_file(
                             cancelled = True
                             break
     except httpx.HTTPError as e:
-        # Network-level failures (timeout, connection reset, TLS errors, …) —
-        # distinct from the HTTP-status DownloadError above. Unlike a bad
-        # status code, these aren't raised until the temp file's `with` block
-        # (and the streaming response) has already unwound and closed, so
-        # unlinking here is safe on Windows. Without this, one flaky/slow
-        # file kills the whole run instead of just failing that one file —
-        # str(e) is often empty for these exceptions, so fall back to the
-        # exception's type name.
         if temp_path:
             try:
                 os.unlink(temp_path)
@@ -406,9 +410,10 @@ async def download_file(
     mime_type = detect_mime(temp_path, declared_mime)
     extension = os.path.splitext(file_name)[1].lower() or None
 
-    # Prefer the document's own embedded title over its URL-derived name
-    # when one exists — URLs are often opaque slugs even when the file
-    # itself carries a real, readable book/document title.
+    # Priority for naming:
+    # 1. Embedded title inside PDF/EPUB/DOCX (if present and not generic)
+    # 2. Contextual page/anchor name (preferred_name e.g. "وەقایعی کوردستان ژمارە ٣٤٥")
+    # 3. Decoded, sanitized URL / Content-Disposition filename
     extracted_title = None
     if mime_type == "application/pdf" or extension == ".pdf":
         extracted_title = extract_pdf_title(temp_path)
@@ -417,10 +422,14 @@ async def download_file(
     elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or extension == ".docx":
         extracted_title = extract_docx_title(temp_path)
 
-    if extracted_title:
+    if extracted_title and not is_generic_title(extracted_title):
         clean_title = sanitize_filename(extracted_title)
         if clean_title and clean_title != "unnamed":
             file_name = clean_title + (extension or "")
+    elif preferred_name and not is_generic_title(preferred_name):
+        clean_preferred = sanitize_filename(preferred_name)
+        if clean_preferred and clean_preferred != "unnamed":
+            file_name = clean_preferred + (extension or "")
 
     log.info(
         "download_completed",

@@ -5,6 +5,7 @@ import { useHealth } from '../hooks/useHealth';
 import { runsApi } from '../api/runs';
 import { filesApi } from '../api/files';
 import { FileStatusBadge } from '../components/FileStatusBadge';
+import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -181,6 +182,11 @@ const FileDetailModal: React.FC<{
           <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
             <span className="text-[var(--color-text-muted)] font-medium">Status</span>
             <FileStatusBadge status={file.status} />
+          </div>
+
+          <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
+            <span className="text-[var(--color-text-muted)] font-medium">Review Status</span>
+            <FileApprovalBadge status={file.approvalStatus} />
           </div>
 
           <div className="flex justify-between py-1.5 border-b border-[var(--color-border-subtle)]">
@@ -491,6 +497,7 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
 
         {/* Quick Action Buttons */}
         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+          <FileApprovalBadge status={file.approvalStatus} />
           <FileStatusBadge status={file.status} />
           <Button
             variant="ghost"

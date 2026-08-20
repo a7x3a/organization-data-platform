@@ -14,9 +14,101 @@ A unified, automated platform for harvesting, processing, categorizing, transcri
 
 ---
 
-## 📥 How Files Are Downloaded, Filtered & Categorized
+## 🚀 Server Installation & Network Deployment Guide
 
-The platform uses a 4-stage pipeline to ensure only clean, high-quality, non-duplicate files are collected and organized:
+Follow these steps to deploy and run the platform on your server PC so that any computer on your local network (LAN or Wi-Fi) can access the dashboard.
+
+### Step 1: Prerequisites on the Server PC
+Make sure the server PC has the following installed:
+- **Docker** & **Docker Compose** ([Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) or `docker-ce` + `docker-compose-plugin` for Linux).
+- Ensure Docker is running.
+
+---
+
+### Step 2: Copy the Project to Your Server
+Either clone via Git or copy the project folder to your server PC:
+```bash
+git clone <YOUR_GIT_REPO_URL> organization-data-platform
+cd organization-data-platform
+```
+*(If copying the folder manually, you can omit `node_modules`, `.venv`, and `.git` folders to keep transfer fast).*
+
+---
+
+### Step 3: Configure `.env`
+Create your `.env` configuration from the template:
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+```
+
+**Linux / macOS:**
+```bash
+cp .env.example .env
+```
+
+Open `.env` and verify key settings (the defaults work out of the box for local storage):
+- `STORAGE_PROVIDER=local` (stores all downloads in `./storage` on the server disk).
+- `AUTH_ACCESS_SECRET` & `AUTH_REFRESH_SECRET` (generate any random secret strings for security).
+
+---
+
+### Step 4: Start All Services with Docker
+Build and launch all 5 microservices in the background:
+
+```bash
+docker compose up --build -d
+```
+
+> **Automated Setup:** On startup, the database migrations run automatically and the default admin user is created.
+
+---
+
+### Step 5: Access the Dashboard from Any Device on Your Network
+
+1. **Find your Server PC's IP address:**
+   - **Windows:** Open Command Prompt/PowerShell and run `ipconfig` (find your **IPv4 Address**, e.g., `192.168.1.150`).
+   - **Linux:** Run `hostname -I` or `ip addr show`.
+
+2. **Ensure Port 3000 is open in Firewall:**
+   - Allow inbound traffic on TCP port **3000** through your server's firewall.
+
+3. **Open in any Browser:**
+   Navigate to:
+   ```
+   http://<YOUR_SERVER_IP>:3000
+   ```
+   *(Example: `http://192.168.1.150:3000`)*
+
+---
+
+### 🔑 Default Login Credentials
+
+| Role | Username | Default Password |
+| :--- | :--- | :--- |
+| **Administrator** | `admin` | `admin12345` |
+| **Alternate Admin** | `a7x3a` | `admin12345` |
+
+> 💡 *Once logged in, you can change passwords or manage users from the **Users** tab.*
+
+---
+
+## 🛠️ Handy Server Management Commands
+
+| Action | Command |
+| :--- | :--- |
+| **Check container status** | `docker compose ps` |
+| **View real-time logs** | `docker compose logs -f` |
+| **View scraper engine logs** | `docker compose logs -f scraper` |
+| **View API logs** | `docker compose logs -f api` |
+| **Restart all services** | `docker compose restart` |
+| **Stop all services** | `docker compose down` |
+| **Update & Rebuild** | `git pull && docker compose up --build -d` |
+
+---
+
+## 📥 How Files Are Downloaded, Filtered & Categorized
 
 ```
 ┌─────────────────┐     ┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
@@ -25,25 +117,10 @@ The platform uses a 4-stage pipeline to ensure only clean, high-quality, non-dup
 └─────────────────┘     └─────────────────────┘     └──────────────────────┘     └──────────────────┘
 ```
 
-### 1. Discovery & Domain Safety
-- **Domain Scoping**: Confines crawling to the target source domain so the crawler never escapes to external websites.
-- **Trusted Asset CDNs**: Automatically permits files hosted on trusted document/media CDNs (`cdn.gov.krd`, `usrfiles.com`, `wixstatic.com`, `drive.google.com`, `archive.org`).
-- **SSRF Protection**: Validates all URLs against private IP ranges (`127.0.0.1`, `10.0.0.0/8`, metadata APIs) for security.
-
-### 2. File Filtering & FileType Rules
-- **Allowed Extensions**: Identifies document formats (`.pdf`, `.epub`, `.docx`, `.xlsx`, `.zip`), audio/video (`.mp3`, `.wav`, `.mp4`), and datasets (`.csv`, `.parquet`, `.jsonl`).
-- **Asset Noise Removal**: Automatically skips page furniture and theme files (`.css`, `.js`, `.ico`, `.woff`, `.svg`).
-- **Regex Rules**: Enforces custom URL inclusion and exclusion patterns defined in the collector configuration.
-
-### 3. Streaming Download & Deduplication
-- **Memory-Efficient Streaming**: Downloads files in chunked streams to keep RAM usage low even for large files.
-- **SHA-256 Deduplication**: Calculates file hashes on-the-fly and skips duplicate downloads instantly against prior runs.
-
-### 4. Classification & Quality Categorization
-- **PDF Yield Classification**: Analyzes PDF text content to separate **Native Digital Text** from **Scanned Image PDFs** (marking scanned files for downstream OCR).
-- **Language Detection**: Identifies document languages (Kurdish, Arabic, English, Persian).
-- **Kurdish Content Categorization**: Categorizes text into domains (e.g., Literature, History, Law, Religion, Science) with quality scores.
-- **Clean Unicode Filenames**: Preserves Kurdish and Arabic script filenames cleanly without corruption.
+1. **Discovery & Domain Safety**: Confines crawling to target domains, permits trusted CDNs (`cdn.gov.krd`, `usrfiles.com`, `drive.google.com`, etc.), with built-in SSRF protection against private IP probing.
+2. **File Filtering & Rules**: Extracts documents (`.pdf`, `.epub`, `.docx`), audio/video (`.mp3`, `.wav`, `.mp4`), and datasets (`.csv`, `.parquet`, `.jsonl`) while eliminating web assets (`.css`, `.js`, `.woff`).
+3. **Streaming Download & Deduplication**: Streams downloads to conserve RAM and computes SHA-256 hashes to prevent redundant downloads.
+4. **Classification & Categorization**: Differentiates native digital PDFs from scanned image PDFs, detects languages (Kurdish, Arabic, English, Persian), and applies Kurdish topic classification with clean Unicode preservation.
 
 ---
 
@@ -52,56 +129,29 @@ The platform uses a 4-stage pipeline to ensure only clean, high-quality, non-dup
 ```
 organization-data-platform/
 ├── apps/
-│   └── web/                      # React + Vite frontend dashboard
-│       ├── src/pages/            # Collectors, Files, Data Browser, Users, Upload
-│       └── src/components/       # Reusable UI components
+│   └── web/                      # React + Vite dashboard (served via Nginx on port 3000)
 ├── services/
-│   ├── api/                      # Express + TypeScript REST API
-│   │   ├── src/routes/           # API endpoints (collectors, runs, files, stats)
-│   │   └── src/services/         # BullMQ queue producers & database queries
-│   └── scraper/                  # Python worker service
-│       ├── app/
-│       │   ├── discovery/        # Link, media, sitemap & robots.txt extractors
-│       │   ├── downloader/       # Streaming HTTP downloader with retry logic
-│       │   ├── media/            # Language detection, Kurdish categorization, quality scoring
-│       │   ├── spiders/          # HTTP spider, Browser Playwright spider, Scrapling spider, CF bypass
-│       │   ├── pipeline/         # Shared file pipeline (dedup, hash, upload)
-│       │   └── storage/          # MetadataWriter (jsonl) & ManifestWriter (json)
-│       └── tests/                # Pytest unit & integration test suite (105+ tests)
+│   ├── api/                      # Express + TypeScript REST API (port 4000)
+│   └── scraper/                  # Python worker (Playwright, Scrapling, yt-dlp, Telethon)
 ├── packages/
 │   ├── database/                 # Prisma ORM schema & PostgreSQL migrations
-│   └── shared-types/             # Shared TypeScript interfaces & enums
+│   └── shared-types/             # Shared TypeScript models & enums
+├── storage/                      # Local persistent storage for scraped content & manifests
 ├── docker-compose.yml            # Production deployment orchestration
-└── docker-compose.dev.yml        # Local development orchestration with live reloading
+└── docker-compose.dev.yml        # Local development orchestration with hot reloading
 ```
 
 ---
 
-## 🚀 Quick Start
+## 💻 Local Development Mode
 
-### Using Docker (Recommended)
-
-1. Clone environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Build and start all services:
-   ```bash
-   docker compose up --build -d
-   ```
-
-- **Web Dashboard**: `http://localhost:3000`
-- **REST API**: `http://localhost:4000`
-
-### Development Mode (With Live Reloading)
+If you are developing locally with hot reloading enabled:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d
 ```
 
-Run the scraper test suite:
-
+Run Scraper unit and integration tests:
 ```bash
 cd services/scraper
 .venv\Scripts\python.exe -m pytest tests/

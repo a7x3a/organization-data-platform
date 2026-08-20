@@ -15,31 +15,14 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Collector, isTelegramCollector, isWebCollector } from '@odp/shared-types';
-import { CollectorTypeInput } from '../types/forms';
+import { CollectorTypeInput, STANDARDIZED_FILE_GROUPS } from '../types/forms';
 import { Plus, Play, Power, Send, Pencil, Trash2, Globe, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-// Mirrors the scraper's own category grouping (services/scraper/app/downloader/downloader.py
-// _CATEGORY_BY_EXTENSION) so "Documents" here means the same thing R2/local
-// storage files it into. Grouped by category rather than one checkbox per
-// extension — a few dozen individual boxes isn't a usable picker.
-const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = [
-  { label: 'Documents', extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf'] },
-  { label: 'Spreadsheets', extensions: ['.xls', '.xlsx', '.ods', '.csv', '.tsv'] },
-  { label: 'Presentations', extensions: ['.ppt', '.pptx', '.odp'] },
-  { label: 'Ebooks', extensions: ['.epub', '.mobi', '.azw3', '.fb2', '.djvu'] },
-  { label: 'Archives', extensions: ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz'] },
-  {
-    label: 'Images',
-    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.heic'],
-  },
-  { label: 'Audio', extensions: ['.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.aac', '.wma'] },
-  { label: 'Video', extensions: ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.m4v'] },
-  {
-    label: 'Text & Data',
-    extensions: ['.txt', '.md', '.json', '.jsonl', '.xml', '.srt', '.vtt', '.parquet', '.arrow', '.feather', '.rst'],
-  },
-];
+const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = STANDARDIZED_FILE_GROUPS.map((g) => ({
+  label: g.name,
+  extensions: g.extensions,
+}));
 
 export const Collectors: React.FC = () => {
   const { t } = useTranslation();
@@ -650,12 +633,12 @@ export const Collectors: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 setRestrictFileTypes(true);
-                                setFileTypeCategories(['Documents', 'Ebooks']);
+                                setFileTypeCategories(['PDF Documents', 'E-Books & Publications']);
                               }}
                               className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
                                 restrictFileTypes &&
-                                fileTypeCategories.includes('Documents') &&
-                                fileTypeCategories.includes('Ebooks')
+                                fileTypeCategories.includes('PDF Documents') &&
+                                fileTypeCategories.includes('E-Books & Publications')
                                   ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
                                   : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
                               }`}
@@ -666,12 +649,12 @@ export const Collectors: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 setRestrictFileTypes(true);
-                                setFileTypeCategories(['Documents', 'Text & Data']);
+                                setFileTypeCategories(['PDF Documents', 'Office Documents']);
                               }}
                               className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
                                 restrictFileTypes &&
-                                fileTypeCategories.includes('Documents') &&
-                                fileTypeCategories.includes('Text & Data')
+                                fileTypeCategories.includes('PDF Documents') &&
+                                fileTypeCategories.includes('Office Documents')
                                   ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
                                   : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
                               }`}
@@ -682,17 +665,33 @@ export const Collectors: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 setRestrictFileTypes(true);
-                                setFileTypeCategories(['Audio']);
+                                setFileTypeCategories(['Audio Files']);
                               }}
                               className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
                                 restrictFileTypes &&
-                                fileTypeCategories.includes('Audio') &&
+                                fileTypeCategories.includes('Audio Files') &&
                                 fileTypeCategories.length === 1
                                   ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
                                   : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
                               }`}
                             >
                               🎧 Audiobooks Preset
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRestrictFileTypes(true);
+                                setFileTypeCategories(['Data & Datasets']);
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                                restrictFileTypes &&
+                                fileTypeCategories.includes('Data & Datasets') &&
+                                fileTypeCategories.length === 1
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                              }`}
+                            >
+                              📊 Datasets Preset
                             </button>
                             <button
                               type="button"
@@ -857,20 +856,21 @@ export const Collectors: React.FC = () => {
                       }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]'
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-brand-400)]'
                         }`}>
                         <Globe className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 text-xs font-semibold">
-                          <span>Force Playwright Browser</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${useBrowser ? 'bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]' : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)]'
-                            }`}>
-                            JS SPAs
+                          <span>Autonomous Engine Selection</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
+                            Auto HTTP + Playwright
                           </span>
                         </div>
-                        <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
-                          Use Playwright headless browser for JavaScript-rendered web apps
+                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                          {useBrowser
+                            ? 'Forced Playwright Chromium active for all URLs.'
+                            : 'Automatic: Fast HTTP by default, switches to Playwright Chromium on JS SPAs & Cloudflare.'}
                         </p>
                       </div>
                     </div>

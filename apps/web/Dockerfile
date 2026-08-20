@@ -12,6 +12,9 @@ RUN npm ci --workspace=apps/web --workspace=packages/shared-types --if-present
 COPY packages/ ./packages/
 COPY apps/web/ ./apps/web/
 
+WORKDIR /app/packages/shared-types
+RUN npm run build
+
 WORKDIR /app/apps/web
 RUN npm run build
 

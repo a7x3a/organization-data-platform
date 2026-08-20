@@ -115,21 +115,61 @@ _ENCLOSURE_RELS = {"alternate", "enclosure"}
 _STYLE_BG_URL_RE = re.compile(r'url\([\'"]?(.*?)[\'"]?\)', re.IGNORECASE)
 
 
-def extract_page_links(html: str, base_url: str) -> set[str]:
+def extract_page_links_with_context(html: str, base_url: str) -> list[tuple[str, dict[str, Any]]]:
     """
-    Every <a href> target on the page, resolved to an absolute URL.
-    Also includes <form action="..."> targets, <iframe src="..."> embed URLs,
-    and interactive dynamic element links ([data-href], [data-url], [onclick]).
+    Extract all links on the page along with their rich contextual metadata:
+    - Target absolute URL
+    - Anchor text (e.g. "وەقایعی کوردستان ژمارە ٣٤٥")
+    - Title / aria-label attribute
+    - Nearest surrounding heading/item title
+    - Page title and description
     """
     tree = HTMLParser(html)
-    links: set[str] = set()
+    results: list[tuple[str, dict[str, Any]]] = []
+    seen_urls: set[str] = set()
+
+    # Extract page-level metadata once
+    page_meta = extract_html_metadata(html, base_url)
+    page_title = page_meta.get("title", "")
 
     # 1. Standard <a href> anchors
     for node in tree.css("a[href]"):
         href = node.attributes.get("href")
         if not href or href.startswith(("javascript:", "mailto:", "tel:", "#", "data:")):
             continue
-        links.add(urljoin(base_url, href))
+        
+        full_url = urljoin(base_url, href)
+        if full_url in seen_urls:
+            continue
+        seen_urls.add(full_url)
+
+        # Context extraction: anchor text, title attr, surrounding heading
+        text = (node.text() or "").strip()
+        title_attr = (node.attributes.get("title") or node.attributes.get("aria-label") or "").strip()
+        
+        # Look for surrounding card/item heading if anchor text is short or generic
+        heading = ""
+        parent = node.parent
+        for _ in range(4):
+            if parent is None:
+                break
+            h_node = parent.css_first("h1, h2, h3, h4, h5, h6, .title, .headline, .card-title, .publication-title, strong")
+            if h_node and h_node.text():
+                h_text = h_node.text().strip()
+                if h_text and len(h_text) > 2:
+                    heading = h_text
+                    break
+            parent = parent.parent
+
+        context = {
+            "text": text,
+            "title_attr": title_attr,
+            "heading": heading,
+            "page_title": page_title,
+            "page_url": base_url,
+            "best_name": text if (text and len(text) > 2) else (title_attr if title_attr else (heading if heading else page_title)),
+        }
+        results.append((full_url, context))
 
     # 2. Dynamic Attributes ([data-href], [data-url], [data-link], [data-document-url])
     for attr in ("data-href", "data-url", "data-link", "data-document-url", "data-uri"):
@@ -139,21 +179,48 @@ def extract_page_links(html: str, base_url: str) -> set[str]:
                 if val.startswith("ugd/") or "usrfiles.com" in val:
                     if not val.startswith("http"):
                         val = f"https://usrfiles.com/{val.lstrip('/')}"
-                links.add(urljoin(base_url, val))
+                full_url = urljoin(base_url, val)
+                if full_url not in seen_urls:
+                    seen_urls.add(full_url)
+                    text = (node.text() or "").strip()
+                    results.append((full_url, {
+                        "text": text,
+                        "title_attr": "",
+                        "heading": "",
+                        "page_title": page_title,
+                        "page_url": base_url,
+                        "best_name": text or page_title,
+                    }))
 
     # 3. Form action targets (<form action="...">)
     for node in tree.css("form[action]"):
         action = node.attributes.get("action")
         if action and not action.startswith(("javascript:", "#", "data:")):
-            links.add(urljoin(base_url, action))
+            full_url = urljoin(base_url, action)
+            if full_url not in seen_urls:
+                seen_urls.add(full_url)
+                results.append((full_url, {"page_url": base_url, "page_title": page_title}))
 
     # 4. Iframe & Embed sources (<iframe src="...">, <embed src="...">)
     for node in tree.css("iframe[src], embed[src], frame[src]"):
         src = node.attributes.get("src")
         if src and not src.startswith(("javascript:", "#", "data:")):
-            links.add(urljoin(base_url, src))
+            full_url = urljoin(base_url, src)
+            if full_url not in seen_urls:
+                seen_urls.add(full_url)
+                results.append((full_url, {"page_url": base_url, "page_title": page_title}))
 
-    return links
+    return results
+
+
+def extract_page_links(html: str, base_url: str) -> set[str]:
+    """
+    Every <a href> target on the page, resolved to an absolute URL.
+    Also includes <form action="..."> targets, <iframe src="..."> embed URLs,
+    and interactive dynamic element links ([data-href], [data-url], [onclick]).
+    """
+    pairs = extract_page_links_with_context(html, base_url)
+    return {url for url, _ in pairs}
 
 
 def extract_html_metadata(html: str, url: str) -> dict[str, str]:

@@ -1,34 +1,81 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useRun, useCancelRun, usePauseRun, useResumeRun, useForceCancelRun } from '../hooks/useRuns';
-import { useFiles } from '../hooks/useFiles';
+import { useAuth } from '../hooks/useAuth';
+import {
+  useFiles,
+  useApproveFile,
+  useRejectFile,
+  useBulkApproveFiles,
+  useBulkRejectFiles,
+  useApproveRunFiles,
+  useRejectRunFiles,
+} from '../hooks/useFiles';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { FileStatusBadge } from '../components/FileStatusBadge';
+import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { DataTable, Column } from '../components/DataTable';
 import { Button } from '../components/Button';
-import { ArrowLeft, XCircle, AlertTriangle, Zap, Pause, Play } from 'lucide-react';
-import { CollectedFile, CollectorType, RunStatus } from '@odp/shared-types';
-import { formatBytes, formatDuration, truncateSha256 } from '../lib/utils';
+import {
+  ArrowLeft,
+  XCircle,
+  AlertTriangle,
+  Zap,
+  Pause,
+  Play,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  ShieldCheck,
+  Lock,
+  Download,
+  Check,
+  X,
+  FileCheck,
+} from 'lucide-react';
+import { ApprovalStatus, CollectedFile, CollectorType, RunStatus, UserRole } from '@odp/shared-types';
+import { formatBytes, truncateSha256 } from '../lib/utils';
+import { downloadFile } from '../lib/downloadFile';
 import { LiveDuration } from '../components/LiveDuration';
 import { LogConsole } from '../components/LogConsole';
 
 export const RunDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isAdmin = user?.roles.includes(UserRole.ADMIN);
 
   const { data: run, isLoading } = useRun(id!);
   const isRunning =
     run ? (run.status === RunStatus.RUNNING || run.status === RunStatus.PENDING || run.status === RunStatus.PAUSED || run.status === RunStatus.CANCEL_REQUESTED) : false;
 
   const { data: filesData } = useFiles(
-    { collectionRunId: id!, pageSize: 20 },
+    { collectionRunId: id!, pageSize: 100 },
     { refetchInterval: isRunning ? 2000 : false }
   );
+
   const cancelRun = useCancelRun();
   const pauseRun = usePauseRun();
   const resumeRun = useResumeRun();
   const forceCancelRun = useForceCancelRun();
+
+  const approveFile = useApproveFile();
+  const rejectFile = useRejectFile();
+  const bulkApprove = useBulkApproveFiles();
+  const bulkReject = useBulkRejectFiles();
+  const approveAllInRun = useApproveRunFiles();
+  const rejectAllInRun = useRejectRunFiles();
+
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [approvalNote, setApprovalNote] = useState('');
+  const [approvalTarget, setApprovalTarget] = useState<{
+    action: 'APPROVE' | 'REJECT';
+    scope: 'SINGLE' | 'BULK' | 'ALL';
+    fileId?: string;
+  } | null>(null);
+
+  const canManage = run ? (isAdmin || !run.createdById || run.createdById === user?.id) : false;
 
   // Force re-render every 1 second when active so duration counter increments live
   const [, setTick] = React.useState(0);
@@ -44,7 +91,82 @@ export const RunDetail: React.FC = () => {
     return <div className="p-8 text-center text-[var(--color-text-muted)]">Loading run progress...</div>;
   }
 
+  const files = filesData?.data || [];
+  const approvedCount = files.filter((f) => f.approvalStatus === ApprovalStatus.APPROVED).length;
+  const rejectedCount = files.filter((f) => f.approvalStatus === ApprovalStatus.REJECTED).length;
+  const pendingCount = files.filter((f) => !f.approvalStatus || f.approvalStatus === ApprovalStatus.PENDING).length;
+
+  const toggleSelectAll = () => {
+    if (selectedFileIds.length === files.length) {
+      setSelectedFileIds([]);
+    } else {
+      setSelectedFileIds(files.map((f) => f.id));
+    }
+  };
+
+  const toggleSelectFile = (fileId: string) => {
+    setSelectedFileIds((prev) =>
+      prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]
+    );
+  };
+
+  const handleDownload = async (fileId: string) => {
+    try {
+      await downloadFile(fileId);
+    } catch {
+      alert('Could not generate signed download URL');
+    }
+  };
+
+  const handleConfirmApproval = async () => {
+    if (!approvalTarget) return;
+
+    if (approvalTarget.scope === 'SINGLE' && approvalTarget.fileId) {
+      if (approvalTarget.action === 'APPROVE') {
+        await approveFile.mutateAsync({ id: approvalTarget.fileId, notes: approvalNote });
+      } else {
+        await rejectFile.mutateAsync({ id: approvalTarget.fileId, notes: approvalNote });
+      }
+    } else if (approvalTarget.scope === 'BULK') {
+      if (approvalTarget.action === 'APPROVE') {
+        await bulkApprove.mutateAsync({ fileIds: selectedFileIds, notes: approvalNote });
+      } else {
+        await bulkReject.mutateAsync({ fileIds: selectedFileIds, notes: approvalNote });
+      }
+      setSelectedFileIds([]);
+    } else if (approvalTarget.scope === 'ALL') {
+      if (approvalTarget.action === 'APPROVE') {
+        await approveAllInRun.mutateAsync({ runId: run.id, notes: approvalNote });
+      } else {
+        await rejectAllInRun.mutateAsync({ runId: run.id, notes: approvalNote });
+      }
+      setSelectedFileIds([]);
+    }
+
+    setApprovalTarget(null);
+    setApprovalNote('');
+  };
+
   const fileColumns: Column<CollectedFile>[] = [
+    {
+      header: (
+        <input
+          type="checkbox"
+          checked={files.length > 0 && selectedFileIds.length === files.length}
+          onChange={toggleSelectAll}
+          className="rounded border-[var(--color-border)] cursor-pointer"
+        />
+      ),
+      className: 'w-8 pl-3',
+      accessor: (f) => (
+        <input
+          type="checkbox"
+          checked={selectedFileIds.includes(f.id)}
+          onChange={() => toggleSelectFile(f.id)}
+          className="rounded border-[var(--color-border)] cursor-pointer"
+        />
+      ),
+    },
     {
       header: 'File ID',
       accessor: (f) => <span className="font-mono text-xs text-[var(--color-brand-400)]">{f.fileId}</span>,
@@ -53,14 +175,47 @@ export const RunDetail: React.FC = () => {
       header: 'File Name',
       accessor: (f) => (
         <div className="truncate max-w-xs" title={f.fileName}>
-          <div className="font-medium text-xs text-[var(--color-text-primary)] truncate">{f.fileName}</div>
-          <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate">{f.sourceUrl}</div>
+          <button
+            type="button"
+            onClick={() => {
+              if (f.sourceUrl) {
+                window.open(f.sourceUrl, '_blank', 'noopener,noreferrer');
+              } else if (f.status === 'UPLOADED') {
+                handleDownload(f.id);
+              }
+            }}
+            className={`font-medium text-xs text-left truncate block ${
+              f.sourceUrl || f.status === 'UPLOADED'
+                ? 'text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer'
+                : 'text-[var(--color-text-primary)] cursor-default'
+            }`}
+          >
+            {f.fileName}
+          </button>
+          <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate">{f.sourceUrl || '—'}</div>
         </div>
       ),
     },
     {
       header: 'Status',
       accessor: (f) => <FileStatusBadge status={f.status} />,
+    },
+    {
+      header: 'Review',
+      className: 'whitespace-nowrap',
+      accessor: (f) => (
+        <div
+          className="inline-flex items-center gap-1.5"
+          title={f.approvedBy ? `Reviewed by ${f.approvedBy.name || f.approvedBy.username}` : undefined}
+        >
+          <FileApprovalBadge status={f.approvalStatus} />
+          {f.approvedBy && (
+            <span className="text-[10px] text-[var(--color-text-muted)] font-mono truncate max-w-[80px]">
+              @{f.approvedBy.username}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       header: 'Size',
@@ -72,6 +227,64 @@ export const RunDetail: React.FC = () => {
         <span className="font-mono text-xs text-[var(--color-text-muted)] font-bold">
           {truncateSha256(f.sha256)}
         </span>
+      ),
+    },
+    {
+      header: 'Actions',
+      className: 'text-right pr-3',
+      accessor: (f) => (
+        <div className="flex items-center justify-end gap-1">
+          {canManage && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  setApprovalTarget({
+                    action: 'APPROVE',
+                    scope: 'SINGLE',
+                    fileId: f.id,
+                  })
+                }
+                title="Approve File"
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                  f.approvalStatus === ApprovalStatus.APPROVED
+                    ? 'text-emerald-400 bg-emerald-500/10'
+                    : 'text-[var(--color-text-muted)] hover:text-emerald-400 hover:bg-emerald-500/10'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setApprovalTarget({
+                    action: 'REJECT',
+                    scope: 'SINGLE',
+                    fileId: f.id,
+                  })
+                }
+                title="Decline / Reject File"
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                  f.approvalStatus === ApprovalStatus.REJECTED
+                    ? 'text-rose-400 bg-rose-500/10'
+                    : 'text-[var(--color-text-muted)] hover:text-rose-400 hover:bg-rose-500/10'
+                }`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {f.status === 'UPLOADED' && (
+            <button
+              type="button"
+              onClick={() => handleDownload(f.id)}
+              title="Download file"
+              className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-brand-400)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       ),
     },
   ];
@@ -91,13 +304,21 @@ export const RunDetail: React.FC = () => {
               {run.runId}
             </h1>
             <RunStatusBadge status={run.status} />
+            {!canManage && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">
+                <Lock className="w-3 h-3" /> View Only
+              </span>
+            )}
           </div>
           <p className="text-xs text-[var(--color-text-muted)] mt-1 font-mono">
-            Source: {run.source?.name} | Collector: {run.collector?.name} | Version: {run.collectorVersion}
+            Source: {run.source?.name} | Collector: {run.collector?.name} | Launched by:{' '}
+            <span className="text-[var(--color-text-secondary)] font-semibold">
+              {(run as any).createdBy?.name || (run as any).createdBy?.username || 'Automated'}
+            </span>
           </p>
         </div>
 
-        {isRunning && (
+        {isRunning && canManage && (
           <div className="flex items-center gap-2">
             {run.status === RunStatus.PAUSED ? (
               <Button
@@ -147,9 +368,181 @@ export const RunDetail: React.FC = () => {
         )}
       </div>
 
-      {/* Why this run failed — without this, a FAILED run with 0 everywhere
-          gives no way to tell "Telegram isn't configured yet" apart from
-          "the collector's start URLs are wrong" apart from any other cause. */}
+      {/* Result Folder Review & Sign-Off Bar */}
+      {files.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-2.5 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl shadow-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-[var(--color-text-primary)]">
+                Folder Review
+              </span>
+              <span className="text-[11px] font-mono text-[var(--color-text-muted)] bg-[var(--color-bg-base)] px-2 py-0.5 rounded-md border border-[var(--color-border-subtle)]">
+                {files.length} {files.length === 1 ? 'file' : 'files'}
+              </span>
+            </div>
+
+            <div className="h-3.5 w-px bg-[var(--color-border-subtle)] hidden sm:block" />
+
+            <div className="flex items-center gap-3 text-[11px] font-mono">
+              <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {approvedCount} accepted
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-rose-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                {rejectedCount} declined
+              </span>
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-amber-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  {pendingCount} pending
+                </span>
+              )}
+            </div>
+          </div>
+
+          {canManage && (
+            <div className="flex items-center gap-2 shrink-0">
+              {approvedCount === files.length ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'REJECT',
+                      scope: 'ALL',
+                    })
+                  }
+                  disabled={rejectAllInRun.isPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  Decline Result Folder
+                </button>
+              ) : rejectedCount === files.length ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'APPROVE',
+                      scope: 'ALL',
+                    })
+                  }
+                  disabled={approveAllInRun.isPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Accept Result Folder
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setApprovalTarget({
+                        action: 'APPROVE',
+                        scope: 'ALL',
+                      })
+                    }
+                    disabled={approveAllInRun.isPending}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Accept Folder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setApprovalTarget({
+                        action: 'REJECT',
+                        scope: 'ALL',
+                      })
+                    }
+                    disabled={rejectAllInRun.isPending}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    Decline Folder
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {approvalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-sans">
+          <div className="relative w-full max-w-md bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              {approvalTarget.action === 'APPROVE' ? (
+                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+                {approvalTarget.action === 'APPROVE' ? 'Approve Files' : 'Decline Files'}
+              </h2>
+            </div>
+
+            <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+              {approvalTarget.scope === 'ALL'
+                ? `${approvalTarget.action === 'APPROVE' ? 'Approve' : 'Decline'} all ${files.length} collected files in run ${run.runId}.`
+                : approvalTarget.scope === 'BULK'
+                ? `${approvalTarget.action === 'APPROVE' ? 'Approve' : 'Decline'} ${selectedFileIds.length} selected files.`
+                : `${approvalTarget.action === 'APPROVE' ? 'Approve' : 'Decline'} the selected file.`}
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">Review Notes (Optional)</label>
+              <textarea
+                value={approvalNote}
+                onChange={(e) => setApprovalNote(e.target.value)}
+                placeholder="e.g. Verified PDF content and formatting..."
+                rows={3}
+                className="w-full text-xs p-3 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-400)]"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setApprovalTarget(null)}
+                disabled={
+                  approveFile.isPending ||
+                  rejectFile.isPending ||
+                  bulkApprove.isPending ||
+                  bulkReject.isPending ||
+                  approveAllInRun.isPending ||
+                  rejectAllInRun.isPending
+                }
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant={approvalTarget.action === 'APPROVE' ? 'primary' : 'danger'}
+                size="sm"
+                onClick={handleConfirmApproval}
+                disabled={
+                  approveFile.isPending ||
+                  rejectFile.isPending ||
+                  bulkApprove.isPending ||
+                  bulkReject.isPending ||
+                  approveAllInRun.isPending ||
+                  rejectAllInRun.isPending
+                }
+              >
+                Confirm {approvalTarget.action === 'APPROVE' ? 'Approval' : 'Decline'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Why this run failed */}
       {run.status === RunStatus.FAILED && run.errors && run.errors.length > 0 && (
         <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-500)]/30 rounded-[var(--radius-lg)] p-4 flex gap-3">
           <AlertTriangle className="w-4 h-4 text-[var(--color-error-400)] flex-shrink-0 mt-0.5" />
@@ -220,12 +613,60 @@ export const RunDetail: React.FC = () => {
 
       {/* Collected files in this run */}
       <div className="space-y-3">
-        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-          Files Collected in this Run
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+            Files Collected in this Run
+          </h2>
+
+          {selectedFileIds.length > 0 && canManage && (
+            <div className="flex items-center gap-2 bg-[var(--color-bg-surface)] border border-[var(--color-border)] px-3 py-1.5 rounded-lg shadow-sm">
+              <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {selectedFileIds.length} file{selectedFileIds.length > 1 ? 's' : ''} selected:
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setApprovalTarget({
+                    action: 'APPROVE',
+                    scope: 'BULK',
+                  })
+                }
+                disabled={bulkApprove.isPending}
+                className="text-xs text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 font-semibold"
+              >
+                <Check className="w-3 h-3 mr-1" />
+                Approve Selected
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setApprovalTarget({
+                    action: 'REJECT',
+                    scope: 'BULK',
+                  })
+                }
+                disabled={bulkReject.isPending}
+                className="text-xs text-rose-400 border-rose-500/30 hover:bg-rose-500/10 font-semibold"
+              >
+                <X className="w-3 h-3 mr-1" />
+                Decline Selected
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSelectedFileIds([])}
+                className="text-[11px] text-[var(--color-text-muted)] hover:underline ml-1 cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+
         <DataTable
           columns={fileColumns}
-          data={filesData?.data || []}
+          data={files}
           keyExtractor={(f) => f.id}
           isLoading={false}
           emptyMessage="No files discovered yet."
