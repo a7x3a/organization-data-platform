@@ -17,6 +17,7 @@ import { FileStatusBadge } from '../components/FileStatusBadge';
 import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { DataTable, Column } from '../components/DataTable';
 import { Button } from '../components/Button';
+import { openFile, downloadFile } from '../lib/downloadFile';
 import {
   ArrowLeft,
   XCircle,
@@ -36,7 +37,6 @@ import {
 } from 'lucide-react';
 import { ApprovalStatus, CollectedFile, CollectorType, RunStatus, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
-import { downloadFile } from '../lib/downloadFile';
 import { LiveDuration } from '../components/LiveDuration';
 import { LogConsole } from '../components/LogConsole';
 
@@ -177,18 +177,9 @@ export const RunDetail: React.FC = () => {
         <div className="truncate max-w-xs" title={f.fileName}>
           <button
             type="button"
-            onClick={() => {
-              if (f.sourceUrl) {
-                window.open(f.sourceUrl, '_blank', 'noopener,noreferrer');
-              } else if (f.status === 'UPLOADED') {
-                handleDownload(f.id);
-              }
-            }}
-            className={`font-medium text-xs text-left truncate block ${
-              f.sourceUrl || f.status === 'UPLOADED'
-                ? 'text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer'
-                : 'text-[var(--color-text-primary)] cursor-default'
-            }`}
+            onClick={() => openFile(f)}
+            className="font-medium text-xs text-left truncate block text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer"
+            title={f.status === 'UPLOADED' ? 'Click to open/view file' : `Open ${f.sourceUrl || f.fileName}`}
           >
             {f.fileName}
           </button>
@@ -277,7 +268,7 @@ export const RunDetail: React.FC = () => {
           {f.status === 'UPLOADED' && (
             <button
               type="button"
-              onClick={() => handleDownload(f.id)}
+              onClick={() => downloadFile(f)}
               title="Download file"
               className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-brand-400)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer"
             >

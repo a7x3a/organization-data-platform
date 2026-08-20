@@ -104,4 +104,24 @@ export const filesApi = {
     const res = await apiClient.post('/files/sync');
     return res.data;
   },
+
+  getContentUrl: (id: string) => `/api/files/${id}/content`,
+  getDownloadUrlDirect: (id: string) => `/api/files/${id}/download`,
 };
+
+export function openCollectedFile(file: Pick<CollectedFile, 'id' | 'status' | 'sourceUrl'>) {
+  if (file.status === 'UPLOADED') {
+    window.open(`/api/files/${file.id}/content`, '_blank');
+  } else if (file.sourceUrl) {
+    window.open(file.sourceUrl, '_blank', 'noopener,noreferrer');
+  }
+}
+
+export function downloadCollectedFile(file: Pick<CollectedFile, 'id'>) {
+  const link = document.createElement('a');
+  link.href = `/api/files/${file.id}/download`;
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

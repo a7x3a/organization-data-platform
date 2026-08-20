@@ -1,3 +1,4 @@
+import path from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
@@ -120,19 +121,63 @@ router.get(
   }
 );
 
-// GET /api/files/local-storage/:key — serves files when STORAGE_PROVIDER=local.
-// Auth-gated (router-level requireAuth); local mode has no cryptographic
-// signing, so access control comes entirely from this route requiring login.
-router.get('/local-storage/:key', (req: Request, res: Response, next: NextFunction) => {
+// GET /api/files/:id/download — Direct file download attachment
+router.get(
+  '/:id/download',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.getFileById(req.params.id);
+      if (!file.r2Key) {
+        throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
+      }
+      if (storageProvider instanceof LocalStorageProvider) {
+        const filePath = storageProvider.resolvePath(file.r2Key);
+        return res.download(filePath, file.fileName || path.basename(filePath));
+      }
+      const { url } = await storageProvider.getSignedUrl(file.r2Key);
+      return res.redirect(url);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// GET /api/files/:id/content — Serves file inline (view PDF/media directly in browser)
+router.get(
+  '/:id/content',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.getFileById(req.params.id);
+      if (!file.r2Key) {
+        throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
+      }
+      if (storageProvider instanceof LocalStorageProvider) {
+        const filePath = storageProvider.resolvePath(file.r2Key);
+        if (file.mimeType) {
+          res.setHeader('Content-Type', file.mimeType);
+        }
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.fileName || path.basename(filePath))}"`);
+        return res.sendFile(filePath);
+      }
+      const { url } = await storageProvider.getSignedUrl(file.r2Key);
+      return res.redirect(url);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// GET /api/files/local-storage/* — serves local files by key
+router.get('/local-storage/*', (req: Request, res: Response, next: NextFunction) => {
   if (!(storageProvider instanceof LocalStorageProvider)) {
     next(new AppError(404, 'Local storage is not active', 'LOCAL_STORAGE_INACTIVE'));
     return;
   }
   try {
-    // Express already percent-decodes route params, and the key was
-    // encodeURIComponent'd as a single opaque segment (slashes -> %2F) when
-    // the signed URL was generated — no further decoding needed here.
-    const filePath = storageProvider.resolvePath(req.params.key);
+    const rawKey = req.params[0] || req.path.replace(/^\/local-storage\//, '');
+    const filePath = storageProvider.resolvePath(decodeURIComponent(rawKey));
     res.sendFile(filePath, (err) => {
       if (err) next(new AppError(404, 'File not found on local storage', 'FILE_NOT_FOUND'));
     });

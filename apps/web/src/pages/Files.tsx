@@ -18,7 +18,7 @@ import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { ApprovalStatus, CollectedFile, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
-import { downloadFile } from '../lib/downloadFile';
+import { downloadFile, openFile } from '../lib/downloadFile';
 import { Download, Pencil, Trash2, Check, X, ShieldCheck, AlertTriangle, FileCheck } from 'lucide-react';
 
 // Data Intelligence helpers
@@ -201,19 +201,9 @@ export const Files: React.FC = () => {
         <div className="truncate max-w-sm">
           <button
             type="button"
-            onClick={() => {
-              if (f.sourceUrl) {
-                window.open(f.sourceUrl, '_blank', 'noopener,noreferrer');
-              } else if (f.status === 'UPLOADED') {
-                handleDownload(f.id);
-              }
-            }}
-            className={`font-medium text-xs truncate text-left block ${
-              f.sourceUrl || f.status === 'UPLOADED'
-                ? 'text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer'
-                : 'text-[var(--color-text-primary)] cursor-default'
-            }`}
-            title={f.sourceUrl ? `Open ${f.sourceUrl}` : f.status === 'UPLOADED' ? 'Click to open file' : (f.fileName ?? undefined)}
+            onClick={() => openFile(f)}
+            className="font-medium text-xs truncate text-left block text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer"
+            title={f.status === 'UPLOADED' ? 'Click to open/view file' : `Open ${f.sourceUrl || f.fileName}`}
           >
             {f.fileName}
           </button>
@@ -329,7 +319,7 @@ export const Files: React.FC = () => {
               variant="ghost"
               size="sm"
               iconOnly
-              onClick={() => handleDownload(f.id)}
+              onClick={() => downloadFile(f)}
               title="Download file"
             >
               <Download className="w-3.5 h-3.5" />

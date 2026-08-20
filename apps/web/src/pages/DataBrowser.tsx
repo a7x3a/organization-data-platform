@@ -10,7 +10,7 @@ import { RunStatusBadge } from '../components/RunStatusBadge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { formatBytes, truncateSha256 } from '../lib/utils';
-import { downloadFile } from '../lib/downloadFile';
+import { downloadFile, openFile } from '../lib/downloadFile';
 import { CollectedFile, Source } from '@odp/shared-types';
 import {
   ChevronRight,
@@ -267,12 +267,18 @@ const FileDetailModal: React.FC<{
             </Button>
           </div>
 
-          {file.status === 'UPLOADED' && (
-            <Button variant="primary" size="sm" onClick={() => handleDownloadClick(file.id)}>
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              Download File
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={() => openFile(file)}>
+              <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+              Open
             </Button>
-          )}
+            {file.status === 'UPLOADED' && (
+              <Button variant="primary" size="sm" onClick={() => downloadFile(file)}>
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Download
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
