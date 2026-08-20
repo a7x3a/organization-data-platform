@@ -3,6 +3,9 @@ import { z } from 'zod';
 // Validate all required environment variables at startup.
 // The application will fail fast with a clear error if any are missing.
 
+const emptyToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((val) => (val === '' || val === null || val === undefined ? undefined : val), schema);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   API_PORT: z.coerce.number().int().positive().default(4000),
@@ -19,10 +22,10 @@ const envSchema = z.object({
   // Local storage needs none of these; only required when STORAGE_PROVIDER=r2.
   STORAGE_PROVIDER: z.enum(['local', 'r2']).default('local'),
   LOCAL_STORAGE_DIR: z.string().default('./storage'),
-  R2_ENDPOINT: z.string().url().optional(),
-  R2_BUCKET: z.string().min(1).optional(),
-  R2_ACCESS_KEY_ID: z.string().min(1).optional(),
-  R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  R2_ENDPOINT: emptyToUndefined(z.string().optional()),
+  R2_BUCKET: emptyToUndefined(z.string().optional()),
+  R2_ACCESS_KEY_ID: emptyToUndefined(z.string().optional()),
+  R2_SECRET_ACCESS_KEY: emptyToUndefined(z.string().optional()),
   R2_REGION: z.string().default('auto'),
   R2_SIGNED_URL_EXPIRES: z.coerce.number().int().positive().default(3600),
 });
@@ -44,6 +47,12 @@ function validateEnv() {
     );
     if (missing.length > 0) {
       console.error(`❌ STORAGE_PROVIDER=r2 requires: ${missing.join(', ')}`);
+      process.exit(1);
+    }
+    try {
+      new URL(result.data.R2_ENDPOINT!);
+    } catch {
+      console.error('❌ R2_ENDPOINT must be a valid URL when STORAGE_PROVIDER=r2');
       process.exit(1);
     }
   }

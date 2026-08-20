@@ -5,27 +5,30 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
 class R2Service {
-  private client: S3Client;
+  private client: S3Client | null = null;
   private bucket: string;
 
   constructor() {
-    // R2_* are optional in env.ts (local storage needs none of them), but
-    // validateEnv() enforces their presence whenever STORAGE_PROVIDER=r2.
-    // This singleton is constructed at module load regardless of mode (the
-    // AWS SDK doesn't validate config until a request is actually sent), but
-    // its methods are only ever called when storageProvider resolves to
-    // R2StorageProvider — i.e. STORAGE_PROVIDER=r2.
-    this.bucket = env.R2_BUCKET!;
-    this.client = new S3Client({
-      region: env.R2_REGION,
-      endpoint: env.R2_ENDPOINT!,
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID!,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
-      },
-      // Force path-style for R2 compatibility
-      forcePathStyle: true,
-    });
+    this.bucket = env.R2_BUCKET || '';
+    if (env.STORAGE_PROVIDER === 'r2') {
+      this.client = new S3Client({
+        region: env.R2_REGION,
+        endpoint: env.R2_ENDPOINT,
+        credentials: {
+          accessKeyId: env.R2_ACCESS_KEY_ID!,
+          secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
+        },
+        // Force path-style for R2 compatibility
+        forcePathStyle: true,
+      });
+    }
+  }
+
+  private getClient(): S3Client {
+    if (!this.client) {
+      throw new Error('R2Service client is not initialized (STORAGE_PROVIDER is not r2)');
+    }
+    return this.client;
   }
 
   /**
@@ -38,7 +41,7 @@ class R2Service {
       Key: key,
     });
 
-    const url = await getSignedUrl(this.client, command, {
+    const url = await getSignedUrl(this.getClient(), command, {
       expiresIn: env.R2_SIGNED_URL_EXPIRES,
     });
 
@@ -55,7 +58,7 @@ class R2Service {
    */
   async getBuffer(key: string): Promise<Buffer | null> {
     try {
-      const response = await this.client.send(
+      const response = await this.getClient().send(
         new GetObjectCommand({ Bucket: this.bucket, Key: key })
       );
       if (!response.Body) return null;
@@ -75,7 +78,7 @@ class R2Service {
    */
   async objectExists(key: string): Promise<boolean> {
     try {
-      await this.client.send(
+      await this.getClient().send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: key })
       );
       return true;
@@ -95,7 +98,7 @@ class R2Service {
     body: Buffer | string,
     contentType: string
   ): Promise<void> {
-    await this.client.send(
+    await this.getClient().send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -114,7 +117,7 @@ class R2Service {
    * makes for collected files specifically).
    */
   async deleteObject(key: string): Promise<void> {
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    await this.getClient().send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
     logger.info({ key }, 'r2_delete_completed');
   }
 }
