@@ -52,6 +52,7 @@ services:
       SCRAPER_SERVICE_URL: http://scraper:8000
     volumes:
       - ./storage:/app/storage
+      - ./packages/database/prisma:/app/packages/database/prisma
     depends_on:
       postgres:
         condition: service_healthy
