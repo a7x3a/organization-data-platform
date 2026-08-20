@@ -28,7 +28,11 @@ export function requireRole(...roles: UserRole[]) {
 
 // Convenience shortcuts
 export const requireAdmin = requireRole(UserRole.ADMIN);
-export const requireDataManager = requireRole(UserRole.ADMIN, UserRole.DATA_MANAGER);
+export const requireDataManager = requireRole(
+  UserRole.ADMIN,
+  UserRole.DATA_MANAGER,
+  UserRole.COLLECTOR
+);
 export const requireCollector = requireRole(
   UserRole.ADMIN,
   UserRole.DATA_MANAGER,
