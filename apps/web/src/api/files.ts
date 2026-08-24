@@ -11,6 +11,9 @@ export const filesApi = {
     approvalStatus?: string;
     sha256?: string;
     sourceUrl?: string;
+    extension?: string;
+    category?: string;
+    search?: string;
   }) => {
     const res = await apiClient.get<PaginatedResponse<CollectedFile>>('/files', { params });
     return res.data;
@@ -62,6 +65,26 @@ export const filesApi = {
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/files/${id}`);
+  },
+
+  bulkDelete: async (fileIds: string[]): Promise<{ deletedCount: number }> => {
+    const res = await apiClient.post<{ deletedCount: number }>('/files/bulk-delete', { fileIds });
+    return res.data;
+  },
+
+  pruneRunFiles: async (
+    runId: string,
+    options: {
+      keepExtensions?: string[];
+      keepCategories?: string[];
+      deleteExtensions?: string[];
+    }
+  ): Promise<{ prunedCount: number; remainingCount: number; totalBytesFreed: number }> => {
+    const res = await apiClient.post<{ prunedCount: number; remainingCount: number; totalBytesFreed: number }>(
+      `/files/run/${runId}/prune`,
+      options
+    );
+    return res.data;
   },
 
   approve: async (id: string, notes?: string): Promise<CollectedFile> => {

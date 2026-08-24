@@ -28,6 +28,9 @@ export async function listFiles(query: {
   approvalStatus?: string;
   sha256?: string;
   sourceUrl?: string;
+  extension?: string;
+  category?: string;
+  search?: string;
 }) {
   const pagination = parsePagination(query);
   const { skip, take } = toPrismaSkipTake(pagination);
@@ -39,6 +42,62 @@ export async function listFiles(query: {
   if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
   if (query.sourceUrl) where.sourceUrl = query.sourceUrl;
   if (query.sha256) where.sha256 = query.sha256;
+
+  if (query.extension) {
+    const rawExt = query.extension.toLowerCase().trim();
+    const extWithDot = rawExt.startsWith('.') ? rawExt : `.${rawExt}`;
+    const extWithoutDot = rawExt.startsWith('.') ? rawExt.slice(1) : rawExt;
+    where.extension = { in: [extWithDot, extWithoutDot] };
+  }
+
+  if (query.category) {
+    const cat = query.category.toLowerCase().trim();
+    if (cat === 'pdf') {
+      where.OR = [
+        { extension: { in: ['.pdf', 'pdf'] } },
+        { mimeType: { contains: 'pdf', mode: 'insensitive' } },
+      ];
+    } else if (cat === 'ebooks' || cat === 'books') {
+      where.OR = [
+        { extension: { in: ['.epub', '.mobi', '.azw3', '.fb2', '.djvu', '.pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'pdf'] } },
+        { mimeType: { in: ['application/epub+zip', 'application/x-mobipocket-ebook', 'application/pdf'] } },
+      ];
+    } else if (cat === 'documents') {
+      where.OR = [
+        { extension: { in: ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.pages', 'pdf', 'doc', 'docx', 'odt', 'rtf', 'txt', 'md'] } },
+        { mimeType: { in: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'] } },
+      ];
+    } else if (cat === 'audio') {
+      where.OR = [
+        { mimeType: { startsWith: 'audio/' } },
+        { extension: { in: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac', 'mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aac'] } },
+      ];
+    } else if (cat === 'video') {
+      where.OR = [
+        { mimeType: { startsWith: 'video/' } },
+        { extension: { in: ['.mp4', '.mkv', '.avi', '.mov', '.webm', 'mp4', 'mkv', 'avi', 'mov', 'webm'] } },
+      ];
+    } else if (cat === 'images') {
+      where.OR = [
+        { mimeType: { startsWith: 'image/' } },
+        { extension: { in: ['.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif', 'jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'] } },
+      ];
+    } else if (cat === 'datasets') {
+      where.OR = [
+        { extension: { in: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow', 'parquet', 'jsonl', 'csv', 'tsv', 'json', 'xml', 'arrow'] } },
+        { mimeType: { in: ['application/json', 'application/jsonlines', 'text/csv', 'application/xml'] } },
+      ];
+    }
+  }
+
+  if (query.search && query.search.trim()) {
+    const term = query.search.trim();
+    where.OR = [
+      { fileName: { contains: term, mode: 'insensitive' } },
+      { originalFilename: { contains: term, mode: 'insensitive' } },
+      { sourceUrl: { contains: term, mode: 'insensitive' } },
+    ];
+  }
 
   const [data, total] = await prisma.$transaction([
     prisma.collectedFile.findMany({
@@ -620,5 +679,189 @@ export async function rejectRunFiles(runId: string, userId: string, notes?: stri
   }
 
   return { updatedCount: res.count };
+}
+
+export async function bulkDeleteFiles(fileIds: string[]) {
+  if (!fileIds.length) return { deletedCount: 0 };
+
+  const files = await prisma.collectedFile.findMany({
+    where: { id: { in: fileIds } },
+    include: { collectionRun: { include: { source: true } } },
+  });
+
+  if (!files.length) return { deletedCount: 0 };
+
+  // 1. Delete stored objects
+  for (const file of files) {
+    if (file.r2Key) {
+      try {
+        await storageProvider.delete(file.r2Key);
+      } catch (err) {
+        logger.error({ err, fileId: file.id, r2Key: file.r2Key }, 'bulk_file_storage_delete_failed');
+      }
+    }
+  }
+
+  // 2. Delete database rows
+  await prisma.collectedFile.deleteMany({
+    where: { id: { in: fileIds } },
+  });
+
+  // 3. Update collection run metadata & manifest for affected runs
+  const affectedRunIds = Array.from(
+    new Set(files.map((f) => f.collectionRunId).filter((id): id is string => Boolean(id)))
+  );
+
+  for (const runId of affectedRunIds) {
+    const runFiles = files.filter((f) => f.collectionRunId === runId);
+    const run = runFiles[0]?.collectionRun;
+    if (!run) continue;
+
+    const runFolderKey = run.manifestR2Key
+      ? run.manifestR2Key.substring(0, run.manifestR2Key.lastIndexOf('/'))
+      : run.source
+      ? `00_raw/web/${run.source.slug}/${run.runId}`
+      : null;
+
+    if (runFolderKey) {
+      try {
+        // Update root metadata.jsonl
+        const metaKey = `${runFolderKey}/metadata.jsonl`;
+        const metaBuf = await storageProvider.getBuffer(metaKey);
+        if (metaBuf) {
+          const lines = metaBuf.toString('utf-8').split('\n').filter((l) => l.trim().length > 0);
+          const deletedSha256s = new Set(runFiles.map((f) => f.sha256?.toLowerCase()).filter(Boolean));
+          const deletedFileIds = new Set(runFiles.map((f) => f.fileId).filter(Boolean));
+          const updatedLines = lines.filter((l) => {
+            try {
+              const obj = JSON.parse(l);
+              if (obj.sha256 && deletedSha256s.has(obj.sha256.toLowerCase())) return false;
+              if (obj.file_id && deletedFileIds.has(obj.file_id)) return false;
+              return true;
+            } catch {
+              return true;
+            }
+          });
+          const newContent = updatedLines.length > 0 ? updatedLines.join('\n') + '\n' : '';
+          await storageProvider.upload(metaKey, Buffer.from(newContent, 'utf-8'), 'application/jsonl');
+        }
+
+        // Update manifest.json
+        const manifestKey = `${runFolderKey}/manifest.json`;
+        const manifestBuf = await storageProvider.getBuffer(manifestKey);
+        if (manifestBuf) {
+          try {
+            const manifest = JSON.parse(manifestBuf.toString('utf-8'));
+            if (manifest.stats) {
+              manifest.stats.files_downloaded = Math.max(0, manifest.stats.files_downloaded - runFiles.length);
+              manifest.stats.files_found = Math.max(0, manifest.stats.files_found - runFiles.length);
+              const totalDeletedBytes = runFiles.reduce((acc, f) => acc + (f.fileSize ? Number(f.fileSize) : 0), 0);
+              if (manifest.stats.total_bytes) {
+                manifest.stats.total_bytes = Math.max(0, Number(manifest.stats.total_bytes) - totalDeletedBytes);
+              }
+            }
+            await storageProvider.upload(manifestKey, Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'), 'application/json');
+          } catch {
+            // ignore
+          }
+        }
+      } catch (err) {
+        logger.error({ err, runId }, 'bulk_delete_manifest_sync_failed');
+      }
+    }
+
+    // Decrement run counts in DB
+    try {
+      await prisma.collectionRun.update({
+        where: { id: runId },
+        data: {
+          filesDownloaded: { decrement: runFiles.length },
+          filesFound: { decrement: runFiles.length },
+        },
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  return { deletedCount: files.length };
+}
+
+export async function pruneRunFiles(
+  runId: string,
+  options: {
+    keepExtensions?: string[];
+    keepCategories?: string[];
+    deleteExtensions?: string[];
+  }
+) {
+  const allFiles = await prisma.collectedFile.findMany({
+    where: { collectionRunId: runId },
+    include: { collectionRun: { include: { source: true } } },
+  });
+
+  if (!allFiles.length) {
+    return { prunedCount: 0, remainingCount: 0, totalBytesFreed: 0 };
+  }
+
+  const normalizedKeepExts = (options.keepExtensions || []).map((e) => {
+    const raw = e.toLowerCase().trim();
+    return raw.startsWith('.') ? raw : `.${raw}`;
+  });
+
+  const keepCategories = (options.keepCategories || []).map((c) => c.toLowerCase().trim());
+  const deleteExts = (options.deleteExtensions || []).map((e) => {
+    const raw = e.toLowerCase().trim();
+    return raw.startsWith('.') ? raw : `.${raw}`;
+  });
+
+  const filesToPrune = allFiles.filter((file) => {
+    const ext = (file.extension || '').toLowerCase();
+    const mime = (file.mimeType || '').toLowerCase();
+
+    // If explicit deleteExtensions provided
+    if (deleteExts.length > 0 && deleteExts.includes(ext)) {
+      return true;
+    }
+
+    // If keepCategories provided (e.g. ['pdf'])
+    if (keepCategories.length > 0) {
+      const matchesCategory = keepCategories.some((cat) => {
+        if (cat === 'pdf') return ext === '.pdf' || mime.includes('pdf');
+        if (cat === 'ebooks' || cat === 'books') return ['.epub', '.mobi', '.azw3', '.fb2', '.djvu', '.pdf'].includes(ext);
+        if (cat === 'documents') return ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md'].includes(ext);
+        if (cat === 'audio') return mime.startsWith('audio/') || ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'].includes(ext);
+        if (cat === 'video') return mime.startsWith('video/') || ['.mp4', '.mkv', '.avi', '.mov', '.webm'].includes(ext);
+        if (cat === 'images') return mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif'].includes(ext);
+        if (cat === 'datasets') return ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml'].includes(ext);
+        return false;
+      });
+      if (!matchesCategory) return true;
+    }
+
+    // If keepExtensions provided (e.g. ['.pdf'])
+    if (normalizedKeepExts.length > 0) {
+      if (!normalizedKeepExts.includes(ext)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  if (!filesToPrune.length) {
+    return { prunedCount: 0, remainingCount: allFiles.length, totalBytesFreed: 0 };
+  }
+
+  const pruneIds = filesToPrune.map((f) => f.id);
+  const totalBytesFreed = filesToPrune.reduce((acc, f) => acc + (f.fileSize ? Number(f.fileSize) : 0), 0);
+
+  await bulkDeleteFiles(pruneIds);
+
+  return {
+    prunedCount: filesToPrune.length,
+    remainingCount: allFiles.length - filesToPrune.length,
+    totalBytesFreed,
+  };
 }
 

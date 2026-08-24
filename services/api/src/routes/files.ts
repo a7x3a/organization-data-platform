@@ -14,6 +14,8 @@ import {
   approveRejectFileSchema,
   bulkFileApprovalSchema,
   runFilesApprovalSchema,
+  bulkDeleteFilesSchema,
+  pruneRunFilesSchema,
 } from '../schemas/index';
 import * as fileService from '../services/file.service';
 import { storageProvider, LocalStorageProvider } from '../services/storage';
@@ -314,6 +316,36 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await fileService.rejectRunFiles(req.params.runId, req.user!.sub, req.body.notes);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/bulk-delete — Bulk delete multiple files (Data Manager+)
+router.post(
+  '/bulk-delete',
+  requireDataManager,
+  validate(bulkDeleteFilesSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.bulkDeleteFiles(req.body.fileIds);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/files/run/:runId/prune — Prune non-matching files from a run (e.g. keep only PDF) (Data Manager+)
+router.post(
+  '/run/:runId/prune',
+  requireDataManager,
+  validate(pruneRunFilesSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await fileService.pruneRunFiles(req.params.runId, req.body);
       res.json(result);
     } catch (err) {
       next(err);

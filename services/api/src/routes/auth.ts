@@ -18,9 +18,9 @@ router.post(
       res.cookie('refresh_token', result.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: '/api/auth/refresh',
+        path: '/',
       });
 
       res.json({
@@ -44,7 +44,21 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     }
 
     const result = await authService.refreshAccessToken(refreshToken);
-    res.json(result);
+
+    // Refresh sliding session cookie
+    res.cookie('refresh_token', result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
+    });
+
+    res.json({
+      user: result.user,
+      accessToken: result.accessToken,
+      expiresIn: result.expiresIn,
+    });
   } catch (err) {
     next(err);
   }
@@ -52,7 +66,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
 // POST /api/auth/logout
 router.post('/logout', (_req: Request, res: Response) => {
-  res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+  res.clearCookie('refresh_token', { path: '/' });
   res.json({ message: 'Logged out successfully' });
 });
 

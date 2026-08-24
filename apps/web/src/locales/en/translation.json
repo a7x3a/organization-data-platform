@@ -107,6 +107,25 @@
       "title": "Collected Files",
       "subtitle": "Browse all collected raw files",
       "download": "Download",
+      "bulkDelete": "Delete Selected",
+      "filter": {
+        "all": "All Files",
+        "pdf": "PDF",
+        "ebooks": "Ebooks",
+        "documents": "Office / Docs",
+        "audio": "Audio",
+        "video": "Video",
+        "images": "Images",
+        "datasets": "Data"
+      },
+      "prune": {
+        "keepOnlyPdf": "Keep Only PDF",
+        "pruneUnused": "Prune Unused Files",
+        "confirmTitle": "Prune Collection Run",
+        "confirmPdfMessage": "Keep only PDF files in this collection? All other file types (images, media, JSON, logs) will be permanently deleted from storage and database.",
+        "confirmBulkMessage": "Are you sure you want to permanently delete the selected files from storage and database?",
+        "success": "Collection pruned successfully"
+      },
       "status": {
         "DISCOVERED": "Discovered",
         "DOWNLOADING": "Downloading",

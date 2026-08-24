@@ -11,6 +11,9 @@ export function useFiles(
     approvalStatus?: string;
     sha256?: string;
     sourceUrl?: string;
+    extension?: string;
+    category?: string;
+    search?: string;
   },
   options?: {
     refetchInterval?: number | false;
@@ -143,6 +146,40 @@ export function useRejectRunFiles() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
       qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+  });
+}
+
+export function useBulkDeleteFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fileIds: string[]) => filesApi.bulkDelete(fileIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function usePruneRunFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runId,
+      options,
+    }: {
+      runId: string;
+      options: {
+        keepExtensions?: string[];
+        keepCategories?: string[];
+        deleteExtensions?: string[];
+      };
+    }) => filesApi.pruneRunFiles(runId, options),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

@@ -99,6 +99,16 @@ export const runFilesApprovalSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+export const bulkDeleteFilesSchema = z.object({
+  fileIds: z.array(z.string().uuid()).min(1),
+});
+
+export const pruneRunFilesSchema = z.object({
+  keepExtensions: z.array(z.string()).optional(),
+  keepCategories: z.array(z.string()).optional(),
+  deleteExtensions: z.array(z.string()).optional(),
+});
+
 export const listFilesQuerySchema = paginationSchema.extend({
   collectionRunId: z.string().optional(),
   sourceId: z.string().optional(),
@@ -106,6 +116,9 @@ export const listFilesQuerySchema = paginationSchema.extend({
   approvalStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   sha256: z.string().optional(),
   sourceUrl: z.string().optional(),
+  extension: z.string().optional(),
+  category: z.string().optional(),
+  search: z.string().optional(),
 });
 
 // ─── Source ───────────────────────────────────────────────────

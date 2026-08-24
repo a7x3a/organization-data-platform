@@ -8,6 +8,7 @@ import {
   useRejectFile,
   useBulkApproveFiles,
   useBulkRejectFiles,
+  useBulkDeleteFiles,
 } from '../hooks/useFiles';
 import { useAuth } from '../hooks/useAuth';
 import { DataTable, Column } from '../components/DataTable';
@@ -19,7 +20,23 @@ import { Input, Select, Textarea } from '../components/Input';
 import { ApprovalStatus, CollectedFile, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
 import { downloadFile, openFile } from '../lib/downloadFile';
-import { Download, Pencil, Trash2, Check, X, ShieldCheck, AlertTriangle, FileCheck } from 'lucide-react';
+import {
+  Download,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  ShieldCheck,
+  AlertTriangle,
+  FileCheck,
+  BookOpen,
+  FileText,
+  Music,
+  Video,
+  Image,
+  Database,
+  Sparkles,
+} from 'lucide-react';
 
 // Data Intelligence helpers
 function getLanguageInfo(file: CollectedFile): { name: string; code: string } | null {
@@ -51,12 +68,14 @@ export const Files: React.FC = () => {
   const [approvalFilter, setApprovalFilter] = useState<string>('');
   const [languageFilter, setLanguageFilter] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
 
   const { data, isLoading } = useFiles({
     page,
     pageSize: 20,
     status: statusFilter || undefined,
     approvalStatus: approvalFilter || undefined,
+    category: fileTypeFilter !== 'all' ? fileTypeFilter : undefined,
   });
 
   const updateFile = useUpdateFile();
@@ -65,6 +84,7 @@ export const Files: React.FC = () => {
   const rejectFile = useRejectFile();
   const bulkApprove = useBulkApproveFiles();
   const bulkReject = useBulkRejectFiles();
+  const bulkDelete = useBulkDeleteFiles();
 
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [editingFile, setEditingFile] = useState<CollectedFile | null>(null);
@@ -72,6 +92,7 @@ export const Files: React.FC = () => {
   const [editMetadataText, setEditMetadataText] = useState('');
   const [editMetadataError, setEditMetadataError] = useState('');
   const [fileToDelete, setFileToDelete] = useState<CollectedFile | null>(null);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
 
   const [approvalTarget, setApprovalTarget] = useState<{
     action: 'APPROVE' | 'REJECT';
@@ -135,6 +156,13 @@ export const Files: React.FC = () => {
     if (!fileToDelete) return;
     await deleteFile.mutateAsync(fileToDelete.id);
     setFileToDelete(null);
+  };
+
+  const handleBulkDeleteConfirmed = async () => {
+    if (!selectedFileIds.length) return;
+    await bulkDelete.mutateAsync(selectedFileIds);
+    setSelectedFileIds([]);
+    setShowBulkDeleteModal(false);
   };
 
   const handleDownload = async (fileId: string) => {
@@ -407,6 +435,106 @@ export const Files: React.FC = () => {
         </div>
       </div>
 
+      {/* Quick Type Filter Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('all'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'all'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>{t('files.filter.all')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('pdf'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'pdf'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+          <span>{t('files.filter.pdf')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('ebooks'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'ebooks'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5 text-sky-400" />
+          <span>{t('files.filter.ebooks')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('documents'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'documents'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5 text-blue-400" />
+          <span>{t('files.filter.documents')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('audio'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'audio'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Music className="w-3.5 h-3.5 text-purple-400" />
+          <span>{t('files.filter.audio')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('video'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'video'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Video className="w-3.5 h-3.5 text-red-400" />
+          <span>{t('files.filter.video')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('images'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'images'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Image className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{t('files.filter.images')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('datasets'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'datasets'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Database className="w-3.5 h-3.5 text-teal-400" />
+          <span>{t('files.filter.datasets')}</span>
+        </button>
+      </div>
+
       {selectedFileIds.length > 0 && isReviewer && (
         <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border)] shadow-sm">
           <div className="text-xs font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
@@ -443,6 +571,16 @@ export const Files: React.FC = () => {
             >
               <X className="w-3.5 h-3.5 mr-1" />
               Decline Selected
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowBulkDeleteModal(true)}
+              disabled={bulkDelete.isPending}
+              className="font-semibold shadow-xs"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              {t('files.bulkDelete')} ({selectedFileIds.length})
             </Button>
             <button
               type="button"
@@ -620,6 +758,18 @@ export const Files: React.FC = () => {
         onConfirm={handleDeleteConfirmed}
         onCancel={() => setFileToDelete(null)}
         isLoading={deleteFile.isPending}
+      />
+
+      {/* Bulk Delete confirmation dialog */}
+      <ConfirmDialog
+        isOpen={showBulkDeleteModal}
+        title={t('files.bulkDelete')}
+        message={`Are you sure you want to permanently delete ${selectedFileIds.length} selected file(s) from storage and database? This action cannot be undone.`}
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
+        onConfirm={handleBulkDeleteConfirmed}
+        onCancel={() => setShowBulkDeleteModal(false)}
+        isLoading={bulkDelete.isPending}
       />
     </div>
   );

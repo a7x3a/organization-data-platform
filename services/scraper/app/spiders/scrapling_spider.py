@@ -182,6 +182,8 @@ async def crawl_with_scrapling(
                 # Extract resource files (PDF, audio, video, documents, etc.)
                 resource_urls = extract_resource_urls(html_body, res_url)
                 for resource_url in resource_urls:
+                    if len(result.files_discovered) >= config.max_files:
+                        break
                     norm_res = normalize_url(resource_url, res_url)
                     if not norm_res or await is_private_address(norm_res):
                         continue
@@ -189,7 +191,7 @@ async def crawl_with_scrapling(
                         if is_allowed_resource_domain(norm_res, effective_allowed_domains):
                             if not config.allowed_url_patterns or url_matches_pattern(norm_res, config.allowed_url_patterns):
                                 if not config.excluded_url_patterns or not url_matches_pattern(norm_res, config.excluded_url_patterns):
-                                    if not any(df.url == norm_res for df in result.files_discovered):
+                                    if len(result.files_discovered) < config.max_files and not any(df.url == norm_res for df in result.files_discovered):
                                         result.files_discovered.append(DiscoveredFile(url=norm_res, depth=depth))
                                         if on_file_found:
                                             await on_file_found()
@@ -198,6 +200,8 @@ async def crawl_with_scrapling(
                 if depth < config.max_depth:
                     page_link_contexts = extract_page_links_with_context(html_body, res_url)
                     for link, ctx in page_link_contexts:
+                        if len(result.files_discovered) >= config.max_files:
+                            break
                         norm_link = normalize_url(link, res_url)
                         if not norm_link or await is_private_address(norm_link):
                             continue
@@ -207,7 +211,7 @@ async def crawl_with_scrapling(
                             if is_allowed_resource_domain(norm_link, effective_allowed_domains):
                                 if not config.allowed_url_patterns or url_matches_pattern(norm_link, config.allowed_url_patterns):
                                     if not config.excluded_url_patterns or not url_matches_pattern(norm_link, config.excluded_url_patterns):
-                                        if not any(df.url == norm_link for df in result.files_discovered):
+                                        if len(result.files_discovered) < config.max_files and not any(df.url == norm_link for df in result.files_discovered):
                                             result.files_discovered.append(
                                                 DiscoveredFile(
                                                     url=norm_link,

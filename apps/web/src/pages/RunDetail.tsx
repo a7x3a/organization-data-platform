@@ -11,6 +11,8 @@ import {
   useBulkRejectFiles,
   useApproveRunFiles,
   useRejectRunFiles,
+  useBulkDeleteFiles,
+  usePruneRunFiles,
 } from '../hooks/useFiles';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { FileStatusBadge } from '../components/FileStatusBadge';
@@ -34,11 +36,21 @@ import {
   Check,
   X,
   FileCheck,
+  Filter,
+  Trash2,
+  BookOpen,
+  FileText,
+  Music,
+  Video,
+  Image,
+  Database,
+  Sparkles,
 } from 'lucide-react';
 import { ApprovalStatus, CollectedFile, CollectorType, RunStatus, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
 import { LiveDuration } from '../components/LiveDuration';
 import { LogConsole } from '../components/LogConsole';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export const RunDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -66,6 +78,8 @@ export const RunDetail: React.FC = () => {
   const bulkReject = useBulkRejectFiles();
   const approveAllInRun = useApproveRunFiles();
   const rejectAllInRun = useRejectRunFiles();
+  const bulkDelete = useBulkDeleteFiles();
+  const pruneRun = usePruneRunFiles();
 
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [approvalNote, setApprovalNote] = useState('');
@@ -74,6 +88,10 @@ export const RunDetail: React.FC = () => {
     scope: 'SINGLE' | 'BULK' | 'ALL';
     fileId?: string;
   } | null>(null);
+
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [showPruneModal, setShowPruneModal] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
 
   const canManage = run ? (isAdmin || !run.createdById || run.createdById === user?.id) : false;
 
@@ -96,11 +114,65 @@ export const RunDetail: React.FC = () => {
   const rejectedCount = files.filter((f) => f.approvalStatus === ApprovalStatus.REJECTED).length;
   const pendingCount = files.filter((f) => !f.approvalStatus || f.approvalStatus === ApprovalStatus.PENDING).length;
 
+  // Categorize files for filtering and pruning
+  const isPdf = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    const mime = (f.mimeType || '').toLowerCase();
+    return ext === '.pdf' || ext === 'pdf' || mime.includes('pdf');
+  };
+  const isEbook = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    return ['.epub', '.mobi', '.azw3', '.fb2', '.djvu'].includes(ext);
+  };
+  const isDoc = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    return ['.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.pages'].includes(ext);
+  };
+  const isAudio = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    const mime = (f.mimeType || '').toLowerCase();
+    return mime.startsWith('audio/') || ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'].includes(ext);
+  };
+  const isVideo = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    const mime = (f.mimeType || '').toLowerCase();
+    return mime.startsWith('video/') || ['.mp4', '.mkv', '.avi', '.mov', '.webm'].includes(ext);
+  };
+  const isImage = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    const mime = (f.mimeType || '').toLowerCase();
+    return mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif'].includes(ext);
+  };
+  const isData = (f: CollectedFile) => {
+    const ext = (f.extension || '').toLowerCase();
+    return ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'].includes(ext);
+  };
+
+  const pdfCount = files.filter(isPdf).length;
+  const ebookCount = files.filter(isEbook).length;
+  const docCount = files.filter(isDoc).length;
+  const audioCount = files.filter(isAudio).length;
+  const videoCount = files.filter(isVideo).length;
+  const imageCount = files.filter(isImage).length;
+  const dataCount = files.filter(isData).length;
+
+  const filteredFiles = files.filter((f) => {
+    if (typeFilter === 'all') return true;
+    if (typeFilter === 'pdf') return isPdf(f);
+    if (typeFilter === 'ebooks') return isEbook(f);
+    if (typeFilter === 'documents') return isDoc(f);
+    if (typeFilter === 'audio') return isAudio(f);
+    if (typeFilter === 'video') return isVideo(f);
+    if (typeFilter === 'images') return isImage(f);
+    if (typeFilter === 'datasets') return isData(f);
+    return true;
+  });
+
   const toggleSelectAll = () => {
-    if (selectedFileIds.length === files.length) {
+    if (selectedFileIds.length === filteredFiles.length) {
       setSelectedFileIds([]);
     } else {
-      setSelectedFileIds(files.map((f) => f.id));
+      setSelectedFileIds(filteredFiles.map((f) => f.id));
     }
   };
 
@@ -116,6 +188,22 @@ export const RunDetail: React.FC = () => {
     } catch {
       alert('Could not generate signed download URL');
     }
+  };
+
+  const handlePruneOnlyPdf = async () => {
+    await pruneRun.mutateAsync({
+      runId: id!,
+      options: { keepCategories: ['pdf'] },
+    });
+    setSelectedFileIds([]);
+    setShowPruneModal(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!selectedFileIds.length) return;
+    await bulkDelete.mutateAsync(selectedFileIds);
+    setSelectedFileIds([]);
+    setShowBulkDeleteModal(false);
   };
 
   const handleConfirmApproval = async () => {
@@ -152,7 +240,7 @@ export const RunDetail: React.FC = () => {
       header: (
         <input
           type="checkbox"
-          checked={files.length > 0 && selectedFileIds.length === files.length}
+          checked={filteredFiles.length > 0 && selectedFileIds.length === filteredFiles.length}
           onChange={toggleSelectAll}
           className="rounded border-[var(--color-border)] cursor-pointer"
         />
@@ -604,65 +692,280 @@ export const RunDetail: React.FC = () => {
 
       {/* Collected files in this run */}
       <div className="space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-            Files Collected in this Run
-          </h2>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+              Files Collected in this Run
+            </h2>
+            <span className="text-xs font-mono text-[var(--color-text-muted)] bg-[var(--color-bg-surface)] px-2.5 py-0.5 rounded-full border border-[var(--color-border-subtle)]">
+              {filteredFiles.length} {filteredFiles.length === 1 ? 'file' : 'files'}
+            </span>
+          </div>
 
-          {selectedFileIds.length > 0 && canManage && (
-            <div className="flex items-center gap-2 bg-[var(--color-bg-surface)] border border-[var(--color-border)] px-3 py-1.5 rounded-lg shadow-sm">
-              <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-                {selectedFileIds.length} file{selectedFileIds.length > 1 ? 's' : ''} selected:
+          <div className="flex flex-wrap items-center gap-2">
+            {canManage && files.length > 0 && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowPruneModal(true)}
+                  disabled={pruneRun.isPending || isRunning}
+                  title="Remove all non-PDF files and keep only PDF documents in this collection run"
+                  className="text-xs text-[var(--color-brand-400)] border-[var(--color-brand-500)]/30 hover:bg-[var(--color-brand-500)]/10 font-semibold shadow-xs"
+                >
+                  <FileCheck className="w-3.5 h-3.5 mr-1 text-[var(--color-brand-400)]" />
+                  {t('files.prune.keepOnlyPdf')}
+                  {files.length > pdfCount && (
+                    <span className="ml-1.5 px-1.5 py-0.2 bg-[var(--color-brand-500)]/20 text-[10px] rounded-full">
+                      Prune {files.length - pdfCount}
+                    </span>
+                  )}
+                </Button>
+
+                {selectedFileIds.length > 0 && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setShowBulkDeleteModal(true)}
+                    disabled={bulkDelete.isPending}
+                    className="text-xs shadow-xs font-semibold"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    {t('files.bulkDelete')} ({selectedFileIds.length})
+                  </Button>
+                )}
+              </>
+            )}
+
+            {selectedFileIds.length > 0 && canManage && (
+              <div className="flex items-center gap-1.5 bg-[var(--color-bg-surface)] border border-[var(--color-border)] px-2.5 py-1 rounded-lg shadow-sm">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'APPROVE',
+                      scope: 'BULK',
+                    })
+                  }
+                  disabled={bulkApprove.isPending}
+                  className="text-xs text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 font-semibold h-7 px-2"
+                >
+                  <Check className="w-3 h-3 mr-1" />
+                  Approve
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'REJECT',
+                      scope: 'BULK',
+                    })
+                  }
+                  disabled={bulkReject.isPending}
+                  className="text-xs text-rose-400 border-rose-500/30 hover:bg-rose-500/10 font-semibold h-7 px-2"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Decline
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFileIds([])}
+                  className="text-[11px] text-[var(--color-text-muted)] hover:underline ml-1 cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* File Type Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setTypeFilter('all')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+              typeFilter === 'all'
+                ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{t('files.filter.all')}</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)]">
+              {files.length}
+            </span>
+          </button>
+
+          {pdfCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('pdf')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'pdf'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+              <span>{t('files.filter.pdf')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-amber-400">
+                {pdfCount}
               </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  setApprovalTarget({
-                    action: 'APPROVE',
-                    scope: 'BULK',
-                  })
-                }
-                disabled={bulkApprove.isPending}
-                className="text-xs text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 font-semibold"
-              >
-                <Check className="w-3 h-3 mr-1" />
-                Approve Selected
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  setApprovalTarget({
-                    action: 'REJECT',
-                    scope: 'BULK',
-                  })
-                }
-                disabled={bulkReject.isPending}
-                className="text-xs text-rose-400 border-rose-500/30 hover:bg-rose-500/10 font-semibold"
-              >
-                <X className="w-3 h-3 mr-1" />
-                Decline Selected
-              </Button>
-              <button
-                type="button"
-                onClick={() => setSelectedFileIds([])}
-                className="text-[11px] text-[var(--color-text-muted)] hover:underline ml-1 cursor-pointer"
-              >
-                Clear
-              </button>
-            </div>
+            </button>
+          )}
+
+          {ebookCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('ebooks')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'ebooks'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-sky-400" />
+              <span>{t('files.filter.ebooks')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-sky-400">
+                {ebookCount}
+              </span>
+            </button>
+          )}
+
+          {docCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('documents')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'documents'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-blue-400" />
+              <span>{t('files.filter.documents')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-blue-400">
+                {docCount}
+              </span>
+            </button>
+          )}
+
+          {audioCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('audio')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'audio'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <Music className="w-3.5 h-3.5 text-purple-400" />
+              <span>{t('files.filter.audio')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-purple-400">
+                {audioCount}
+              </span>
+            </button>
+          )}
+
+          {videoCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('video')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'video'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5 text-red-400" />
+              <span>{t('files.filter.video')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-red-400">
+                {videoCount}
+              </span>
+            </button>
+          )}
+
+          {imageCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('images')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'images'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <Image className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{t('files.filter.images')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-emerald-400">
+                {imageCount}
+              </span>
+            </button>
+          )}
+
+          {dataCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('datasets')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'datasets'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-teal-400" />
+              <span>{t('files.filter.datasets')}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-teal-400">
+                {dataCount}
+              </span>
+            </button>
           )}
         </div>
 
         <DataTable
           columns={fileColumns}
-          data={files}
+          data={filteredFiles}
           keyExtractor={(f) => f.id}
           isLoading={false}
-          emptyMessage="No files discovered yet."
+          emptyMessage={
+            typeFilter === 'all'
+              ? 'No files discovered yet.'
+              : `No ${typeFilter.toUpperCase()} files found in this run.`
+          }
         />
       </div>
+
+      {/* Confirm Keep Only PDF / Prune Modal */}
+      <ConfirmDialog
+        isOpen={showPruneModal}
+        title={t('files.prune.confirmTitle')}
+        message={
+          files.length > pdfCount
+            ? `Keep only PDF files in this run? This will permanently delete ${files.length - pdfCount} unused non-PDF files from storage and database and keep only the ${pdfCount} PDFs.`
+            : `All ${files.length} files in this run are already PDFs.`
+        }
+        confirmText={files.length > pdfCount ? t('files.prune.keepOnlyPdf') : 'OK'}
+        cancelText={t('common.cancel')}
+        onConfirm={handlePruneOnlyPdf}
+        onCancel={() => setShowPruneModal(false)}
+        isLoading={pruneRun.isPending}
+      />
+
+      {/* Confirm Bulk Delete Modal */}
+      <ConfirmDialog
+        isOpen={showBulkDeleteModal}
+        title={t('files.bulkDelete')}
+        message={`Are you sure you want to permanently delete ${selectedFileIds.length} selected file(s) from storage and database?`}
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setShowBulkDeleteModal(false)}
+        isLoading={bulkDelete.isPending}
+      />
     </div>
   );
 };

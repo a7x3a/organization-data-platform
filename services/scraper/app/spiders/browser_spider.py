@@ -249,13 +249,16 @@ async def _run_browser_crawl(
 
                         # Add any intercepted download URLs
                         for dl_url in downloaded_urls:
+                            if len(result.files_discovered) >= config.max_files:
+                                break
                             if dl_url not in visited:
-                                visited.add(dl_url)
-                                result.files_discovered.append(
-                                    DiscoveredFile(url=dl_url, depth=depth)
-                                )
-                                if on_file_found:
-                                    await on_file_found()
+                                if is_downloadable_url(dl_url, config.allowed_extensions):
+                                    visited.add(dl_url)
+                                    result.files_discovered.append(
+                                        DiscoveredFile(url=dl_url, depth=depth)
+                                    )
+                                    if on_file_found:
+                                        await on_file_found()
 
                         # Embedded resources (images, video/audio sources,
                         # embedded objects, feed enclosures, inline-script
@@ -263,6 +266,8 @@ async def _run_browser_crawl(
                         rendered_html = await page.content()
                         extra_page_candidates: set[str] = set()
                         for resource_url in extract_resource_urls(rendered_html, url):
+                            if len(result.files_discovered) >= config.max_files:
+                                break
                             normalized = normalize_url(resource_url, base_url=url)
                             if normalized is None or normalized in visited:
                                 continue
@@ -273,15 +278,16 @@ async def _run_browser_crawl(
 
                             if is_downloadable_url(normalized, config.allowed_extensions):
                                 if is_allowed_resource_domain(normalized, effective_allowed_domains):
-                                    visited.add(normalized)
-                                    result.files_discovered.append(
-                                        DiscoveredFile(url=normalized, depth=depth)
-                                    )
-                                    log.debug(
-                                        "file_discovered", url=normalized, via="embedded_resource"
-                                    )
-                                    if on_file_found:
-                                        await on_file_found()
+                                    if len(result.files_discovered) < config.max_files:
+                                        visited.add(normalized)
+                                        result.files_discovered.append(
+                                            DiscoveredFile(url=normalized, depth=depth)
+                                        )
+                                        log.debug(
+                                            "file_discovered", url=normalized, via="embedded_resource"
+                                        )
+                                        if on_file_found:
+                                            await on_file_found()
                             else:
                                 if is_allowed_domain(normalized, effective_allowed_domains):
                                     extra_page_candidates.add(normalized)
@@ -312,6 +318,8 @@ async def _run_browser_crawl(
                         from app.spiders.http_spider import transform_cloud_storage_url
 
                         for item in links_data:
+                            if len(result.files_discovered) >= config.max_files:
+                                break
                             raw_link_url = item.get("target") if isinstance(item, dict) else item
                             if not isinstance(raw_link_url, str):
                                 continue
@@ -325,19 +333,20 @@ async def _run_browser_crawl(
                             if is_downloadable_url(link_url, config.allowed_extensions):
                                 if is_allowed_resource_domain(link_url, effective_allowed_domains):
                                     if not url_matches_pattern(link_url, config.excluded_url_patterns):
-                                        visited.add(link_url)
-                                        result.files_discovered.append(
-                                            DiscoveredFile(
-                                                url=link_url,
-                                                depth=depth,
-                                                context_name=ctx_name,
-                                                page_title=page_title,
-                                                page_url=url,
+                                        if len(result.files_discovered) < config.max_files:
+                                            visited.add(link_url)
+                                            result.files_discovered.append(
+                                                DiscoveredFile(
+                                                    url=link_url,
+                                                    depth=depth,
+                                                    context_name=ctx_name,
+                                                    page_title=page_title,
+                                                    page_url=url,
+                                                )
                                             )
-                                        )
-                                        log.info("file_discovered_via_dom", url=link_url, context=ctx_name)
-                                        if on_file_found:
-                                            await on_file_found()
+                                            log.info("file_discovered_via_dom", url=link_url, context=ctx_name)
+                                            if on_file_found:
+                                                await on_file_found()
                                 continue
 
                             if not is_allowed_domain(link_url, effective_allowed_domains):

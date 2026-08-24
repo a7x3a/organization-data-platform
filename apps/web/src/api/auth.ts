@@ -3,6 +3,7 @@ import type {
   LoginRequest,
   LoginResponse,
   AuthTokens,
+  User,
 } from '@odp/shared-types';
 
 export const authApi = {
@@ -15,8 +16,8 @@ export const authApi = {
     await apiClient.post('/auth/logout');
   },
 
-  refresh: async (): Promise<AuthTokens> => {
-    const res = await apiClient.post<AuthTokens>('/auth/refresh');
+  refresh: async (): Promise<AuthTokens & { user?: User }> => {
+    const res = await apiClient.post<AuthTokens & { user?: User }>('/auth/refresh');
     return res.data;
   },
 };

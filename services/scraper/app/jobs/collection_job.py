@@ -18,6 +18,7 @@ collector via app.pipeline.file_pipeline.FilePipeline — only discovery
 Telethon media download there) differ between collector types.
 """
 import asyncio
+import os
 import random
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -315,6 +316,41 @@ class CollectionJob:
                     should_cancel=self._pipeline.is_cancelled,
                     preferred_name=preferred_name,
                 )
+
+                # Post-download verification: enforce allowedExtensions and reject unexpected HTML error pages
+                allowed_extensions = self._cfg.get("allowedExtensions") or []
+                normalized_allowed = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in allowed_extensions if e.strip()]
+
+                if (result.mime_type and "text/html" in result.mime_type) and (not normalized_allowed or ".html" not in normalized_allowed):
+                    log.info("discarding_unexpected_html_download", url=url, mime=result.mime_type)
+                    if os.path.exists(result.temp_path):
+                        try:
+                            os.unlink(result.temp_path)
+                        except OSError:
+                            pass
+                    manifest.record_file_skipped()
+                    return
+
+                if normalized_allowed:
+                    res_ext = (result.extension or "").lower()
+                    mime = (result.mime_type or "").lower()
+                    matches_ext = res_ext in normalized_allowed
+                    matches_mime = (
+                        (".pdf" in normalized_allowed and "application/pdf" in mime)
+                        or (".epub" in normalized_allowed and "epub" in mime)
+                        or (".docx" in normalized_allowed and "wordprocessingml" in mime)
+                        or (".mp3" in normalized_allowed and "audio/" in mime)
+                    )
+                    if not matches_ext and not matches_mime:
+                        log.info("discarding_unallowed_downloaded_extension", url=url, ext=res_ext, mime=mime, allowed=normalized_allowed)
+                        if os.path.exists(result.temp_path):
+                            try:
+                                os.unlink(result.temp_path)
+                            except OSError:
+                                pass
+                        manifest.record_file_skipped()
+                        return
+
                 await self._pipeline.process_downloaded_file(result, manifest=manifest, metadata=metadata)
                 return
 

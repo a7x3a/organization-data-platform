@@ -249,7 +249,49 @@ def categorize_file(
         if any(tok in mime_clean for tok in ("json", "xml", "parquet", "feather")):
             return "data"
 
-    return "other"
+    # 4. Fallback default category
+    return "files"
+
+_CANONICAL_EXT_MAP = {
+    "application/pdf": ".pdf",
+    "application/epub+zip": ".epub",
+    "application/x-mobipocket-ebook": ".mobi",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/zip": ".zip",
+    "application/x-rar-compressed": ".rar",
+    "application/x-7z-compressed": ".7z",
+    "application/x-tar": ".tar",
+    "application/gzip": ".gz",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+    "video/mp4": ".mp4",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg",
+    "application/json": ".json",
+    "text/csv": ".csv",
+    "application/xml": ".xml",
+    "text/plain": ".txt",
+    "application/x-parquet": ".parquet",
+}
 
 
 def detect_mime(file_path: str, declared: Optional[str] = None) -> Optional[str]:
@@ -409,6 +451,18 @@ async def download_file(
     sha256 = hasher.hexdigest()
     mime_type = detect_mime(temp_path, declared_mime)
     extension = os.path.splitext(file_name)[1].lower() or None
+
+    # If extension is missing, or is a dynamic script / server page (.php, .asp, .html, etc.),
+    # infer canonical file extension from verified magic-byte MIME type
+    if mime_type and mime_type in _CANONICAL_EXT_MAP:
+        inferred = _CANONICAL_EXT_MAP[mime_type]
+        if not extension or extension in (
+            ".php", ".asp", ".aspx", ".jsp", ".cgi", ".cfm", ".htm", ".html", ".action", ".do", ".ashx"
+        ):
+            extension = inferred
+            if not file_name.lower().endswith(extension):
+                base_name = os.path.splitext(file_name)[0]
+                file_name = f"{base_name}{extension}"
 
     # Priority for naming:
     # 1. Embedded title inside PDF/EPUB/DOCX (if present and not generic)

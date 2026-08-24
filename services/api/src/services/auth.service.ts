@@ -101,7 +101,14 @@ export async function refreshAccessToken(refreshToken: string) {
     roles: user.roles as UserRole[],
   });
 
-  return { accessToken, expiresIn: 15 * 60 };
+  const newRefreshToken = signRefreshToken(user.id);
+
+  return {
+    user: toPublicUser(user),
+    accessToken,
+    refreshToken: newRefreshToken,
+    expiresIn: 15 * 60,
+  };
 }
 
 // General-purpose user creation, used by both the admin bootstrap script and

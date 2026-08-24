@@ -137,7 +137,6 @@ def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     If `allowed_extensions` is configured, only matching extensions are accepted.
     If `allowed_extensions` is empty, match against DOWNLOADABLE_EXTENSIONS.
     Website theme assets (.css, .js, .svg, .ico, .woff, .ttf) are explicitly ignored.
-    Also handles Wix document storage paths (usrfiles.com/ugd, wixstatic.com/docs) and Google Drive download links.
     """
     parsed = urlparse(url)
     path = parsed.path.lower()
@@ -147,52 +146,36 @@ def is_downloadable_url(url: str, allowed_extensions: list[str]) -> bool:
     if any(path.endswith(ignored) for ignored in (".css", ".js", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot")):
         return False
 
-    # Special handling for Wix document CDN (usrfiles.com/ugd/..., static.wixstatic.com/docs/...)
-    if "usrfiles.com" in url or "wixstatic.com/docs" in url or "wixstatic.com/media" in url:
-        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar")):
-            return True
-        if "/ugd/" in path or "/docs/" in path:
-            return True
-
-    # Special handling for Kurdistan Government CDN & document storage (cdn.gov.krd, *.gov.krd/storage/...)
-    if "cdn.gov.krd" in url or "gov.krd" in url:
-        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar", ".csv", ".json")):
-            return True
-        if "/storage/" in path or "/files/" in path or "/documents/" in path or "/uploads/" in path or "/media/" in path or "/archive/" in path:
-            return True
-
-    # Special handling for Kurdipedia library & file storage (kurdipedia.org/files/...)
-    if "kurdipedia.org" in url:
-        if any(ext in path or ext in query for ext in (".pdf", ".epub", ".mobi", ".docx", ".xlsx", ".zip", ".mp3", ".wav", ".rar", ".csv", ".txt")):
-            return True
-        if "/files/books/" in path or "/files/documents/" in path or "/files/" in path:
-            return True
-
-    # Special handling for Google Drive & Dropbox downloads
-    if ("drive.google.com" in url or "docs.google.com" in url) and ("export=download" in query or "/file/d/" in path or "/uc" in path):
-        return True
-
     targets = [ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in allowed_extensions] if allowed_extensions else DOWNLOADABLE_EXTENSIONS
 
-    # 1. Path extension check (e.g. /books/history.pdf)
+    # 1. Path extension check (e.g. /books/history.pdf, usrfiles.com/ugd/xyz.pdf, cdn.gov.krd/file.pdf)
     if any(path.endswith(ext) for ext in targets):
         return True
 
-    # 2. Query parameter check (e.g. /download.php?file=book.pdf or ?format=pdf)
+    # 2. Query parameter check (e.g. /download.php?file=book.pdf or ?format=pdf or ?ext=pdf)
     if query:
-        if "export=download" in query or "dl=1" in query or "download=true" in query:
-            return True
         for ext in targets:
             clean_ext = ext.lstrip(".")
-            if f".{clean_ext}" in query or f"format={clean_ext}" in query or f"type={clean_ext}" in query or f"file={clean_ext}" in query:
+            if f".{clean_ext}" in query or f"format={clean_ext}" in query or f"type={clean_ext}" in query or f"file={clean_ext}" in query or f"ext={clean_ext}" in query:
+                return True
+        if not allowed_extensions:
+            if "export=download" in query or "dl=1" in query or "download=true" in query:
                 return True
 
     # 3. Download path segment check (e.g. /download/pdf/123, /download/epub/456)
     for ext in targets:
         clean_ext = ext.lstrip(".")
-        if f"/pdf/" in path and clean_ext == "pdf":
+        if f"/{clean_ext}/" in path or path.endswith(f"/{clean_ext}"):
             return True
-        if f"/epub/" in path and clean_ext == "epub":
+
+    # 4. Special handling for Google Drive & Dropbox downloads
+    if ("drive.google.com" in url or "docs.google.com" in url) and ("export=download" in query or "/file/d/" in path or "/uc" in path):
+        if not allowed_extensions or any(ext in (".pdf", ".docx", ".zip", ".xlsx", ".epub") for ext in targets):
+            return True
+
+    # 5. Wix document CDN (usrfiles.com/ugd/..., static.wixstatic.com/docs/...)
+    if "usrfiles.com" in url or "wixstatic.com/docs" in url:
+        if any(ext in path or ext in query for ext in targets):
             return True
 
     return False
@@ -406,10 +389,11 @@ async def crawl(
                     # Quick check: is this a downloadable file URL?
                     if is_downloadable_url(url, config.allowed_extensions):
                         if not url_matches_pattern(url, config.excluded_url_patterns):
-                            result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
-                            log.debug("file_discovered", url=url)
-                            if on_file_found:
-                                await on_file_found()
+                            if len(result.files_discovered) < config.max_files:
+                                result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
+                                log.debug("file_discovered", url=url)
+                                if on_file_found:
+                                    await on_file_found()
                         return
 
                     if not await robots.is_allowed(url, enabled=config.robots_enabled):
@@ -427,26 +411,23 @@ async def crawl(
 
                     content_type = response.headers.get("content-type", "")
                     if "text/html" not in content_type:
-                        # Could be a direct file — treat as discovered
-                        if not url_matches_pattern(url, config.excluded_url_patterns):
-                            result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
-                            if on_file_found:
-                                await on_file_found()
+                        # Direct non-HTML file — only accept if valid for allowed_extensions
+                        if is_downloadable_url(url, config.allowed_extensions):
+                            if not url_matches_pattern(url, config.excluded_url_patterns):
+                                if len(result.files_discovered) < config.max_files:
+                                    result.files_discovered.append(DiscoveredFile(url=url, depth=depth))
+                                    if on_file_found:
+                                        await on_file_found()
                         return
 
                     log.debug("page_crawled", url=url, depth=depth)
                     html = response.text
 
-                    # Every non-<a> resource this page points to — images,
-                    # video/audio sources, embedded objects, feed enclosures,
-                    # and URLs found in inline scripts/JSON-LD. A resource
-                    # that IS itself a downloadable file is recorded
-                    # regardless of depth (it's terminal, not something to
-                    # recurse into); anything else found this way is treated
-                    # exactly like a normal <a> link below, subject to the
-                    # same max_depth limit.
+                    # Every non-<a> resource this page points to
                     extra_page_candidates: set[str] = set()
                     for resource_url in extract_resource_urls(html, url):
+                        if len(result.files_discovered) >= config.max_files:
+                            break
                         normalized = normalize_url(resource_url, base_url=url)
                         if normalized is None or normalized in visited:
                             continue
@@ -457,11 +438,12 @@ async def crawl(
 
                         if is_downloadable_url(normalized, config.allowed_extensions):
                             if is_allowed_resource_domain(normalized, effective_allowed_domains):
-                                visited.add(normalized)
-                                result.files_discovered.append(DiscoveredFile(url=normalized, depth=depth))
-                                log.debug("file_discovered", url=normalized, via="embedded_resource")
-                                if on_file_found:
-                                    await on_file_found()
+                                if len(result.files_discovered) < config.max_files:
+                                    visited.add(normalized)
+                                    result.files_discovered.append(DiscoveredFile(url=normalized, depth=depth))
+                                    log.debug("file_discovered", url=normalized, via="embedded_resource")
+                                    if on_file_found:
+                                        await on_file_found()
                         else:
                             if is_allowed_domain(normalized, effective_allowed_domains):
                                 extra_page_candidates.add(normalized)
@@ -475,21 +457,25 @@ async def crawl(
                                 api_data = api_res.json()
                                 books = api_data.get("books", []) if isinstance(api_data, dict) else api_data
                                 for book in books:
+                                    if len(result.files_discovered) >= config.max_files:
+                                        break
                                     file_name = book.get("file_url")
                                     audio_url = book.get("audio_file_url")
                                     if file_name and isinstance(file_name, str):
                                         full_pdf_url = f"https://z4l1g0tev5tfrvnx.public.blob.vercel-storage.com/{file_name}"
-                                        if full_pdf_url not in visited:
-                                            visited.add(full_pdf_url)
-                                            result.files_discovered.append(DiscoveredFile(url=full_pdf_url, depth=depth + 1))
-                                            if on_file_found:
-                                                await on_file_found()
+                                        if is_downloadable_url(full_pdf_url, config.allowed_extensions) and full_pdf_url not in visited:
+                                            if len(result.files_discovered) < config.max_files:
+                                                visited.add(full_pdf_url)
+                                                result.files_discovered.append(DiscoveredFile(url=full_pdf_url, depth=depth + 1))
+                                                if on_file_found:
+                                                    await on_file_found()
                                     if audio_url and isinstance(audio_url, str):
-                                        if audio_url not in visited:
-                                            visited.add(audio_url)
-                                            result.files_discovered.append(DiscoveredFile(url=audio_url, depth=depth + 1))
-                                            if on_file_found:
-                                                await on_file_found()
+                                        if is_downloadable_url(audio_url, config.allowed_extensions) and audio_url not in visited:
+                                            if len(result.files_discovered) < config.max_files:
+                                                visited.add(audio_url)
+                                                result.files_discovered.append(DiscoveredFile(url=audio_url, depth=depth + 1))
+                                                if on_file_found:
+                                                    await on_file_found()
                         except Exception as api_err:
                             log.warning("spa_api_probe_failed", url=url, error=str(api_err))
 
@@ -503,6 +489,8 @@ async def crawl(
                     # Extract links with rich context from HTML
                     page_link_contexts = extract_page_links_with_context(html, url)
                     for link, ctx in page_link_contexts:
+                        if len(result.files_discovered) >= config.max_files:
+                            break
                         link_url = normalize_url(link, base_url=url)
                         if link_url is None:
                             continue
@@ -511,7 +499,7 @@ async def crawl(
                         if is_downloadable_url(link_url, config.allowed_extensions):
                             if is_allowed_resource_domain(link_url, effective_allowed_domains):
                                 if not url_matches_pattern(link_url, config.excluded_url_patterns):
-                                    if not any(df.url == link_url for df in result.files_discovered):
+                                    if len(result.files_discovered) < config.max_files and not any(df.url == link_url for df in result.files_discovered):
                                         result.files_discovered.append(
                                             DiscoveredFile(
                                                 url=link_url,
