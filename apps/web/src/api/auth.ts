@@ -16,8 +16,9 @@ export const authApi = {
     await apiClient.post('/auth/logout');
   },
 
-  refresh: async (): Promise<AuthTokens & { user?: User }> => {
-    const res = await apiClient.post<AuthTokens & { user?: User }>('/auth/refresh');
+  refresh: async (refreshToken?: string | null): Promise<AuthTokens & { user?: User }> => {
+    const body = refreshToken ? { refreshToken } : {};
+    const res = await apiClient.post<AuthTokens & { user?: User }>('/auth/refresh', body);
     return res.data;
   },
 };

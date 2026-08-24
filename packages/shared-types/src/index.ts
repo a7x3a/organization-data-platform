@@ -303,6 +303,7 @@ export interface ApiResponse<T> {
 
 export interface AuthTokens {
   accessToken: string;
+  refreshToken?: string;
   expiresIn: number;
 }
 
@@ -330,6 +331,7 @@ export interface UpdateUserRequest {
 export interface LoginResponse {
   user: User;
   accessToken: string;
+  refreshToken?: string;
   expiresIn: number;
 }
 

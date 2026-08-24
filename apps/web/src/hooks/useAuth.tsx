@@ -28,41 +28,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
   });
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Restore & validate session on mount
+  // Background token refresh & sync on mount (does NOT wipe valid session on temporary failure)
   useEffect(() => {
     let isMounted = true;
 
-    async function initAuth() {
+    async function syncAuth() {
       const token = localStorage.getItem('access_token');
-      const storedUser = localStorage.getItem('user');
+      const refreshToken = localStorage.getItem('refresh_token');
 
-      if (token && storedUser) {
+      if (token || refreshToken) {
         try {
-          const res = await authApi.refresh();
+          const res = await authApi.refresh(refreshToken);
           if (isMounted) {
             localStorage.setItem('access_token', res.accessToken);
+            if (res.refreshToken) {
+              localStorage.setItem('refresh_token', res.refreshToken);
+            }
             if (res.user) {
               localStorage.setItem('user', JSON.stringify(res.user));
               setUser(res.user);
             }
           }
         } catch {
-          // If refresh fails on startup, clear invalid credentials
-          if (isMounted) {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('user');
-            setUser(null);
-          }
+          // If refresh fails on mount, let apiClient interceptor handle 401s when actual queries occur
         }
-      }
-      if (isMounted) {
-        setIsLoading(false);
       }
     }
 
-    initAuth();
+    syncAuth();
 
     return () => {
       isMounted = false;
@@ -75,8 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const interval = setInterval(async () => {
       try {
-        const res = await authApi.refresh();
+        const storedRefreshToken = localStorage.getItem('refresh_token');
+        const res = await authApi.refresh(storedRefreshToken);
         localStorage.setItem('access_token', res.accessToken);
+        if (res.refreshToken) {
+          localStorage.setItem('refresh_token', res.refreshToken);
+        }
         if (res.user) {
           localStorage.setItem('user', JSON.stringify(res.user));
           setUser(res.user);
@@ -87,10 +86,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 10 * 60 * 1000);
 
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && localStorage.getItem('access_token')) {
+      if (document.visibilityState === 'visible' && (localStorage.getItem('access_token') || localStorage.getItem('refresh_token'))) {
         try {
-          const res = await authApi.refresh();
+          const storedRefreshToken = localStorage.getItem('refresh_token');
+          const res = await authApi.refresh(storedRefreshToken);
           localStorage.setItem('access_token', res.accessToken);
+          if (res.refreshToken) {
+            localStorage.setItem('refresh_token', res.refreshToken);
+          }
           if (res.user) {
             localStorage.setItem('user', JSON.stringify(res.user));
             setUser(res.user);
@@ -112,6 +115,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const result = await authApi.login({ username, password });
     localStorage.setItem('access_token', result.accessToken);
+    if (result.refreshToken) {
+      localStorage.setItem('refresh_token', result.refreshToken);
+    }
     localStorage.setItem('user', JSON.stringify(result.user));
     setUser(result.user);
   }, []);
@@ -121,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authApi.logout();
     } finally {
       localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
       setUser(null);
     }

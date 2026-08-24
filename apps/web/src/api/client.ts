@@ -64,10 +64,15 @@ apiClient.interceptors.response.use(
 
       try {
         const refreshUrl = `${apiClient.defaults.baseURL || '/api'}/auth/refresh`;
-        const { data } = await axios.post(refreshUrl, {}, { withCredentials: true });
+        const storedRefreshToken = localStorage.getItem('refresh_token');
+        const body = storedRefreshToken ? { refreshToken: storedRefreshToken } : {};
+        const { data } = await axios.post(refreshUrl, body, { withCredentials: true });
         const newToken = data.accessToken;
 
         localStorage.setItem('access_token', newToken);
+        if (data.refreshToken) {
+          localStorage.setItem('refresh_token', data.refreshToken);
+        }
         if (data.user) {
           localStorage.setItem('user', JSON.stringify(data.user));
         }
@@ -78,6 +83,7 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login';

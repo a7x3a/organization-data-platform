@@ -14,10 +14,12 @@ router.post(
       const { username, password } = req.body;
       const result = await authService.loginUser(username, password);
 
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
       // Set refresh token as HttpOnly cookie
       res.cookie('refresh_token', result.refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isHttps,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: '/',
@@ -26,6 +28,7 @@ router.post(
       res.json({
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       });
     } catch (err) {
@@ -37,7 +40,7 @@ router.post(
 // POST /api/auth/refresh
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const refreshToken = req.cookies?.refresh_token;
+    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
     if (!refreshToken) {
       res.status(401).json({ error: 'No refresh token', code: 'NO_REFRESH_TOKEN' });
       return;
@@ -45,10 +48,12 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
     const result = await authService.refreshAccessToken(refreshToken);
 
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
     // Refresh sliding session cookie
     res.cookie('refresh_token', result.refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/',
@@ -57,6 +62,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     res.json({
       user: result.user,
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       expiresIn: result.expiresIn,
     });
   } catch (err) {
