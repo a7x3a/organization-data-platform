@@ -187,6 +187,7 @@ class FilePipeline:
                 fileSize=result.file_size,
                 sha256=result.sha256,
                 r2Key=r2_key,
+                metadata=extra_metadata,
             )
 
             metadata.add(

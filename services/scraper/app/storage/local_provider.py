@@ -25,7 +25,12 @@ class LocalStorageProvider:
             os.makedirs(self._root, exist_ok=True)
 
     def _resolve(self, key: str) -> str:
-        path = os.path.abspath(os.path.join(self._root, key))
+        clean_key = key.lstrip("/\\")
+        if clean_key.startswith("storage/"):
+            clean_key = clean_key[len("storage/"):]
+        elif clean_key.startswith("app/storage/"):
+            clean_key = clean_key[len("app/storage/"):]
+        path = os.path.abspath(os.path.join(self._root, clean_key))
         if not path.startswith(self._root + os.sep) and path != self._root:
             raise ValueError(f"Storage key resolves outside storage root: {key}")
         return path
@@ -40,14 +45,17 @@ class LocalStorageProvider:
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(local_path, dest)
+            try:
+                os.chmod(dest, 0o666)
+            except Exception:
+                pass
             log.info("local_storage_upload_completed", key=r2_key)
-        except PermissionError:
-            # Safe fallback to /tmp/scraper if permissions fail
+        except Exception as e:
             alt_root = os.path.abspath("/tmp/scraper/storage")
-            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key))
+            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key.lstrip("/\\")))
             os.makedirs(os.path.dirname(alt_dest), exist_ok=True)
             shutil.copyfile(local_path, alt_dest)
-            log.info("local_storage_upload_completed_fallback", key=r2_key)
+            log.info("local_storage_upload_completed_fallback", key=r2_key, error=str(e))
 
     def upload_bytes(
         self,
@@ -60,14 +68,18 @@ class LocalStorageProvider:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as f:
                 f.write(data)
+            try:
+                os.chmod(dest, 0o666)
+            except Exception:
+                pass
             log.info("local_storage_bytes_upload_completed", key=r2_key, size=len(data))
-        except PermissionError:
+        except Exception as e:
             alt_root = os.path.abspath("/tmp/scraper/storage")
-            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key))
+            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key.lstrip("/\\")))
             os.makedirs(os.path.dirname(alt_dest), exist_ok=True)
             with open(alt_dest, "wb") as f:
                 f.write(data)
-            log.info("local_storage_bytes_upload_completed_fallback", key=r2_key, size=len(data))
+            log.info("local_storage_bytes_upload_completed_fallback", key=r2_key, size=len(data), error=str(e))
 
     def object_exists(self, r2_key: str) -> bool:
         return os.path.exists(self._resolve(r2_key))

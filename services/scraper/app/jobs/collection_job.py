@@ -437,6 +437,7 @@ class CollectionJob:
             fileSize=len(raw_bytes),
             sha256=sha256,
             r2Key=r2_key,
+            metadata=page_doc,
         )
 
         try:
