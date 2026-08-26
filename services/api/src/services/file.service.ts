@@ -470,12 +470,12 @@ export async function syncStorageDirectories() {
   });
 
   let syncedCount = 0;
-  let prunedCount = 0;
+  let missingCount = 0;
   let indexedNewCount = 0;
 
   const existingR2KeysInDb = new Set<string>();
 
-  // 1. Reconcile DB -> Storage: verify every file in DB still physically exists
+  // 1. Reconcile DB -> Storage: verify files in DB without deleting any database records
   for (const f of dbFiles) {
     if (f.r2Key) {
       const exists = await storageProvider.exists(f.r2Key);
@@ -483,27 +483,7 @@ export async function syncStorageDirectories() {
         existingR2KeysInDb.add(f.r2Key);
         syncedCount++;
       } else {
-        try {
-          await prisma.collectedFile.delete({ where: { id: f.id } });
-          prunedCount++;
-        } catch {
-          // Ignore if already deleted
-        }
-      }
-    } else if (f.status === 'DUPLICATE' || f.status === 'FAILED' || f.status === 'SKIPPED') {
-      // If a ghost duplicate or failed record has no matching physical file in DB, prune it
-      if (f.sha256) {
-        const hasActiveUploaded = dbFiles.some(
-          (other) => other.id !== f.id && other.sha256 === f.sha256 && other.status === 'UPLOADED' && other.r2Key
-        );
-        if (!hasActiveUploaded) {
-          try {
-            await prisma.collectedFile.delete({ where: { id: f.id } });
-            prunedCount++;
-          } catch {
-            // ignore
-          }
-        }
+        missingCount++;
       }
     }
   }
@@ -649,8 +629,7 @@ export async function syncStorageDirectories() {
     totalChecked: dbFiles.length + indexedNewCount,
     syncedCount,
     indexedNewCount,
-    missingCount: prunedCount,
-    prunedOrphansCount: prunedCount,
+    missingCount,
     timestamp: new Date().toISOString(),
   };
 }

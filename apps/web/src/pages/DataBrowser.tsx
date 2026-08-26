@@ -11,6 +11,7 @@ import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { formatBytes, truncateSha256 } from '../lib/utils';
 import { downloadFile, openFile } from '../lib/downloadFile';
+import { JsonViewerModal } from '../components/JsonViewerModal';
 import { CollectedFile, Source } from '@odp/shared-types';
 import {
   ChevronRight,
@@ -31,6 +32,7 @@ import {
   ExternalLink,
   Info,
   Filter,
+  FileCode2,
 } from 'lucide-react';
 
 // Data Intelligence helpers
@@ -461,6 +463,26 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
+  const [jsonPayload, setJsonPayload] = useState<any>(file.metadata || null);
+
+  const isJsonFile = file.fileName.toLowerCase().endsWith('.json') || file.fileName.toLowerCase().endsWith('.jsonl') || Boolean((file.metadata as any)?.body_text || (file.metadata as any)?.title);
+
+  const handleOpenClick = async () => {
+    if (isJsonFile) {
+      setIsJsonModalOpen(true);
+      try {
+        const res = await filesApi.getJsonContent(file.id);
+        if (res.data || res.raw) {
+          setJsonPayload(res.data || res.raw);
+        }
+      } catch {
+        // Fallback to existing file.metadata
+      }
+    } else {
+      openFile(file);
+    }
+  };
 
   const handleDeleteConfirmed = async () => {
     setIsDeleting(true);
@@ -481,19 +503,17 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
         {/* Clickable Title & Details Area */}
         <button
           type="button"
-          onClick={() => {
-            if (file.sourceUrl) {
-              window.open(file.sourceUrl, '_blank', 'noopener,noreferrer');
-            } else if (file.status === 'UPLOADED') {
-              handleDownloadClick(file.id);
-            }
-          }}
+          onClick={handleOpenClick}
           className="min-w-0 flex-1 text-left cursor-pointer group-hover:text-[var(--color-brand-400)] transition-colors"
-          title={file.sourceUrl ? `Open ${file.sourceUrl}` : 'Click to open file'}
+          title={isJsonFile ? 'Click to inspect extracted article / JSON' : file.status === 'UPLOADED' ? 'Click to open file' : `Open ${file.sourceUrl || file.fileName}`}
         >
           <div className="text-[var(--color-text-primary)] truncate font-medium group-hover:text-[var(--color-brand-400)] flex items-center gap-1.5">
             <span className="hover:underline">{file.fileName}</span>
-            <ExternalLink className="w-3 h-3 text-[var(--color-brand-400)] opacity-70 group-hover:opacity-100 transition-opacity" />
+            {isJsonFile ? (
+              <FileCode2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            ) : (
+              <ExternalLink className="w-3 h-3 text-[var(--color-brand-400)] opacity-70 group-hover:opacity-100 transition-opacity" />
+            )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[var(--color-text-muted)] font-mono text-[10px]">
             <span>{formatBytes(file.fileSize)}</span>
@@ -517,6 +537,20 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
           <FileApprovalBadge status={file.approvalStatus} />
           <FileStatusBadge status={file.status} />
+          {isJsonFile && (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenClick();
+              }}
+              title="Inspect JSON / Article Data"
+            >
+              <FileCode2 className="w-3.5 h-3.5 text-cyan-400" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -536,9 +570,9 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
               iconOnly
               onClick={(e) => {
                 e.stopPropagation();
-                handleDownloadClick(file.id);
+                downloadFile(file);
               }}
-              title="Download file"
+              title="Download file directly"
             >
               <Download className="w-3.5 h-3.5" />
             </Button>
@@ -577,6 +611,18 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
           onClose={() => setIsDetailOpen(false)}
           onEdit={() => setIsEditing(true)}
           onDeleteRequest={() => setShowDeleteConfirm(true)}
+        />
+      )}
+
+      {isJsonModalOpen && (
+        <JsonViewerModal
+          isOpen={isJsonModalOpen}
+          onClose={() => setIsJsonModalOpen(false)}
+          title={`Structured Content — ${file.fileName}`}
+          fileName={file.fileName}
+          relativePath={file.r2Key || undefined}
+          localPath={file.r2Key ? `/app/storage/${file.r2Key}` : undefined}
+          data={jsonPayload}
         />
       )}
 
@@ -834,6 +880,7 @@ export const DataBrowser: React.FC = () => {
     provider: string;
     totalChecked: number;
     syncedCount: number;
+    indexedNewCount?: number;
     prunedOrphansCount?: number;
     missingCount: number;
     timestamp: string;
@@ -908,7 +955,7 @@ export const DataBrowser: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-[var(--color-success-400)]" />
             <span>
               <strong>Storage Sync Completed:</strong> Checked {syncReport.totalChecked} files under{' '}
-              <code className="font-mono">{syncReport.provider}</code> mode ({syncReport.syncedCount} synced, {syncReport.prunedOrphansCount ?? syncReport.missingCount} orphaned DB records pruned).
+              <code className="font-mono">{syncReport.provider}</code> mode ({syncReport.syncedCount} verified on disk, {syncReport.indexedNewCount ?? 0} newly indexed from storage). All records preserved.
             </span>
           </div>
           <button onClick={() => setSyncReport(null)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">

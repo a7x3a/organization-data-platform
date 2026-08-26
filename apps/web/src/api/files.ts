@@ -121,6 +121,7 @@ export const filesApi = {
     provider: string;
     totalChecked: number;
     syncedCount: number;
+    indexedNewCount?: number;
     missingCount: number;
     timestamp: string;
   }> => {
