@@ -13,7 +13,6 @@ import { Collectors } from './pages/Collectors';
 import { CollectorDetail } from './pages/CollectorDetail';
 import { Runs } from './pages/Runs';
 import { RunDetail } from './pages/RunDetail';
-import { Files } from './pages/Files';
 import { DataBrowser } from './pages/DataBrowser';
 import { Settings } from './pages/Settings';
 import { Users } from './pages/Users';
@@ -81,7 +80,7 @@ export function App() {
                   <Route path="/collectors/:id" element={<CollectorDetail />} />
                   <Route path="/runs" element={<Runs />} />
                   <Route path="/runs/:id" element={<RunDetail />} />
-                  <Route path="/files" element={<Files />} />
+                  <Route path="/files" element={<Navigate to="/data" replace />} />
                   <Route path="/data" element={<DataBrowser />} />
                   <Route path="/upload" element={<Upload />} />
                   <Route path="/users" element={<Users />} />

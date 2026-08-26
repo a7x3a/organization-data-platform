@@ -118,9 +118,9 @@ export async function refreshAccessToken(refreshToken: string) {
 export async function createUser(input: {
   username: string;
   password: string;
-  name: string;
-  roles: UserRole[];
-  email?: string;
+  name?: string;
+  roles?: UserRole[];
+  email?: string | null;
 }) {
   const existing = await prisma.user.findUnique({ where: { username: input.username } });
   if (existing) {
@@ -131,11 +131,11 @@ export async function createUser(input: {
   const user = await prisma.user.create({
     data: {
       username: input.username,
-      email: input.email,
-      name: input.name,
+      email: input.email || null,
+      name: input.name || input.username,
       passwordHash,
       isActive: true,
-      roles: input.roles,
+      roles: input.roles && input.roles.length > 0 ? input.roles : [UserRole.COLLECTOR],
     },
   });
 

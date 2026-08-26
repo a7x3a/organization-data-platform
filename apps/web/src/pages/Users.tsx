@@ -91,8 +91,6 @@ export const Users: React.FC = () => {
   const handleOpenCreate = () => {
     setCreateUsername('');
     setCreatePassword('');
-    setCreateName('');
-    setCreateEmail('');
     setCreateRoles([UserRole.COLLECTOR]);
     setCreateError(null);
     setIsCreateOpen(true);
@@ -105,8 +103,7 @@ export const Users: React.FC = () => {
       await createUser.mutateAsync({
         username: createUsername.trim(),
         password: createPassword,
-        name: createName.trim(),
-        email: createEmail.trim() || undefined,
+        name: createUsername.trim(),
         roles: createRoles,
       });
       setIsCreateOpen(false);
@@ -121,7 +118,6 @@ export const Users: React.FC = () => {
     setEditName(u.name);
     setEditEmail(u.email || '');
     setEditPassword('');
-    // Keep only Admin / Collector in edit state
     const validRoles = u.roles.filter((r) => r === UserRole.ADMIN || r === UserRole.COLLECTOR);
     setEditRoles(validRoles.length > 0 ? validRoles : [UserRole.COLLECTOR]);
     setEditIsActive(u.isActive);
@@ -137,7 +133,7 @@ export const Users: React.FC = () => {
       await updateUser.mutateAsync({
         id: editingUser.id,
         data: {
-          name: editName.trim(),
+          name: editName.trim() || undefined,
           email: editEmail.trim() ? editEmail.trim() : null,
           roles: editRoles,
           isActive: editIsActive,
@@ -173,7 +169,7 @@ export const Users: React.FC = () => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchUsername = u.username.toLowerCase().includes(q);
-        const matchName = u.name.toLowerCase().includes(q);
+        const matchName = u.name?.toLowerCase().includes(q);
         const matchEmail = (u.email || '').toLowerCase().includes(q);
         return matchUsername || matchName || matchEmail;
       }
@@ -187,7 +183,7 @@ export const Users: React.FC = () => {
       accessor: (u) => (
         <div className="min-w-0">
           <div className="font-semibold text-xs text-[var(--color-text-primary)] flex items-center gap-1.5 truncate">
-            <span>{u.name}</span>
+            <span>{u.name || u.username}</span>
             {u.id === currentUser?.id && (
               <span className="px-1.5 py-0.2 rounded text-[10px] bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] font-mono">
                 You
@@ -203,38 +199,37 @@ export const Users: React.FC = () => {
     {
       header: 'Email',
       accessor: (u) => (
-        <div className="text-xs font-mono text-[var(--color-text-secondary)] truncate max-w-[200px]">
-          {u.email || <span className="text-[var(--color-text-muted)] italic">—</span>}
-        </div>
+        <span className="text-xs font-mono text-[var(--color-text-muted)] truncate">
+          {u.email || '—'}
+        </span>
       ),
     },
     {
       header: 'Assigned Roles',
-      accessor: (u) => {
-        // Display only Admin and Collector
-        const validRoles = u.roles.filter((r) => r === UserRole.ADMIN || r === UserRole.COLLECTOR);
-        const displayRoles = validRoles.length > 0 ? validRoles : [UserRole.COLLECTOR];
-        return (
-          <div className="flex flex-wrap gap-1">
-            {displayRoles.map((r) => (
-              <span
-                key={r}
-                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${
-                  ROLE_BADGE_STYLES[r] || 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                }`}
-              >
-                {r}
-              </span>
-            ))}
-          </div>
-        );
-      },
+      accessor: (u) => (
+        <div className="flex flex-wrap gap-1">
+          {u.roles.map((r) => (
+            <span
+              key={r}
+              className={`px-2 py-0.5 text-[10px] font-mono font-semibold rounded-md border ${
+                r === UserRole.ADMIN
+                  ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                  : r === UserRole.COLLECTOR
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] border-[var(--color-border-subtle)]'
+              }`}
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      ),
     },
     {
       header: 'Status',
       accessor: (u) => (
         <span
-          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium font-mono border ${
+          className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-full border ${
             u.isActive
               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
               : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
@@ -295,15 +290,14 @@ export const Users: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Header */}
+    <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-[var(--color-brand-400)]" />
             User Management
           </h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
             Manage organization members, access permissions, and role-based security.
           </p>
         </div>
@@ -313,8 +307,7 @@ export const Users: React.FC = () => {
         </Button>
       </div>
 
-      {/* KPI Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[var(--color-text-muted)]">Total Accounts</span>
@@ -334,7 +327,7 @@ export const Users: React.FC = () => {
           <div className="mt-2 text-2xl font-bold font-mono text-[var(--color-text-primary)]">
             {metrics.active}
           </div>
-          <span className="text-[11px] text-emerald-400 font-medium">Eligible to sign in</span>
+          <span className="text-[11px] text-[var(--color-text-muted)]">Eligible to sign in</span>
         </div>
 
         <div className="p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] shadow-xs">
@@ -360,16 +353,13 @@ export const Users: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter & Search Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] p-3 rounded-xl shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] p-2.5 rounded-xl shadow-xs">
         <div className="relative flex-1 min-w-[240px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-          <input
-            type="text"
+          <Input
+            icon={<Search className="w-4 h-4" />}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, username, or email..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-[var(--color-bg-overlay)] border border-[var(--color-border)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-400)]"
+            placeholder="Search by username or name..."
           />
         </div>
 
@@ -377,7 +367,7 @@ export const Users: React.FC = () => {
           <Select
             value={roleFilter}
             onValueChange={setRoleFilter}
-            className="w-36 text-xs"
+            className="w-36"
             options={[
               { value: '', label: 'All Roles' },
               ...ALL_ROLES.map((r) => ({ value: r.role, label: r.label })),
@@ -386,20 +376,16 @@ export const Users: React.FC = () => {
           <Select
             value={statusFilter}
             onValueChange={setStatusFilter}
-            className="w-32 text-xs"
+            className="w-32"
             options={[
               { value: '', label: 'All Status' },
               { value: 'active', label: 'Active' },
               { value: 'disabled', label: 'Disabled' },
             ]}
           />
-          <span className="text-xs font-mono text-[var(--color-text-muted)] px-1 whitespace-nowrap">
-            {filteredUsers.length} of {userList.length}
-          </span>
         </div>
       </div>
 
-      {/* User Table */}
       <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-2xl)] p-5 shadow-[var(--shadow-card)]">
         <DataTable
           columns={columns}
@@ -410,7 +396,6 @@ export const Users: React.FC = () => {
         />
       </div>
 
-      {/* Create User Modal */}
       {isCreateOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-sans">
           <div className="relative w-full max-w-md bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -418,7 +403,7 @@ export const Users: React.FC = () => {
               <div>
                 <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Add New User</h2>
                 <p className="text-[11px] text-[var(--color-text-muted)]">
-                  Create a new platform account with assigned roles.
+                  Create a new platform account with username and password.
                 </p>
               </div>
               <button
@@ -439,63 +424,37 @@ export const Users: React.FC = () => {
 
             <form onSubmit={handleCreate} className="flex flex-col flex-1 min-h-0">
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                      Username <span className="text-red-400">*</span>
-                    </label>
-                    <Input
-                      type="text"
-                      required
-                      pattern="^[a-zA-Z0-9_\-]+$"
-                      value={createUsername}
-                      onChange={(e) => setCreateUsername(e.target.value)}
-                      placeholder="e.g. jsmith"
-                      className="font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                      Full Name <span className="text-red-400">*</span>
-                    </label>
-                    <Input
-                      type="text"
-                      required
-                      value={createName}
-                      onChange={(e) => setCreateName(e.target.value)}
-                      placeholder="e.g. John Smith"
-                      className="text-xs"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                    Username <span className="text-red-400">*</span>
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    pattern="^[a-zA-Z0-9_\-]+$"
+                    value={createUsername}
+                    onChange={(e) => setCreateUsername(e.target.value)}
+                    placeholder="e.g. jsmith"
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+                    Letters, numbers, underscores, and hyphens only.
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                      Email Address
-                    </label>
-                    <Input
-                      type="email"
-                      value={createEmail}
-                      onChange={(e) => setCreateEmail(e.target.value)}
-                      placeholder="e.g. user@organization.org"
-                      className="text-xs font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                      Password <span className="text-red-400">*</span>
-                    </label>
-                    <Input
-                      type="password"
-                      required
-                      minLength={8}
-                      value={createPassword}
-                      onChange={(e) => setCreatePassword(e.target.value)}
-                      placeholder="Min 8 chars"
-                      className="text-xs"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                    Password <span className="text-red-400">*</span>
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={createPassword}
+                    onChange={(e) => setCreatePassword(e.target.value)}
+                    placeholder="Min 8 characters"
+                    className="text-xs"
+                  />
                 </div>
 
                 <div>
@@ -519,11 +478,13 @@ export const Users: React.FC = () => {
                             type="checkbox"
                             checked={selected}
                             onChange={() => {}}
-                            className="mt-0.5 accent-[var(--color-brand-500)] cursor-pointer"
+                            className="mt-0.5 rounded text-[var(--color-brand-500)]"
                           />
                           <div>
                             <div className="font-semibold text-xs">{r.label}</div>
-                            <div className="text-[10px] opacity-75 mt-0.5 leading-tight">{r.desc}</div>
+                            <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
+                              {r.desc}
+                            </div>
                           </div>
                         </label>
                       );

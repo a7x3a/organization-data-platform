@@ -21,6 +21,8 @@ import { Button } from '../components/Button';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { QuickCollectModal } from '../components/QuickCollectModal';
 
+import { QaiLogo } from '../components/QaiLogo';
+
 export const AppLayout: React.FC = () => {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
@@ -60,7 +62,6 @@ export const AppLayout: React.FC = () => {
     { to: '/sources', label: t('nav.sources'), icon: Globe },
     { to: '/collectors', label: t('nav.collectors'), icon: Bot },
     { to: '/runs', label: t('nav.runs'), icon: PlaySquare },
-    { to: '/files', label: t('nav.files'), icon: FileArchive },
     { to: '/data', label: t('nav.dataBrowser'), icon: FolderTree },
     { to: '/upload', label: t('nav.upload'), icon: UploadCloud },
     ...(user?.roles.includes(UserRole.ADMIN)
@@ -80,16 +81,9 @@ export const AppLayout: React.FC = () => {
       {/* Sidebar */}
       <aside className="w-[var(--spacing-sidebar)] flex-shrink-0 border-r border-[var(--color-border)] flex flex-col justify-between bg-[var(--color-bg-surface)]">
         <div>
-          {/* Header / Brand */}
-          <div className="h-16 flex items-center px-5 border-b border-[var(--color-border)]">
-            <div>
-              <div className="text-sm font-bold font-mono text-[var(--color-text-primary)] leading-none tracking-tight">
-                QAI Collector
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] font-mono tracking-tight mt-1">
-                AI Data Collection Engine
-              </div>
-            </div>
+          {/* Header / Brand with QAI Logo */}
+          <div className="h-16 flex items-center px-4 border-b border-[var(--color-border)]">
+            <QaiLogo size="sm" />
           </div>
 
           {/* Nav links */}

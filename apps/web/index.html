@@ -1,36 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Organization Data Platform — Web Collector</title>
 
-    <!-- Preconnect Google Fonts for Inter & JetBrains Mono -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body class="bg-[var(--color-bg-base)] text-[var(--color-text-primary)] antialiased selection:bg-[var(--color-brand-600)] selection:text-white">
-    <script>
-      // Applied synchronously, before first paint — avoids a flash of the
-      // wrong theme between the raw HTML render and React mounting/reading
-      // localStorage itself (see src/hooks/useTheme.tsx for the full logic
-      // this mirrors). No explicit choice stored means "system" — leave
-      // data-theme unset and let the CSS media query decide.
-      (function () {
-        try {
-          var stored = localStorage.getItem('odp-theme');
-          if (stored === 'light' || stored === 'dark') {
-            document.documentElement.dataset.theme = stored;
-          }
-        } catch (e) {}
-      })();
-    </script>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="/qai.png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QAI Collector — Enterprise Raw Data Platform</title>
+
+  <!-- Preconnect Google Fonts for Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+</head>
+
+<body
+  class="bg-[var(--color-bg-base)] text-[var(--color-text-primary)] antialiased selection:bg-[var(--color-brand-600)] selection:text-white">
+  <script>
+    // Applied synchronously, before first paint — avoids a flash of the
+    // wrong theme between the raw HTML render and React mounting/reading
+    // localStorage itself (see src/hooks/useTheme.tsx for the full logic
+    // this mirrors). No explicit choice stored means "system" — leave
+    // data-theme unset and let the CSS media query decide.
+    (function () {
+      try {
+        var stored = localStorage.getItem('odp-theme');
+        if (stored === 'light' || stored === 'dark') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch (e) { }
+    })();
+  </script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

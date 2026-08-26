@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Source } from '@odp/shared-types';
+import { SourceReportModal } from '../components/SourceReportModal';
 import {
   Plus,
   Pencil,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   X,
   Power,
+  FileText,
 } from 'lucide-react';
 
 export const Sources: React.FC = () => {
@@ -28,6 +30,7 @@ export const Sources: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
+  const [reportingSource, setReportingSource] = useState<Source | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -148,6 +151,15 @@ export const Sources: React.FC = () => {
       className: 'text-right',
       accessor: (s) => (
         <div className="flex justify-end gap-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            iconOnly
+            onClick={() => setReportingSource(s)}
+            title="Generate Source Intelligence PDF Report"
+          >
+            <FileText className="w-3.5 h-3.5 text-[var(--color-brand-400)]" />
+          </Button>
           <Button variant="ghost" size="sm" iconOnly onClick={() => openEditModal(s)} title="Edit">
             <Pencil className="w-3.5 h-3.5" />
           </Button>
@@ -182,7 +194,7 @@ export const Sources: React.FC = () => {
           data={data?.data || []}
           keyExtractor={(s) => s.id}
           isLoading={isLoading}
-          emptyMessage="No sources configured yet."
+          emptyMessage="No sources created yet."
           pagination={
             data
               ? {
@@ -194,6 +206,13 @@ export const Sources: React.FC = () => {
           }
         />
       </div>
+
+      {/* Source PDF Report Modal */}
+      <SourceReportModal
+        source={reportingSource}
+        isOpen={!!reportingSource}
+        onClose={() => setReportingSource(null)}
+      />
 
       {/* Create / Edit Source Modal */}
       {isModalOpen && (

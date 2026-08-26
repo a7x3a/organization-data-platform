@@ -16,8 +16,8 @@ export const createUserSchema = z.object({
     .max(50)
     .regex(/^[a-z0-9_-]+$/i, 'Username must be letters, numbers, underscores, and hyphens only'),
   password: z.string().min(8),
-  name: z.string().min(1).max(200),
-  email: z.string().email().optional(),
+  name: z.string().min(1).max(200).optional(),
+  email: z.string().email().optional().nullable(),
   roles: z
     .array(
       z.enum([
@@ -30,7 +30,8 @@ export const createUserSchema = z.object({
         'SERVICE_ACCOUNT',
       ])
     )
-    .min(1, 'At least one role is required'),
+    .min(1, 'At least one role is required')
+    .default(['COLLECTOR']),
 });
 
 export const updateUserSchema = z.object({
