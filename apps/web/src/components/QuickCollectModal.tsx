@@ -5,7 +5,7 @@ import { useCreateSource, useSources } from '../hooks/useSources';
 import { useCreateCollector, useRunCollector } from '../hooks/useCollectors';
 import { Button } from './Button';
 import { Input } from './Input';
-import { Zap, BookOpen, FileText, Music, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor, Video, Image, Archive } from 'lucide-react';
+import { Zap, BookOpen, FileText, Music, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor, Video, Image, Archive, AlertCircle } from 'lucide-react';
 import { RobotsPolicy } from '@odp/shared-types';
 import { TelegramSetupModal } from './TelegramSetupModal';
 
@@ -14,9 +14,16 @@ interface QuickCollectModalProps {
   onClose: () => void;
 }
 
-type PresetType = 'books' | 'documents' | 'audio' | 'video' | 'images' | 'datasets' | 'archives' | 'all';
+type PresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
 
 const PRESETS: { id: PresetType; label: string; description: string; icon: React.ElementType; extensions: string[] }[] = [
+  {
+    id: 'articles',
+    label: 'Web Articles & Text Knowledge',
+    description: 'Extract full page text, article bodies, headings & JSON dataset records',
+    icon: Globe,
+    extensions: ['.html', '.json'],
+  },
   {
     id: 'books',
     label: 'Books & Ebooks',
@@ -69,7 +76,7 @@ const PRESETS: { id: PresetType; label: string; description: string; icon: React
   {
     id: 'all',
     label: 'All Media & Files',
-    description: 'Discover all supported media and document formats',
+    description: 'Discover all supported media, documents and web text formats',
     icon: Sparkles,
     extensions: [],
   },
@@ -85,8 +92,6 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
   const [url, setUrl] = useState('');
   const [collectionName, setCollectionName] = useState('');
   const [selectedPresets, setSelectedPresets] = useState<PresetType[]>(['books']);
-  const [useBrowser, setUseBrowser] = useState(false);
-  const [extractWebData, setExtractWebData] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTelegramSetup, setShowTelegramSetup] = useState(false);
@@ -305,6 +310,8 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
         selectedPresets.includes('audio') ||
         selectedPresets.includes('video');
 
+      const isWebArticles = selectedPresets.includes('articles') || selectedPresets.includes('all');
+
       const collectorConfig: any = {
         startUrls: [parsedUrl.href],
         allowedDomains: [hostname],
@@ -319,9 +326,9 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
         concurrency: 4,
         requestTimeoutSeconds: 30,
         maxRetries: 3,
-        useBrowser,
+        useBrowser: true,
         robotsEnabled: true,
-        extractWebData,
+        extractWebData: isWebArticles,
       };
 
       if (isMediaUrl) {
@@ -350,7 +357,7 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
       <div className="relative w-full max-w-xl max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-elevated)] overflow-hidden my-auto">
-        {/* Modal Header */}
+        {/* Header - Pinned at top */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] flex items-center justify-center">
@@ -358,10 +365,10 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
             </div>
             <div>
               <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-                Quick Collect
+                Quick Collection Launcher
               </h2>
               <p className="text-xs text-[var(--color-text-muted)]">
-                Start collecting books, files & datasets in 1 click
+                Enter any web URL or Telegram channel to begin extracting
               </p>
             </div>
           </div>
@@ -373,77 +380,51 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
           </button>
         </div>
 
-        {/* Form Container with scrollable body & pinned footer */}
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {/* Scrollable Modal Body */}
           <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
             {error && (
-              <div className="p-3 text-xs rounded-[var(--radius-md)] bg-[var(--color-error-bg)] text-[var(--color-error-400)] border border-[var(--color-error-400)]/20 flex items-center justify-between gap-2">
-                <div className="min-w-0 flex-1">{error}</div>
-                {error.includes('Telegram') && (
-                  <button
-                    type="button"
-                    onClick={() => setShowTelegramSetup(true)}
-                    className="shrink-0 px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-                  >
-                    Setup Telegram Login
-                  </button>
-                )}
+              <div className="flex items-center gap-2 p-3 text-xs text-[var(--color-error-400)] bg-[var(--color-error-500)]/10 border border-[var(--color-error-500)]/20 rounded-[var(--radius-md)]">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="flex-1">{error}</span>
               </div>
             )}
 
-            {/* Quick status bar for Telegram */}
-            <div className="flex items-center justify-between px-3.5 py-2 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-xs">
-              <div className="flex items-center gap-2">
-                <Send className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-[var(--color-text-secondary)] font-medium">Telegram Scraper Engine:</span>
-                <span className={telegramStatus?.is_authorized ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
-                  {telegramStatus?.is_authorized ? 'Authorized & Ready' : 'Not Logged In'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  navigate('/settings');
-                }}
-                className="text-xs text-[var(--color-brand-400)] hover:underline font-medium flex items-center gap-1"
-              >
-                {telegramStatus?.is_authorized ? 'Account Settings →' : 'Setup in Settings →'}
-              </button>
-            </div>
-
+            {/* Target URL / Channel Input */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                Target Website or Telegram Channel
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
+                Target URL or Telegram Channel
               </label>
-              <Input
-                type="text"
-                placeholder="e.g. https://gov.krd/publications/ or https://t.me/kurdish_books or @channel"
-                value={url}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  try {
-                    if (val.includes('%')) {
-                      setUrl(decodeURI(val));
-                      return;
-                    }
-                  } catch {
-                    // Fallback
-                  }
-                  setUrl(val);
-                }}
-                required
-                autoFocus
-              />
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--color-text-muted)]">
+                  {url.startsWith('@') || url.includes('t.me/') ? (
+                    <Send className="w-4 h-4 text-sky-400" />
+                  ) : (
+                    <Globe className="w-4 h-4 text-[var(--color-brand-400)]" />
+                  )}
+                </div>
+                <input
+                  type="text"
+                  required
+                  placeholder="https://example.com/books or @channel_username"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-xl text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-brand-500)] focus:ring-1 focus:ring-[var(--color-brand-500)] transition-all font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Accepts any website URL, research publication, digital library, or Telegram channel name.
+              </p>
             </div>
 
+            {/* Multi-Select Category Presets */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-[var(--color-text-secondary)]">
                   Select File Categories / Presets <span className="text-[var(--color-text-muted)] font-normal">(Multi-Select)</span>
                 </label>
                 <span className="text-[11px] font-mono text-[var(--color-brand-400)] font-medium">
-                  {selectedPresets.includes('all') ? 'All Formats' : `${selectedPresets.length} selected`}
+                  {selectedPresets.includes('all') ? 'All Formats (No Filter)' : `${selectedPresets.length} selected`}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -455,10 +436,11 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
                       key={preset.id}
                       type="button"
                       onClick={() => togglePreset(preset.id)}
-                      className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors cursor-pointer ${isSelected
+                      className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors cursor-pointer ${
+                        isSelected
                           ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-text-primary)] font-medium'
                           : 'border-[var(--color-border)] bg-[var(--color-bg-base)] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]'
-                        }`}
+                      }`}
                     >
                       <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? 'text-[var(--color-brand-400)]' : ''}`} />
                       <div className="min-w-0 flex-1">
@@ -482,86 +464,19 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--color-text-secondary)] block">
-                  Collection Name <span className="text-[var(--color-text-muted)] font-normal">(Optional)</span>
+            {/* Collection Name & Options */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5">
+                  Collection / Source Name <span className="text-[var(--color-text-muted)] font-normal">(Optional)</span>
                 </label>
-                <Input
+                <input
+                  type="text"
                   placeholder="e.g. Kurdish Archive 2026"
                   value={collectionName}
                   onChange={(e) => setCollectionName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs bg-[var(--color-bg-base)] border border-[var(--color-border)] rounded-xl text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-brand-500)] focus:ring-1 focus:ring-[var(--color-brand-500)] transition-all"
                 />
-              </div>
-
-              {/* Autonomous Engine Selection */}
-              <div
-                onClick={() => setUseBrowser(!useBrowser)}
-                className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${useBrowser
-                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                  }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-brand-400)]'
-                    }`}>
-                    <Globe className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-semibold">
-                      <span>Autonomous Engine Selection</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
-                        Auto HTTP + Playwright
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                      {useBrowser
-                        ? 'Forced Playwright Chromium active for all URLs.'
-                        : 'Automatic: Fast HTTP by default, switches to Playwright Chromium on JS SPAs & Cloudflare.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
-                  }`}>
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${useBrowser ? 'translate-x-4' : 'translate-x-0'
-                    }`} />
-                </div>
-              </div>
-
-              {/* Extract Web Data & Article Texts */}
-              <div
-                onClick={() => setExtractWebData(!extractWebData)}
-                className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${extractWebData
-                  ? 'border-cyan-500 bg-cyan-500/10 shadow-sm text-[var(--color-text-primary)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                  }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${extractWebData ? 'bg-cyan-500 text-white' : 'bg-[var(--color-bg-overlay)] text-cyan-400'
-                    }`}>
-                    <Database className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-semibold">
-                      <span>Extract Web Data & Article Texts</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-cyan-500/20 text-cyan-400">
-                        JSON Datasets
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                      {extractWebData
-                        ? 'Enabled: Extracts clean body text, article content, and headings into structured JSON data.'
-                        : 'Off: Only downloadable files (PDF, audio, docs) are collected.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${extractWebData ? 'bg-cyan-500' : 'bg-[var(--color-border-strong)]'
-                  }`}>
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${extractWebData ? 'translate-x-4' : 'translate-x-0'
-                    }`} />
-                </div>
               </div>
             </div>
           </div>
@@ -573,19 +488,23 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
             </Button>
             <Button type="submit" variant="primary" disabled={isSubmitting}>
               <Zap className="w-4 h-4 mr-1.5" />
-              {isSubmitting ? 'Starting...' : 'Start Collecting'}
+              {isSubmitting ? 'Starting Run...' : 'Launch Quick Collector'}
             </Button>
           </div>
         </form>
       </div>
 
-      <TelegramSetupModal
-        isOpen={showTelegramSetup}
-        onClose={() => setShowTelegramSetup(false)}
-        onSuccess={() => {
-          apiClient.get('/telegram/status').then((r: any) => setTelegramStatus(r.data));
-        }}
-      />
+      {/* Telegram Setup Helper Modal */}
+      {showTelegramSetup && (
+        <TelegramSetupModal
+          isOpen={showTelegramSetup}
+          onClose={() => setShowTelegramSetup(false)}
+          onSuccess={() => {
+            setShowTelegramSetup(false);
+            setTelegramStatus({ is_authorized: true });
+          }}
+        />
+      )}
     </div>
   );
 };

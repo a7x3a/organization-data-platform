@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir --timeout 300 --retries 5 --user --no-deps "playw
     /root/.local/bin/playwright install chromium --with-deps
 
 COPY services/scraper/requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt && \
+    /root/.local/bin/patchright install chromium --with-deps || true
 
 # ─── Runtime stage ────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime

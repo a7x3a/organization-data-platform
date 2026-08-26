@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-type CollectorPresetType = 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
+type CollectorPresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
 
 const COLLECTOR_PRESETS: {
   id: CollectorPresetType;
@@ -47,6 +47,13 @@ const COLLECTOR_PRESETS: {
   icon: React.ElementType;
   extensions: string[];
 }[] = [
+  {
+    id: 'articles',
+    label: 'Web Articles & Text Knowledge',
+    description: 'Extract full page text, article bodies, headings & JSON dataset records',
+    icon: Globe,
+    extensions: ['.html', '.json'],
+  },
   {
     id: 'books',
     label: 'Books & Ebooks',
@@ -99,7 +106,7 @@ const COLLECTOR_PRESETS: {
   {
     id: 'all',
     label: 'All Media & Files',
-    description: 'Discover all supported media and document formats',
+    description: 'Discover all supported media, documents and web text formats',
     icon: Sparkles,
     extensions: [],
   },
@@ -138,8 +145,6 @@ export const Collectors: React.FC = () => {
   const [maxDepth, setMaxDepth] = useState(5);
   const [maxPages, setMaxPages] = useState(1000);
   const [concurrency, setConcurrency] = useState(4);
-  const [useBrowser, setUseBrowser] = useState(false);
-  const [extractWebData, setExtractWebData] = useState(false);
   const [selectedPresets, setSelectedPresets] = useState<CollectorPresetType[]>(['books']);
 
   const togglePreset = (id: CollectorPresetType) => {
@@ -185,8 +190,6 @@ export const Collectors: React.FC = () => {
     setMaxDepth(5);
     setMaxPages(1000);
     setConcurrency(4);
-    setUseBrowser(false);
-    setExtractWebData(false);
     setSelectedPresets(['books']);
     setChannels('');
     setMessageLimit(500);
@@ -231,14 +234,15 @@ export const Collectors: React.FC = () => {
       setMaxDepth(collector.configuration.maxDepth);
       setMaxPages(collector.configuration.maxPages);
       setConcurrency(collector.configuration.concurrency);
-      setUseBrowser(collector.configuration.useBrowser);
-      setExtractWebData(collector.configuration.extractWebData ?? false);
       const allowedExts = collector.configuration.allowedExtensions || [];
-      if (allowedExts.length === 0) {
+      if (allowedExts.length === 0 && !collector.configuration.extractWebData) {
         setSelectedPresets(['all']);
       } else {
         const matched = COLLECTOR_PRESETS.filter(
-          (p) => p.id !== 'all' && p.extensions.some((ext) => allowedExts.includes(ext))
+          (p) => p.id !== 'all' && (
+            (p.id === 'articles' && collector.configuration.extractWebData) ||
+            p.extensions.some((ext) => allowedExts.includes(ext))
+          )
         ).map((p) => p.id);
         setSelectedPresets(matched.length > 0 ? matched : ['all']);
       }
@@ -328,6 +332,8 @@ export const Collectors: React.FC = () => {
     const existingWebConfig =
       editingCollector && isWebCollector(editingCollector) ? editingCollector.configuration : undefined;
 
+    const isWebArticles = selectedPresets.includes('articles') || selectedPresets.includes('all');
+
     const webConfig = {
       allowedUrlPatterns: [],
       excludedUrlPatterns: [],
@@ -344,8 +350,8 @@ export const Collectors: React.FC = () => {
       maxDepth,
       maxPages,
       concurrency,
-      useBrowser,
-      extractWebData,
+      useBrowser: true,
+      extractWebData: isWebArticles,
     };
 
     if (editingCollector) {
@@ -847,79 +853,6 @@ export const Collectors: React.FC = () => {
                   </>
                 )}
 
-                {collectorType === 'WEB' && (
-                  <div className="space-y-3 pt-1">
-                    {/* Autonomous Engine Selection */}
-                    <div
-                      onClick={() => setUseBrowser(!useBrowser)}
-                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${useBrowser
-                        ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
-                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                        }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-brand-400)]'
-                          }`}>
-                          <Globe className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-xs font-semibold">
-                            <span>Autonomous Engine Selection</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
-                              Auto HTTP + Playwright
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                            {useBrowser
-                              ? 'Forced Playwright Chromium active for all URLs.'
-                              : 'Automatic: Fast HTTP by default, switches to Playwright Chromium on JS SPAs & Cloudflare.'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
-                        }`}>
-                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${useBrowser ? 'translate-x-4' : 'translate-x-0'
-                          }`} />
-                      </div>
-                    </div>
-
-                    {/* Extract Web Data & Article Texts */}
-                    <div
-                      onClick={() => setExtractWebData(!extractWebData)}
-                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${extractWebData
-                        ? 'border-cyan-500 bg-cyan-500/10 shadow-sm text-[var(--color-text-primary)]'
-                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                        }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${extractWebData ? 'bg-cyan-500 text-white' : 'bg-[var(--color-bg-overlay)] text-cyan-400'
-                          }`}>
-                          <Database className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-xs font-semibold">
-                            <span>Extract Web Data & Article Texts</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-cyan-500/20 text-cyan-400">
-                              JSON Datasets
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                            {extractWebData
-                              ? 'Enabled: Extracts clean body text, article content, and headings into structured JSON data.'
-                              : 'Off: Only downloadable files (PDF, audio, docs) are collected.'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${extractWebData ? 'bg-cyan-500' : 'bg-[var(--color-border-strong)]'
-                        }`}>
-                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${extractWebData ? 'translate-x-4' : 'translate-x-0'
-                          }`} />
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Footer Actions */}

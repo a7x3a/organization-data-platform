@@ -146,7 +146,7 @@ class CollectionJob:
             # Autonomous Auto-Engine & Stealth Detection:
             # If the user hasn't explicitly set spider options, inspect start URLs for known JS/SPA/Anti-Bot sites
             # (Wix, Vercel, Netlify, WordPress.com, Cloudflare, etc.) and automatically activate Scrapling & Stealth Playwright.
-            known_js_domains = ("gov.krd", "wixsite.com", "wix.com", "usrfiles.com", "vercel.app", "netlify.app", "notion.site", "gitbook.io", "medium.com", "archive.org")
+            known_js_domains = ("gov.krd", "wixsite.com", "wix.com", "usrfiles.com", "vercel.app", "netlify.app", "notion.site", "gitbook.io", "medium.com", "archive.org", "basnews.com", "rudaw.net", "kurdistan24.net", "nrttv.com")
             start_urls = self._cfg.get("startUrls", [])
             auto_js_site = any(any(dom in url.lower() for dom in known_js_domains) for url in start_urls)
 
@@ -193,9 +193,9 @@ class CollectionJob:
                     on_page_data=on_page_data,
                 )
 
-            # Step 2: Autonomous Cascade Fallback — if primary engine found 0 files on a dynamic site,
+            # Step 2: Autonomous Cascade Fallback — if primary engine found 0 files/pages on a dynamic site,
             # automatically cascade through Playwright Chromium & Scrapling Stealth to guarantee complete coverage.
-            if not crawl_result.files_discovered and not crawl_result.cancelled:
+            if (not crawl_result.files_discovered and crawl_result.pages_crawled <= 1) and not crawl_result.cancelled:
                 is_canc = await self._pipeline.is_cancelled() if self._pipeline.is_cancelled else False
                 if not is_canc:
                     log.info("crawl_found_0_files_initiating_playwright_stealth_cascade", run_id=self._run_db_id)
@@ -205,6 +205,7 @@ class CollectionJob:
                             should_cancel=self._pipeline.is_cancelled,
                             on_page_crawled=on_page_crawled,
                             on_file_found=on_file_found,
+                            on_page_data=on_page_data,
                         )
                         if browser_result.files_discovered or browser_result.pages_crawled > crawl_result.pages_crawled:
                             crawl_result = browser_result
@@ -220,6 +221,7 @@ class CollectionJob:
                                 should_cancel=self._pipeline.is_cancelled,
                                 on_page_crawled=on_page_crawled,
                                 on_file_found=on_file_found,
+                                on_page_data=on_page_data,
                                 check_pause=self._pipeline.wait_if_paused,
                             )
                             if scrapling_result.files_discovered or scrapling_result.pages_crawled > crawl_result.pages_crawled:
