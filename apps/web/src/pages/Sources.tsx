@@ -31,6 +31,7 @@ export const Sources: React.FC = () => {
   const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [reportingSource, setReportingSource] = useState<Source | null>(null);
+  const [showAllReport, setShowAllReport] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -174,17 +175,29 @@ export const Sources: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Clean Page Header matching Collectors page */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
             {t('sources.title')}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">{t('sources.subtitle')}</p>
         </div>
-        <Button onClick={openCreateModal}>
-          <Plus className="w-4 h-4" />
-          {t('sources.create')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {data && data.data.length > 0 && (
+            <Button
+              variant="secondary"
+              onClick={() => setShowAllReport(true)}
+              className="text-xs font-semibold text-[var(--color-brand-400)] border-[var(--color-brand-500)]/30 hover:bg-[var(--color-brand-500)]/10"
+            >
+              <FileText className="w-3.5 h-3.5 mr-1.5 text-[var(--color-brand-400)]" />
+              Print Sources Dossier
+            </Button>
+          )}
+          <Button onClick={openCreateModal}>
+            <Plus className="w-4 h-4" />
+            {t('sources.create')}
+          </Button>
+        </div>
       </div>
 
       {/* Single Table Card matching Collectors page */}
@@ -210,8 +223,12 @@ export const Sources: React.FC = () => {
       {/* Source PDF Report Modal */}
       <SourceReportModal
         source={reportingSource}
-        isOpen={!!reportingSource}
-        onClose={() => setReportingSource(null)}
+        allSources={data?.data || []}
+        isOpen={Boolean(reportingSource || showAllReport)}
+        onClose={() => {
+          setReportingSource(null);
+          setShowAllReport(false);
+        }}
       />
 
       {/* Create / Edit Source Modal */}

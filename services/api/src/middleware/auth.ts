@@ -36,10 +36,29 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const payload = jwt.verify(token, env.AUTH_ACCESS_SECRET) as JwtPayload;
 
     // Verify user still exists in database and has not been deleted or deactivated
-    const dbUser = await prisma.user.findUnique({
+    let dbUser = await prisma.user.findUnique({
       where: { id: payload.sub },
       select: { id: true, isActive: true, roles: true, username: true },
     });
+
+    if (!dbUser && (payload.roles?.includes(UserRole.SERVICE_ACCOUNT) || payload.username === 'scraper-worker')) {
+      dbUser = await prisma.user.findUnique({
+        where: { username: 'scraper-worker' },
+        select: { id: true, isActive: true, roles: true, username: true },
+      });
+      if (!dbUser) {
+        dbUser = await prisma.user.create({
+          data: {
+            username: 'scraper-worker',
+            name: 'Scraper Worker',
+            passwordHash: 'unused',
+            isActive: true,
+            roles: [UserRole.SERVICE_ACCOUNT],
+          },
+          select: { id: true, isActive: true, roles: true, username: true },
+        });
+      }
+    }
 
     if (!dbUser || !dbUser.isActive) {
       res.status(401).json({
@@ -51,6 +70,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     req.user = {
       ...payload,
+      sub: dbUser.id,
       roles: dbUser.roles as UserRole[],
       username: dbUser.username,
     };
