@@ -5,7 +5,7 @@ Only launched when collector configuration has use_browser = True.
 Chromium is NOT started for normal HTTP pages.
 """
 import asyncio
-from typing import Awaitable, Callable, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 
 import httpx
 import structlog
