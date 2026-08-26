@@ -129,6 +129,7 @@ class CollectionJob:
                 robots_enabled=self._cfg.get("robotsEnabled", True),
                 use_scrapling=use_scrapling,
                 stealth_mode=stealth_mode,
+                extract_web_data=self._cfg.get("extractWebData", False),
             )
 
             async def on_page_crawled() -> None:
@@ -138,6 +139,9 @@ class CollectionJob:
             async def on_file_found() -> None:
                 manifest.record_file_found()
                 await self._pipeline.report_progress(manifest)
+
+            async def on_page_data(page_doc: dict[str, Any]) -> None:
+                await self._save_web_data_record(page_doc, manifest, metadata)
 
             # Autonomous Auto-Engine & Stealth Detection:
             # If the user hasn't explicitly set spider options, inspect start URLs for known JS/SPA/Anti-Bot sites
@@ -161,6 +165,7 @@ class CollectionJob:
                         should_cancel=self._pipeline.is_cancelled,
                         on_page_crawled=on_page_crawled,
                         on_file_found=on_file_found,
+                        on_page_data=on_page_data,
                         check_pause=self._pipeline.wait_if_paused,
                     )
                 except Exception as exc:
@@ -174,6 +179,7 @@ class CollectionJob:
                         should_cancel=self._pipeline.is_cancelled,
                         on_page_crawled=on_page_crawled,
                         on_file_found=on_file_found,
+                        on_page_data=on_page_data,
                     )
                 except Exception as exc:
                     log.warning("browser_engine_failed_attempting_fallback", run_id=self._run_db_id, error=str(exc))
@@ -184,6 +190,7 @@ class CollectionJob:
                     should_cancel=self._pipeline.is_cancelled,
                     on_page_crawled=on_page_crawled,
                     on_file_found=on_file_found,
+                    on_page_data=on_page_data,
                 )
 
             # Step 2: Autonomous Cascade Fallback — if primary engine found 0 files on a dynamic site,
@@ -392,6 +399,63 @@ class CollectionJob:
                     error=error_str,
                 )
                 await asyncio.sleep(delay)
+
+    async def _save_web_data_record(
+        self,
+        page_doc: dict[str, Any],
+        manifest: ManifestWriter,
+        metadata: MetadataWriter,
+    ) -> None:
+        """Save extracted web page text & article body into structured data dataset."""
+        import json
+        import hashlib
+        from app.downloader.downloader import sanitize_filename
+        from app.pipeline.file_pipeline import canonical_filename
+
+        body_text = page_doc.get("body_text", "").strip()
+        if not body_text or len(body_text) < 30:
+            return
+
+        raw_bytes = json.dumps(page_doc, ensure_ascii=False, indent=2).encode("utf-8")
+        sha256 = hashlib.sha256(raw_bytes).hexdigest()
+
+        if await self._pipeline.is_duplicate(sha256):
+            return
+
+        title = page_doc.get("title", "") or "web_content"
+        clean_title = sanitize_filename(title)
+
+        file_id = await self._pipeline.reserve_file_id(
+            sourceUrl=page_doc.get("url"),
+            fileName=f"{clean_title}.json",
+            extension=".json",
+            mimeType="application/json",
+            fileSize=len(raw_bytes),
+            sha256=sha256,
+        )
+
+        canon_name = canonical_filename(f"{clean_title}.json", file_id, ".json")
+        r2_key = f"{self._run_folder_key}/data/web_content/{canon_name}"
+
+        try:
+            storage.upload_bytes(raw_bytes, r2_key, "application/json")
+            manifest.record_file_downloaded(size=len(raw_bytes))
+            metadata.append({
+                "file_id": file_id,
+                "file_name": canon_name,
+                "original_filename": f"{clean_title}.json",
+                "sha256": sha256,
+                "size_bytes": len(raw_bytes),
+                "source_url": page_doc.get("url"),
+                "r2_key": r2_key,
+                "category": "data/web_content",
+                "type": "web_page_data",
+                "title": title,
+                "word_count": page_doc.get("word_count", 0),
+            }, category="data/web_content")
+            log.info("web_data_extracted_and_stored", url=page_doc.get("url"), title=title, r2_key=r2_key)
+        except Exception as e:
+            log.warning("web_data_storage_failed", url=page_doc.get("url"), error=str(e))
 
     async def _finalize(
         self,

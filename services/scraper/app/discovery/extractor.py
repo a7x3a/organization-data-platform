@@ -12,6 +12,7 @@ same job, plus the media/JSON extraction this module adds on top.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -147,27 +148,40 @@ def extract_page_links_with_context(html: str, base_url: str) -> list[tuple[str,
         text = (node.text() or "").strip()
         title_attr = (node.attributes.get("title") or node.attributes.get("aria-label") or "").strip()
         
-        # Look for surrounding card/item heading if anchor text is short or generic
+        # Look for surrounding card/item heading or accordion panel if anchor text is short or generic
         heading = ""
+        accordion_group = ""
         parent = node.parent
-        for _ in range(4):
+        for _ in range(6):
             if parent is None:
                 break
+            # Check for accordion group header or panel
+            acc_header = parent.css_first(".accordion-header, .accordion-button, .card-header, .panel-heading, summary, [data-bs-toggle='collapse'], [data-toggle='collapse']")
+            if acc_header and acc_header.text():
+                acc_text = acc_header.text().strip()
+                if acc_text and len(acc_text) > 2 and not accordion_group:
+                    accordion_group = acc_text
+
             h_node = parent.css_first("h1, h2, h3, h4, h5, h6, .title, .headline, .card-title, .publication-title, strong")
-            if h_node and h_node.text():
+            if h_node and h_node.text() and not heading:
                 h_text = h_node.text().strip()
                 if h_text and len(h_text) > 2:
                     heading = h_text
-                    break
             parent = parent.parent
+
+        best_name = text if (text and len(text) > 2) else (title_attr if title_attr else (heading if heading else page_title))
+        if accordion_group and text and len(text) > 2:
+            # If link text is an issue number or short title, keep it clear
+            best_name = text
 
         context = {
             "text": text,
             "title_attr": title_attr,
             "heading": heading,
+            "accordion_group": accordion_group,
             "page_title": page_title,
             "page_url": base_url,
-            "best_name": text if (text and len(text) > 2) else (title_attr if title_attr else (heading if heading else page_title)),
+            "best_name": best_name,
         }
         results.append((full_url, context))
 
@@ -446,4 +460,54 @@ def extract_page_text(html: str) -> str:
                     lines.append(clean)
 
     return "\n".join(lines)
+
+
+def extract_structured_page_data(html: str, url: str) -> dict[str, Any]:
+    """
+    Extract a comprehensive structured article / webpage document record for NLP & data platforms:
+    - URL, title, meta description, author, language
+    - Headings hierarchy (H1-H6)
+    - Full clean body text
+    - Word count & stats
+    - Discovered downloadable files / media links
+    """
+    tree = HTMLParser(html)
+    metadata = extract_html_metadata(html, url)
+    body_text = extract_page_text(html)
+
+    headings = []
+    for h in tree.css("h1, h2, h3, h4, h5, h6"):
+        htext = (h.text() or "").strip()
+        if htext:
+            headings.append({"tag": h.tag, "text": htext})
+
+    words = body_text.split()
+    word_count = len(words)
+
+    # Extract associated file links on this specific page
+    page_links = extract_page_links_with_context(html, url)
+    downloadable_files = []
+    for link_url, ctx in page_links:
+        ext = link_url.split("?")[0].split("#")[0].lower()
+        if any(ext.endswith(target_ext) for target_ext in (
+            ".pdf", ".epub", ".mobi", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".zip", ".rar", ".mp3", ".mp4"
+        )):
+            downloadable_files.append({
+                "url": link_url,
+                "title": ctx.get("best_name") or ctx.get("text") or "",
+                "accordion_group": ctx.get("accordion_group") or "",
+            })
+
+    return {
+        "url": url,
+        "title": metadata.get("title") or "",
+        "description": metadata.get("description") or "",
+        "author": metadata.get("author") or "",
+        "language": metadata.get("language") or "ku",
+        "headings": headings,
+        "body_text": body_text,
+        "word_count": word_count,
+        "downloadable_files": downloadable_files,
+        "crawled_at": datetime.now(timezone.utc).isoformat(),
+    }
 

@@ -16,7 +16,7 @@ import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Collector, isTelegramCollector, isWebCollector } from '@odp/shared-types';
 import { CollectorTypeInput, STANDARDIZED_FILE_GROUPS } from '../types/forms';
-import { Plus, Play, Power, Send, Pencil, Trash2, Globe, X } from 'lucide-react';
+import { Plus, Play, Power, Send, Pencil, Trash2, Globe, X, Database } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = STANDARDIZED_FILE_GROUPS.map((g) => ({
@@ -58,6 +58,7 @@ export const Collectors: React.FC = () => {
   const [maxPages, setMaxPages] = useState(1000);
   const [concurrency, setConcurrency] = useState(4);
   const [useBrowser, setUseBrowser] = useState(false);
+  const [extractWebData, setExtractWebData] = useState(false);
   // Off by default — discover every file type the crawler finds, matching
   // the scraper's own "discover everything unless narrowed" default
   // (empty allowedExtensions means no filter, not "nothing allowed").
@@ -97,6 +98,7 @@ export const Collectors: React.FC = () => {
     setMaxPages(1000);
     setConcurrency(4);
     setUseBrowser(false);
+    setExtractWebData(false);
     setRestrictFileTypes(false);
     setFileTypeCategories([]);
     setChannels('');
@@ -144,8 +146,8 @@ export const Collectors: React.FC = () => {
       setFileTypeCategories(
         restricted
           ? FILE_TYPE_CATEGORIES.filter((cat) =>
-              cat.extensions.some((ext) => allowedExts.includes(ext))
-            ).map((cat) => cat.label)
+            cat.extensions.some((ext) => allowedExts.includes(ext))
+          ).map((cat) => cat.label)
           : []
       );
     } else if (isWebCollector(collector)) {
@@ -156,6 +158,7 @@ export const Collectors: React.FC = () => {
       setMaxPages(collector.configuration.maxPages);
       setConcurrency(collector.configuration.concurrency);
       setUseBrowser(collector.configuration.useBrowser);
+      setExtractWebData(collector.configuration.extractWebData ?? false);
       const restricted = collector.configuration.allowedExtensions.length > 0;
       setRestrictFileTypes(restricted);
       setFileTypeCategories(
@@ -282,6 +285,7 @@ export const Collectors: React.FC = () => {
       maxPages,
       concurrency,
       useBrowser,
+      extractWebData,
     };
 
     if (editingCollector) {
@@ -635,13 +639,12 @@ export const Collectors: React.FC = () => {
                                 setRestrictFileTypes(true);
                                 setFileTypeCategories(['PDF Documents', 'E-Books & Publications']);
                               }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                restrictFileTypes &&
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
                                 fileTypeCategories.includes('PDF Documents') &&
                                 fileTypeCategories.includes('E-Books & Publications')
-                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                              }`}
+                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                                }`}
                             >
                               📚 Books & Ebooks Preset
                             </button>
@@ -651,13 +654,12 @@ export const Collectors: React.FC = () => {
                                 setRestrictFileTypes(true);
                                 setFileTypeCategories(['PDF Documents', 'Office Documents']);
                               }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                restrictFileTypes &&
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
                                 fileTypeCategories.includes('PDF Documents') &&
                                 fileTypeCategories.includes('Office Documents')
-                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                              }`}
+                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                                }`}
                             >
                               📄 Research Docs Preset
                             </button>
@@ -667,13 +669,12 @@ export const Collectors: React.FC = () => {
                                 setRestrictFileTypes(true);
                                 setFileTypeCategories(['Audio Files']);
                               }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                restrictFileTypes &&
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
                                 fileTypeCategories.includes('Audio Files') &&
                                 fileTypeCategories.length === 1
-                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                              }`}
+                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                                }`}
                             >
                               🎧 Audiobooks Preset
                             </button>
@@ -683,13 +684,12 @@ export const Collectors: React.FC = () => {
                                 setRestrictFileTypes(true);
                                 setFileTypeCategories(['Data & Datasets']);
                               }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                restrictFileTypes &&
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
                                 fileTypeCategories.includes('Data & Datasets') &&
                                 fileTypeCategories.length === 1
-                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                              }`}
+                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
+                                }`}
                             >
                               📊 Datasets Preset
                             </button>
@@ -699,11 +699,10 @@ export const Collectors: React.FC = () => {
                                 setRestrictFileTypes(false);
                                 setFileTypeCategories([]);
                               }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                !restrictFileTypes
-                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-muted)]'
-                              }`}
+                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${!restrictFileTypes
+                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
+                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-muted)]'
+                                }`}
                             >
                               🌐 All Files (No Filter)
                             </button>
@@ -848,39 +847,75 @@ export const Collectors: React.FC = () => {
                 )}
 
                 {collectorType === 'WEB' && (
-                  <div
-                    onClick={() => setUseBrowser(!useBrowser)}
-                    className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${useBrowser
-                      ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
-                      }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-brand-400)]'
-                        }`}>
-                        <Globe className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-xs font-semibold">
-                          <span>Autonomous Engine Selection</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
-                            Auto HTTP + Playwright
-                          </span>
+                  <>
+                    <div
+                      onClick={() => setUseBrowser(!useBrowser)}
+                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${useBrowser
+                        ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
+                        }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${useBrowser ? 'bg-[var(--color-brand-500)] text-white' : 'bg-[var(--color-bg-overlay)] text-[var(--color-brand-400)]'
+                          }`}>
+                          <Globe className="w-4 h-4" />
                         </div>
-                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                          {useBrowser
-                            ? 'Forced Playwright Chromium active for all URLs.'
-                            : 'Automatic: Fast HTTP by default, switches to Playwright Chromium on JS SPAs & Cloudflare.'}
-                        </p>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-xs font-semibold">
+                            <span>Autonomous Engine Selection</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[var(--color-brand-500)]/20 text-[var(--color-brand-400)]">
+                              Auto HTTP + Playwright
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                            {useBrowser
+                              ? 'Forced Playwright Chromium active for all URLs.'
+                              : 'Automatic: Fast HTTP by default, switches to Playwright Chromium on JS SPAs & Cloudflare.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
+                        }`}>
+                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${useBrowser ? 'translate-x-4' : 'translate-x-0'
+                          }`} />
                       </div>
                     </div>
 
-                    <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${useBrowser ? 'bg-[var(--color-brand-500)]' : 'bg-[var(--color-border-strong)]'
-                      }`}>
-                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${useBrowser ? 'translate-x-4' : 'translate-x-0'
-                        }`} />
+                    <div
+                      onClick={() => setExtractWebData(!extractWebData)}
+                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${extractWebData
+                        ? 'border-cyan-500 bg-cyan-500/10 shadow-sm text-[var(--color-text-primary)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
+                        }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${extractWebData ? 'bg-cyan-500 text-white' : 'bg-[var(--color-bg-overlay)] text-cyan-400'
+                          }`}>
+                          <Database className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-xs font-semibold">
+                            <span>Extract Web Data & Article Texts</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-cyan-500/20 text-cyan-400">
+                              JSON Datasets
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                            {extractWebData
+                              ? 'Enabled: Extracts clean body text, article content, and headings into structured JSON data.'
+                              : 'Off: Only downloadable files (PDF, audio, docs) are collected.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${extractWebData ? 'bg-cyan-500' : 'bg-[var(--color-border-strong)]'
+                        }`}>
+                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${extractWebData ? 'translate-x-4' : 'translate-x-0'
+                          }`} />
+                      </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
 

@@ -115,10 +115,21 @@ export const RunDetail: React.FC = () => {
   const pendingCount = files.filter((f) => !f.approvalStatus || f.approvalStatus === ApprovalStatus.PENDING).length;
 
   // Categorize files for filtering and pruning
-  const isPdf = (f: CollectedFile) => {
+  const isOcrPdf = (f: CollectedFile) => {
+    const r2 = (f.r2Key || '').toLowerCase();
+    return r2.includes('pdf/ocr');
+  };
+  const isDigitalPdf = (f: CollectedFile) => {
     const ext = (f.extension || '').toLowerCase();
     const mime = (f.mimeType || '').toLowerCase();
+    const r2 = (f.r2Key || '').toLowerCase();
+    if (r2.includes('pdf/ocr')) return false;
     return ext === '.pdf' || ext === 'pdf' || mime.includes('pdf');
+  };
+  const isPdf = (f: CollectedFile) => isDigitalPdf(f) || isOcrPdf(f);
+  const isWebData = (f: CollectedFile) => {
+    const r2 = (f.r2Key || '').toLowerCase();
+    return r2.includes('data/web_content') || r2.includes('web_data');
   };
   const isEbook = (f: CollectedFile) => {
     const ext = (f.extension || '').toLowerCase();
@@ -145,10 +156,13 @@ export const RunDetail: React.FC = () => {
   };
   const isData = (f: CollectedFile) => {
     const ext = (f.extension || '').toLowerCase();
-    return ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'].includes(ext);
+    return ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'].includes(ext) && !isWebData(f);
   };
 
+  const digitalPdfCount = files.filter(isDigitalPdf).length;
+  const ocrPdfCount = files.filter(isOcrPdf).length;
   const pdfCount = files.filter(isPdf).length;
+  const webDataCount = files.filter(isWebData).length;
   const ebookCount = files.filter(isEbook).length;
   const docCount = files.filter(isDoc).length;
   const audioCount = files.filter(isAudio).length;
@@ -158,6 +172,9 @@ export const RunDetail: React.FC = () => {
 
   const filteredFiles = files.filter((f) => {
     if (typeFilter === 'all') return true;
+    if (typeFilter === 'digital') return isDigitalPdf(f);
+    if (typeFilter === 'ocr') return isOcrPdf(f);
+    if (typeFilter === 'web_data') return isWebData(f);
     if (typeFilter === 'pdf') return isPdf(f);
     if (typeFilter === 'ebooks') return isEbook(f);
     if (typeFilter === 'documents') return isDoc(f);
@@ -799,20 +816,56 @@ export const RunDetail: React.FC = () => {
             </span>
           </button>
 
-          {pdfCount > 0 && (
+          {digitalPdfCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('pdf')}
+              onClick={() => setTypeFilter('digital')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                typeFilter === 'pdf'
+                typeFilter === 'digital'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Digital PDF</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-emerald-400">
+                {digitalPdfCount}
+              </span>
+            </button>
+          )}
+
+          {ocrPdfCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('ocr')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'ocr'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
                   : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
               }`}
             >
               <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-              <span>{t('files.filter.pdf')}</span>
+              <span>OCR / Scanned PDF</span>
               <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-amber-400">
-                {pdfCount}
+                {ocrPdfCount}
+              </span>
+            </button>
+          )}
+
+          {webDataCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setTypeFilter('web_data')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                typeFilter === 'web_data'
+                  ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+                  : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Web Data</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-[var(--color-bg-base)] text-cyan-400">
+                {webDataCount}
               </span>
             </button>
           )}

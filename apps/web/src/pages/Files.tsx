@@ -451,15 +451,39 @@ export const Files: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => { setFileTypeFilter('pdf'); setPage(1); }}
+          onClick={() => { setFileTypeFilter('digital'); setPage(1); }}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-            fileTypeFilter === 'pdf'
+            fileTypeFilter === 'digital'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Digital PDF</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('ocr'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'ocr'
               ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
               : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
           }`}
         >
           <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-          <span>{t('files.filter.pdf')}</span>
+          <span>OCR / Scanned PDF</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setFileTypeFilter('web_data'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+            fileTypeFilter === 'web_data'
+              ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
+              : 'bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border)]'
+          }`}
+        >
+          <Database className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Web Data</span>
         </button>
         <button
           type="button"

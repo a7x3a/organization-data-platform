@@ -1,3 +1,5 @@
+import fs from 'fs/promises';
+import path from 'path';
 import crypto from 'crypto';
 import { prisma } from '../config/prisma';
 import { env } from '../config/env';
@@ -36,7 +38,17 @@ export async function listFiles(query: {
   const { skip, take } = toPrismaSkipTake(pagination);
 
   const where: Record<string, unknown> = {};
-  if (query.collectionRunId) where.collectionRunId = query.collectionRunId;
+  if (query.collectionRunId) {
+    const run = await prisma.collectionRun.findFirst({
+      where: { OR: [{ id: query.collectionRunId }, { runId: query.collectionRunId }] },
+      select: { id: true },
+    });
+    if (run) {
+      where.collectionRunId = run.id;
+    } else {
+      where.collectionRunId = query.collectionRunId;
+    }
+  }
   if (query.sourceId) where.sourceId = query.sourceId;
   if (query.status) where.status = query.status;
   if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
@@ -56,6 +68,23 @@ export async function listFiles(query: {
       where.OR = [
         { extension: { in: ['.pdf', 'pdf'] } },
         { mimeType: { contains: 'pdf', mode: 'insensitive' } },
+        { r2Key: { contains: '/pdf/', mode: 'insensitive' } },
+      ];
+    } else if (cat === 'digital' || cat === 'pdf_digital' || cat === 'digital_pdf') {
+      where.OR = [
+        { r2Key: { contains: '/pdf/digital/' } },
+        { r2Key: { contains: '/pdf/native/decoded/' } },
+        { r2Key: { contains: '/pdf/native/' } },
+      ];
+    } else if (cat === 'ocr' || cat === 'pdf_ocr' || cat === 'ocr_pdf') {
+      where.OR = [
+        { r2Key: { contains: '/pdf/ocr/' } },
+        { r2Key: { contains: '/ocr/' } },
+      ];
+    } else if (cat === 'web_data' || cat === 'web' || cat === 'articles') {
+      where.OR = [
+        { r2Key: { contains: '/data/web_content/' } },
+        { r2Key: { contains: '/web_content/' } },
       ];
     } else if (cat === 'ebooks' || cat === 'books') {
       where.OR = [
@@ -436,53 +465,190 @@ export async function deleteFile(id: string) {
 }
 
 export async function syncStorageDirectories() {
-  const files = await prisma.collectedFile.findMany({
-    where: { r2Key: { not: null } },
-    select: { id: true, r2Key: true },
+  const dbFiles = await prisma.collectedFile.findMany({
+    select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true },
   });
 
   let syncedCount = 0;
   let prunedCount = 0;
+  let indexedNewCount = 0;
 
-  for (const f of files) {
-    if (!f.r2Key) continue;
-    const exists = await storageProvider.exists(f.r2Key);
-    if (exists) {
-      syncedCount++;
-    } else {
-      try {
-        await prisma.collectedFile.delete({ where: { id: f.id } });
-        prunedCount++;
-      } catch {
-        // Ignore if already deleted
+  const existingR2KeysInDb = new Set<string>();
+
+  // 1. Reconcile DB -> Storage: verify every file in DB still physically exists
+  for (const f of dbFiles) {
+    if (f.r2Key) {
+      const exists = await storageProvider.exists(f.r2Key);
+      if (exists) {
+        existingR2KeysInDb.add(f.r2Key);
+        syncedCount++;
+      } else {
+        try {
+          await prisma.collectedFile.delete({ where: { id: f.id } });
+          prunedCount++;
+        } catch {
+          // Ignore if already deleted
+        }
+      }
+    } else if (f.status === 'DUPLICATE' || f.status === 'FAILED' || f.status === 'SKIPPED') {
+      // If a ghost duplicate or failed record has no matching physical file in DB, prune it
+      if (f.sha256) {
+        const hasActiveUploaded = dbFiles.some(
+          (other) => other.id !== f.id && other.sha256 === f.sha256 && other.status === 'UPLOADED' && other.r2Key
+        );
+        if (!hasActiveUploaded) {
+          try {
+            await prisma.collectedFile.delete({ where: { id: f.id } });
+            prunedCount++;
+          } catch {
+            // ignore
+          }
+        }
       }
     }
   }
 
+  // 2. Reconcile Storage -> DB: scan local storage folder to index any uncataloged files
   try {
-    const activeRunFiles = await prisma.collectedFile.findMany({
-      where: { collectionRunId: { not: null } },
-      select: { collectionRunId: true },
-      distinct: ['collectionRunId'],
-    });
-    const activeRunIds = new Set(activeRunFiles.map((f) => f.collectionRunId).filter((id): id is string => Boolean(id)));
+    const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
+    const rawRoot = path.join(localStorageDir, '00_raw');
 
+    async function walkDir(dir: string, fileList: string[] = []): Promise<string[]> {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            await walkDir(fullPath, fileList);
+          } else if (entry.isFile()) {
+            fileList.push(fullPath);
+          }
+        }
+      } catch {
+        // directory may not exist yet
+      }
+      return fileList;
+    }
+
+    const diskFiles = await walkDir(rawRoot);
+    const sources = await prisma.source.findMany();
+    const sourceMap = new Map(sources.map((s) => [s.slug, s.id]));
+    const runs = await prisma.collectionRun.findMany();
+    const runMap = new Map(runs.map((r) => [r.runId, r.id]));
+
+    for (const diskFile of diskFiles) {
+      const relKey = path.relative(localStorageDir, diskFile).replace(/\\/g, '/');
+      const ext = path.extname(diskFile).toLowerCase();
+      const baseName = path.basename(diskFile);
+
+      // Skip internal manifest & jsonl files from being indexed as standalone collected files
+      if (baseName === 'manifest.json' || baseName === 'metadata.jsonl') {
+        continue;
+      }
+
+      if (existingR2KeysInDb.has(relKey)) {
+        continue;
+      }
+
+      // Check if already in DB
+      const existingInDb = await prisma.collectedFile.findFirst({ where: { r2Key: relKey } });
+      if (existingInDb) {
+        existingR2KeysInDb.add(relKey);
+        continue;
+      }
+
+      // Parse path structure: 00_raw/{type}/{sourceSlug}/{runId}/...
+      const parts = relKey.split('/');
+      if (parts.length >= 3) {
+        const sourceSlug = parts[2];
+        let sourceId = sourceMap.get(sourceSlug);
+        if (!sourceId) {
+          // Auto-create source if not found
+          const newSource = await prisma.source.create({
+            data: {
+              name: sourceSlug.replace(/[-_]/g, ' ').toUpperCase(),
+              slug: sourceSlug,
+              baseUrl: `https://${sourceSlug}.com`,
+            },
+          });
+          sourceId = newSource.id;
+          sourceMap.set(sourceSlug, sourceId);
+        }
+
+        let collectionRunId: string | null = null;
+        if (parts.length >= 4 && parts[3].includes('_run_')) {
+          const runKey = parts[3];
+          collectionRunId = runMap.get(runKey) || null;
+        }
+
+        try {
+          const fileBuf = await fs.readFile(diskFile);
+          const sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex');
+          const stat = await fs.stat(diskFile);
+          const seq = (await prisma.collectedFile.count()) + 1;
+          const fileId = formatFileId(seq);
+
+          await prisma.collectedFile.create({
+            data: {
+              fileId,
+              sourceId,
+              collectionRunId,
+              fileName: baseName,
+              originalFilename: baseName,
+              canonicalFilename: canonicalFilename(baseName, fileId, ext),
+              extension: ext,
+              mimeType: ext === '.pdf' ? 'application/pdf' : 'application/octet-stream',
+              fileSize: BigInt(stat.size),
+              sha256,
+              r2Key: relKey,
+              status: 'UPLOADED',
+              downloadedAt: stat.mtime || new Date(),
+            },
+          });
+          existingR2KeysInDb.add(relKey);
+          indexedNewCount++;
+          syncedCount++;
+        } catch (err) {
+          logger.warn({ diskFile, err }, 'failed_to_index_discovered_disk_file');
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'storage_directory_scan_failed');
+  }
+
+  // 3. Recalculate run statistics in database to match actual files
+  try {
     const allRuns = await prisma.collectionRun.findMany({ select: { id: true } });
-    const emptyRunIds = allRuns.map((r) => r.id).filter((id) => !activeRunIds.has(id));
-
-    if (emptyRunIds.length > 0) {
-      await prisma.collectionRun.deleteMany({
-        where: { id: { in: emptyRunIds } },
+    for (const r of allRuns) {
+      const actualUploadedCount = await prisma.collectedFile.count({
+        where: { collectionRunId: r.id, status: 'UPLOADED' },
+      });
+      const actualDuplicateCount = await prisma.collectedFile.count({
+        where: { collectionRunId: r.id, status: 'DUPLICATE' },
+      });
+      const actualFailedCount = await prisma.collectedFile.count({
+        where: { collectionRunId: r.id, status: 'FAILED' },
+      });
+      await prisma.collectionRun.update({
+        where: { id: r.id },
+        data: {
+          filesDownloaded: actualUploadedCount,
+          filesFound: actualUploadedCount + actualDuplicateCount + actualFailedCount,
+          filesDuplicate: actualDuplicateCount,
+          filesFailed: actualFailedCount,
+        },
       });
     }
   } catch {
-    // Ignore cleanup errors
+    // ignore
   }
 
   return {
     provider: env.STORAGE_PROVIDER,
-    totalChecked: files.length,
+    totalChecked: dbFiles.length + indexedNewCount,
     syncedCount,
+    indexedNewCount,
     missingCount: prunedCount,
     prunedOrphansCount: prunedCount,
     timestamp: new Date().toISOString(),

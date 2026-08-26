@@ -215,7 +215,7 @@ def categorize_file(
 
             pdf_result = extract_and_classify_pdf(temp_path)
             return pdf_result.folder_path
-        return "pdf/native/decoded"
+        return "pdf/digital"
 
     # 2. Check Extension mapping first if clean_ext is a known non-generic extension
     if clean_ext and clean_ext in _CATEGORY_BY_EXTENSION:
@@ -225,7 +225,7 @@ def categorize_file(
     if mime_type:
         mime_clean = mime_type.lower().split(";")[0].strip()
         if mime_clean == "application/pdf":
-            return "pdf/native/decoded"
+            return "pdf/digital"
         if mime_clean.startswith("audio/"):
             return "audio"
         if mime_clean.startswith("video/"):

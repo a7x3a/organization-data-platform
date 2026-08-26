@@ -155,6 +155,7 @@ const webCollectorConfigSchema = z.object({
   requestTimeoutSeconds: z.number().int().min(5).max(300).default(30),
   maxRetries: z.number().int().min(0).max(10).default(3),
   useBrowser: z.boolean().default(false),
+  extractWebData: z.boolean().default(false),
   robotsEnabled: z.boolean().default(true),
 });
 

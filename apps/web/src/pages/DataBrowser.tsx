@@ -95,7 +95,11 @@ function categoryOf(file: CollectedFile): string {
     const parts = file.r2Key.split('/');
     if (parts.length >= 6) {
       const catSlice = parts.slice(4, -1).join('/');
-      if (catSlice && catSlice !== '00_raw') return catSlice;
+      if (catSlice && catSlice !== '00_raw') {
+        // Map legacy paths if any exist
+        if (catSlice === 'pdf/native/decoded' || catSlice === 'pdf/native/encoded') return 'pdf/digital';
+        return catSlice;
+      }
     } else if (parts.length >= 2) {
       const parent = parts[parts.length - 2];
       if (parent && parent !== '00_raw') return parent;
@@ -106,7 +110,7 @@ function categoryOf(file: CollectedFile): string {
   const ext = name.split('?')[0].split('#')[0].split('.').pop()?.toLowerCase() || '';
   const mime = (file.mimeType || '').toLowerCase();
 
-  if (ext === 'pdf' || mime === 'application/pdf') return 'pdf/native/decoded';
+  if (ext === 'pdf' || mime === 'application/pdf') return 'pdf/digital';
   if (['epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr', 'chm'].includes(ext)) return 'ebooks';
   if (['doc', 'docx', 'odt', 'rtf', 'txt', 'md', 'pages'].includes(ext) || mime.startsWith('text/')) return 'documents';
   if (['mp3', 'wav', 'flac', 'm4a', 'ogg', 'opus', 'aac'].includes(ext) || mime.startsWith('audio/')) return 'audio';
@@ -116,6 +120,14 @@ function categoryOf(file: CollectedFile): string {
   if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(ext) || mime.includes('compressed') || mime.includes('zip')) return 'archives';
 
   return 'other';
+}
+
+function formatCategoryLabel(cat: string): string {
+  if (cat === 'pdf/digital') return 'Digital PDF';
+  if (cat === 'pdf/ocr') return 'OCR / Scanned PDF';
+  if (cat === 'pdf/native/decoded' || cat === 'pdf/native/encoded') return 'Digital PDF';
+  if (cat === 'data/web_content' || cat === 'web_data') return 'Web Data / Articles';
+  return cat.replace('/', ' / ');
 }
 
 async function fetchAllFilesForSource(sourceId: string) {
@@ -604,7 +616,7 @@ const CategoryGroup: React.FC<{ category: string; files: CollectedFile[]; onRefe
           <ChevronRight className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
         )}
         <Folder className="w-3.5 h-3.5 text-[var(--color-warning-400)]" />
-        <span className="text-[var(--color-text-secondary)] capitalize font-medium">{category}</span>
+        <span className="text-[var(--color-text-secondary)] capitalize font-medium">{formatCategoryLabel(category)}</span>
         <span className="text-[var(--color-text-muted)] font-mono">({files.length})</span>
       </button>
       {expanded && files.map((f) => <FileRow key={f.id} file={f} onRefetch={onRefetch} />)}

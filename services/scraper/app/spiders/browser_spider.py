@@ -29,24 +29,21 @@ from app.normalize.url_normalizer import normalize_url
 log = structlog.get_logger(__name__)
 
 
-
 async def crawl_with_browser(
     config: CrawlConfig,
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
     on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
     on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    on_page_data: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> CrawlResult:
     """
-    Playwright-based crawl for JavaScript-heavy pages.
-
-    Uses one shared browser instance.
-    Only launched when explicitly required — never for normal pages.
+    Perform a JavaScript-rendering crawl using Playwright Chromium headless.
+    Captures dynamically loaded links, user files, media URLs, and expanded accordions.
     """
     result = CrawlResult()
     visited: Set[str] = set()
     queue: asyncio.Queue = asyncio.Queue()
 
-    # A plain httpx client just for robots.txt/sitemap fetches — those are
     effective_allowed_domains = get_effective_allowed_domains(
         config.start_urls, config.allowed_domains
     )
@@ -112,6 +109,7 @@ async def crawl_with_browser(
             should_cancel,
             on_page_crawled=on_page_crawled,
             on_file_found=on_file_found,
+            on_page_data=on_page_data,
             effective_allowed_domains=effective_allowed_domains,
         )
     finally:
@@ -138,6 +136,7 @@ async def _run_browser_crawl(
     should_cancel: Optional[Callable[[], Awaitable[bool]]],
     on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
     on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    on_page_data: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
     effective_allowed_domains: list[str] = [],
 ) -> None:
     async with async_playwright() as p:
@@ -232,10 +231,37 @@ async def _run_browser_crawl(
                             await page.goto(
                                 url,
                                 timeout=config.request_timeout_seconds * 1000,
-                                wait_until="networkidle" if "ktebstan.net" in url or "wixsite.com" in url or "kurdipedia.org" in url else "domcontentloaded",
+                                wait_until="networkidle" if "ktebstan.net" in url or "wixsite.com" in url or "kurdipedia.org" in url or "gov.krd" in url else "domcontentloaded",
                             )
                             from app.spiders.cf_bypass import handle_cloudflare_challenge
                             await handle_cloudflare_challenge(page, max_wait_seconds=15)
+
+                            # Auto-expand all accordion dropdowns, collapsible panels, and details tags (e.g. KRG gazettes)
+                            try:
+                                await page.evaluate(r"""async () => {
+                                    // 1. Expand bootstrap / custom accordions
+                                    const accordions = document.querySelectorAll(
+                                        '.accordion-button.collapsed, [data-bs-toggle="collapse"], [data-toggle="collapse"], .panel-heading, summary, [aria-expanded="false"]'
+                                    );
+                                    for (const el of accordions) {
+                                        try {
+                                            el.click();
+                                        } catch (e) {}
+                                    }
+                                    // 2. Force show all hidden collapse containers
+                                    document.querySelectorAll('.collapse:not(.show), .accordion-collapse:not(.show)').forEach(el => {
+                                        el.classList.add('show');
+                                        el.style.display = 'block';
+                                    });
+                                    // 3. Open details tags
+                                    document.querySelectorAll('details:not([open])').forEach(el => {
+                                        el.setAttribute('open', 'true');
+                                    });
+                                }""")
+                                await asyncio.sleep(1.0)
+                            except Exception:
+                                pass
+
                             # Scroll page to trigger lazy loading / dynamic rendering
                             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                             await asyncio.sleep(1.0)
@@ -264,6 +290,13 @@ async def _run_browser_crawl(
                         # embedded objects, feed enclosures, inline-script
                         # URLs) from the fully rendered DOM
                         rendered_html = await page.content()
+
+                        if config.extract_web_data and on_page_data:
+                            from app.discovery.extractor import extract_structured_page_data
+                            page_doc = extract_structured_page_data(rendered_html, url)
+                            if page_doc.get("body_text"):
+                                await on_page_data(page_doc)
+
                         extra_page_candidates: set[str] = set()
                         for resource_url in extract_resource_urls(rendered_html, url):
                             if len(result.files_discovered) >= config.max_files:
@@ -301,7 +334,7 @@ async def _run_browser_crawl(
                         except Exception:
                             pass
 
-                        # Extract links, titles & download targets from rendered DOM
+                        # Extract links, titles, accordion context & download targets from rendered DOM
                         links_data = await page.eval_on_selector_all(
                             "a[href], [download], [data-href], [data-download], [data-url], [data-document-url], [data-media-id], [data-uri]",
                             r"""els => els.map(el => {
@@ -311,7 +344,20 @@ async def _run_browser_crawl(
                                 }
                                 let text = (el.textContent || '').trim();
                                 let title = el.getAttribute('title') || el.getAttribute('aria-label') || '';
-                                return { target, text, title };
+                                
+                                // Look for surrounding accordion header / card title
+                                let accordionGroup = '';
+                                let cur = el.parentElement;
+                                for (let i = 0; i < 5 && cur; i++) {
+                                    let acc = cur.querySelector('.accordion-header, .accordion-button, .card-header, .panel-heading, summary');
+                                    if (acc && acc.textContent) {
+                                        accordionGroup = acc.textContent.trim();
+                                        break;
+                                    }
+                                    cur = cur.parentElement;
+                                }
+
+                                return { target, text, title, accordionGroup };
                             }).filter(x => Boolean(x.target))""",
                         )
 

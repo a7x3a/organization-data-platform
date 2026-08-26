@@ -295,9 +295,9 @@ class FilePipeline:
         return False
 
     async def is_duplicate(self, sha256: str) -> bool:
-        """Ask the API if this SHA-256 already exists."""
+        """Ask the API if this SHA-256 already exists and is actively stored."""
         try:
-            r = await self._api.get(f"/api/files?sha256={sha256}&pageSize=1")
+            r = await self._api.get(f"/api/files?sha256={sha256}&status=UPLOADED&pageSize=1")
             r.raise_for_status()
             data = r.json()
             return data.get("total", 0) > 0
@@ -308,12 +308,12 @@ class FilePipeline:
     async def is_known_url(self, url: str) -> bool:
         """
         Ask the API if this exact source URL was already recorded for this
-        source (as UPLOADED or DUPLICATE).
+        source as UPLOADED.
         """
         try:
             r = await self._api.get(
                 "/api/files",
-                params={"sourceId": self._source_id, "sourceUrl": url, "pageSize": 1},
+                params={"sourceId": self._source_id, "sourceUrl": url, "status": "UPLOADED", "pageSize": 1},
             )
             r.raise_for_status()
             data = r.json()

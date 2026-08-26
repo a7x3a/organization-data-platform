@@ -92,6 +92,7 @@ async def crawl_with_scrapling(
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
     on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
     on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    on_page_data: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
     check_pause: Optional[Callable[[], Awaitable[bool]]] = None,
 ) -> CrawlResult:
     """
@@ -178,6 +179,12 @@ async def crawl_with_scrapling(
                 result.pages_crawled += 1
                 if on_page_crawled:
                     await on_page_crawled()
+
+                if config.extract_web_data and on_page_data:
+                    from app.discovery.extractor import extract_structured_page_data
+                    page_doc = extract_structured_page_data(html_body, res_url)
+                    if page_doc.get("body_text"):
+                        await on_page_data(page_doc)
 
                 # Extract resource files (PDF, audio, video, documents, etc.)
                 resource_urls = extract_resource_urls(html_body, res_url)

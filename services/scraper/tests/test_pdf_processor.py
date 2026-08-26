@@ -75,4 +75,4 @@ def test_categorize_file_with_pdf_paths(tmp_path):
 
     # Non-existent path defaults gracefully
     cat_default = categorize_file("application/pdf", ".pdf", temp_path="/tmp/non_existent.pdf")
-    assert cat_default == "pdf/native/decoded"
+    assert cat_default == "pdf/digital"

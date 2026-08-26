@@ -17,7 +17,7 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class PDFExtractionResult:
-    classification: str  # "native_decoded", "native_encoded", or "ocr"
+    classification: str  # "digital" or "ocr"
     is_native: bool
     is_legacy_encoded: bool
     page_count: int
@@ -33,12 +33,10 @@ class PDFExtractionResult:
 
     @property
     def folder_path(self) -> str:
-        """Return the target storage subfolder: pdf/native/decoded, pdf/native/encoded, or pdf/ocr."""
-        if not self.is_native:
+        """Return the target storage subfolder: pdf/digital or pdf/ocr."""
+        if not self.is_native or self.classification == "ocr":
             return "pdf/ocr"
-        if self.is_legacy_encoded:
-            return "pdf/native/encoded"
-        return "pdf/native/decoded"
+        return "pdf/digital"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -131,7 +129,7 @@ def extract_and_classify_pdf(
         raw_sample = combined_raw_text[:max_sample_len].strip()
         decoded_sample = decoded_text[:max_sample_len].strip()
 
-        # Decision rules for Native (Decoded / Encoded) vs OCR
+        # Decision rules for Digital vs OCR
         if total_chars == 0:
             classification = "ocr"
             is_native = False
@@ -148,12 +146,12 @@ def extract_and_classify_pdf(
             is_legacy_encoded = False
             reason = f"unprintable_garbage_encoding_ratio_{printable_ratio:.2f}"
         elif kurdish_res.is_legacy_encoded:
-            classification = "native_encoded"
+            classification = "digital"
             is_native = True
             is_legacy_encoded = True
             reason = f"kurdish_legacy_font_decoded_{kurdish_res.encoding_type}"
         else:
-            classification = "native_decoded"
+            classification = "digital"
             is_native = True
             is_legacy_encoded = False
             reason = "clean_native_text_extracted"

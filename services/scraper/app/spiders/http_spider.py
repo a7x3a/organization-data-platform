@@ -40,10 +40,10 @@ class CrawlConfig:
     request_delay_ms: int = 1000
     concurrency: int = 4
     request_timeout_seconds: int = 30
-    max_retries: int = 3
     robots_enabled: bool = True
     use_scrapling: bool = False
     stealth_mode: bool = False
+    extract_web_data: bool = False
 
 
 @dataclass
@@ -299,6 +299,7 @@ async def crawl(
     should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
     on_page_crawled: Optional[Callable[[], Awaitable[None]]] = None,
     on_file_found: Optional[Callable[[], Awaitable[None]]] = None,
+    on_page_data: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> CrawlResult:
     """
     Perform an HTTP crawl using httpx.
@@ -422,6 +423,12 @@ async def crawl(
 
                     log.debug("page_crawled", url=url, depth=depth)
                     html = response.text
+
+                    if config.extract_web_data and on_page_data:
+                        from app.discovery.extractor import extract_structured_page_data
+                        page_doc = extract_structured_page_data(html, url)
+                        if page_doc.get("body_text"):
+                            await on_page_data(page_doc)
 
                     # Every non-<a> resource this page points to
                     extra_page_candidates: set[str] = set()

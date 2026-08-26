@@ -107,6 +107,7 @@ export interface WebCollectorConfiguration {
   requestTimeoutSeconds: number;
   maxRetries: number;
   useBrowser: boolean;
+  extractWebData?: boolean;
   robotsEnabled: boolean;
 }
 
