@@ -15,14 +15,95 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Collector, isTelegramCollector, isWebCollector } from '@odp/shared-types';
-import { CollectorTypeInput, STANDARDIZED_FILE_GROUPS } from '../types/forms';
-import { Plus, Play, Power, Send, Pencil, Trash2, Globe, X, Database } from 'lucide-react';
+import { CollectorTypeInput } from '../types/forms';
+import {
+  Plus,
+  Play,
+  Power,
+  Send,
+  Pencil,
+  Trash2,
+  Globe,
+  X,
+  Database,
+  BookOpen,
+  FileText,
+  Music,
+  Video,
+  Image,
+  Archive,
+  Sparkles,
+  CheckCircle2,
+  Bot,
+} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-const FILE_TYPE_CATEGORIES: { label: string; extensions: string[] }[] = STANDARDIZED_FILE_GROUPS.map((g) => ({
-  label: g.name,
-  extensions: g.extensions,
-}));
+type CollectorPresetType = 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
+
+const COLLECTOR_PRESETS: {
+  id: CollectorPresetType;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  extensions: string[];
+}[] = [
+  {
+    id: 'books',
+    label: 'Books & Ebooks',
+    description: 'PDF books, EPUB ebooks, MOBI, and AZW3 documents',
+    icon: BookOpen,
+    extensions: ['.pdf', '.epub', '.mobi', '.azw3', '.fb2', '.djvu'],
+  },
+  {
+    id: 'documents',
+    label: 'Office Documents',
+    description: 'Word DOCX, PDF reports, ODT, and office text files',
+    icon: FileText,
+    extensions: ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.pages'],
+  },
+  {
+    id: 'datasets',
+    label: 'Data & Knowledge',
+    description: 'Parquet, JSONL, CSV, TSV, and XML datasets',
+    icon: Database,
+    extensions: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'],
+  },
+  {
+    id: 'audio',
+    label: 'Audio & Recordings',
+    description: 'MP3, WAV, FLAC, M4A, and speech audio files',
+    icon: Music,
+    extensions: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'],
+  },
+  {
+    id: 'video',
+    label: 'Video & Footage',
+    description: 'MP4, MKV, WebM, and high definition video files',
+    icon: Video,
+    extensions: ['.mp4', '.mkv', '.avi', '.mov', '.webm'],
+  },
+  {
+    id: 'images',
+    label: 'Images & Photos',
+    description: 'JPG, PNG, WebP, SVG, and high resolution scans',
+    icon: Image,
+    extensions: ['.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif'],
+  },
+  {
+    id: 'archives',
+    label: 'Archives & Bundles',
+    description: 'ZIP, RAR, 7Z, and compressed package archives',
+    icon: Archive,
+    extensions: ['.zip', '.rar', '.7z', '.tar', '.gz'],
+  },
+  {
+    id: 'all',
+    label: 'All Media & Files',
+    description: 'Discover all supported media and document formats',
+    icon: Sparkles,
+    extensions: [],
+  },
+];
 
 export const Collectors: React.FC = () => {
   const { t } = useTranslation();
@@ -59,25 +140,32 @@ export const Collectors: React.FC = () => {
   const [concurrency, setConcurrency] = useState(4);
   const [useBrowser, setUseBrowser] = useState(false);
   const [extractWebData, setExtractWebData] = useState(false);
-  // Off by default — discover every file type the crawler finds, matching
-  // the scraper's own "discover everything unless narrowed" default
-  // (empty allowedExtensions means no filter, not "nothing allowed").
-  const [restrictFileTypes, setRestrictFileTypes] = useState(false);
-  const [fileTypeCategories, setFileTypeCategories] = useState<string[]>([]);
+  const [selectedPresets, setSelectedPresets] = useState<CollectorPresetType[]>(['books']);
 
-  const toggleFileTypeCategory = (label: string) => {
-    setFileTypeCategories((prev) =>
-      prev.includes(label) ? prev.filter((c) => c !== label) : [...prev, label]
-    );
+  const togglePreset = (id: CollectorPresetType) => {
+    if (id === 'all') {
+      if (selectedPresets.includes('all')) {
+        setSelectedPresets(['books']);
+      } else {
+        setSelectedPresets(['all']);
+      }
+      return;
+    }
+    setSelectedPresets((prev) => {
+      const withoutAll = prev.filter((p) => p !== 'all');
+      if (withoutAll.includes(id)) {
+        const filtered = withoutAll.filter((p) => p !== id);
+        return filtered.length > 0 ? filtered : ['all'];
+      } else {
+        return [...withoutAll, id];
+      }
+    });
   };
+
   // TELEGRAM fields
   const [channels, setChannels] = useState('');
   const [messageLimit, setMessageLimit] = useState(500);
   const [downloadMedia, setDownloadMedia] = useState(true);
-  // All four checked by default — an empty includeMediaTypes list means
-  // "no filter" to the scraper, so "everything checked" and "list omitted"
-  // are equivalent; sending the explicit list here just keeps the UI's
-  // checked state and what's actually submitted in sync at a glance.
   const ALL_MEDIA_TYPES = ['photo', 'video', 'audio', 'document'] as const;
   const [mediaTypes, setMediaTypes] = useState<string[]>([...ALL_MEDIA_TYPES]);
 
@@ -99,8 +187,7 @@ export const Collectors: React.FC = () => {
     setConcurrency(4);
     setUseBrowser(false);
     setExtractWebData(false);
-    setRestrictFileTypes(false);
-    setFileTypeCategories([]);
+    setSelectedPresets(['books']);
     setChannels('');
     setMessageLimit(500);
     setDownloadMedia(true);
@@ -130,26 +217,13 @@ export const Collectors: React.FC = () => {
       );
       let allowedExts = (collector.configuration as any).allowedExtensions || [];
       if (allowedExts.length === 0) {
-        const lowerName = collector.name.toLowerCase();
-        if (lowerName.includes('book') || lowerName.includes('ebook')) {
-          allowedExts = ['.pdf', '.epub', '.mobi', '.azw3', '.fb2', '.djvu'];
-        } else if (lowerName.includes('research') || lowerName.includes('document')) {
-          allowedExts = ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md'];
-        } else if (lowerName.includes('audio')) {
-          allowedExts = ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'];
-        } else if (lowerName.includes('data') || lowerName.includes('dataset')) {
-          allowedExts = ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml'];
-        }
+        setSelectedPresets(['all']);
+      } else {
+        const matched = COLLECTOR_PRESETS.filter(
+          (p) => p.id !== 'all' && p.extensions.some((ext) => allowedExts.includes(ext))
+        ).map((p) => p.id);
+        setSelectedPresets(matched.length > 0 ? matched : ['all']);
       }
-      const restricted = allowedExts.length > 0;
-      setRestrictFileTypes(restricted);
-      setFileTypeCategories(
-        restricted
-          ? FILE_TYPE_CATEGORIES.filter((cat) =>
-            cat.extensions.some((ext) => allowedExts.includes(ext))
-          ).map((cat) => cat.label)
-          : []
-      );
     } else if (isWebCollector(collector)) {
       setCollectorType('WEB');
       setStartUrls(collector.configuration.startUrls.join('\n'));
@@ -159,15 +233,15 @@ export const Collectors: React.FC = () => {
       setConcurrency(collector.configuration.concurrency);
       setUseBrowser(collector.configuration.useBrowser);
       setExtractWebData(collector.configuration.extractWebData ?? false);
-      const restricted = collector.configuration.allowedExtensions.length > 0;
-      setRestrictFileTypes(restricted);
-      setFileTypeCategories(
-        restricted
-          ? FILE_TYPE_CATEGORIES.filter((cat) =>
-            cat.extensions.some((ext) => collector.configuration.allowedExtensions.includes(ext))
-          ).map((cat) => cat.label)
-          : []
-      );
+      const allowedExts = collector.configuration.allowedExtensions || [];
+      if (allowedExts.length === 0) {
+        setSelectedPresets(['all']);
+      } else {
+        const matched = COLLECTOR_PRESETS.filter(
+          (p) => p.id !== 'all' && p.extensions.some((ext) => allowedExts.includes(ext))
+        ).map((p) => p.id);
+        setSelectedPresets(matched.length > 0 ? matched : ['all']);
+      }
     }
 
     setIsModalOpen(true);
@@ -182,6 +256,17 @@ export const Collectors: React.FC = () => {
     e.preventDefault();
     if (!sourceId) return;
 
+    const isAll = selectedPresets.includes('all');
+    const extensions = isAll
+      ? []
+      : Array.from(
+          new Set(
+            COLLECTOR_PRESETS.filter((p) => selectedPresets.includes(p.id)).flatMap(
+              (p) => p.extensions
+            )
+          )
+        );
+
     if (collectorType === 'TELEGRAM') {
       const channelList = channels
         .split(/[\n,]+/)
@@ -193,21 +278,9 @@ export const Collectors: React.FC = () => {
           ? editingCollector.configuration
           : undefined;
 
-      const extensions =
-        restrictFileTypes && fileTypeCategories.length > 0
-          ? FILE_TYPE_CATEGORIES.filter((c) => fileTypeCategories.includes(c.label)).flatMap(
-            (c) => c.extensions
-          )
-          : [];
-
       const effectiveMediaTypes = [...mediaTypes];
-      if (restrictFileTypes && fileTypeCategories.length > 0) {
-        const hasDocCategory = fileTypeCategories.some((cat) =>
-          ['Documents', 'Spreadsheets', 'Presentations', 'Ebooks', 'Archives', 'Text & Data'].includes(cat)
-        );
-        if (hasDocCategory && !effectiveMediaTypes.includes('document')) {
-          effectiveMediaTypes.push('document');
-        }
+      if (!isAll && extensions.length > 0 && !effectiveMediaTypes.includes('document')) {
+        effectiveMediaTypes.push('document');
       }
 
       const telegramConfig = {
@@ -237,10 +310,6 @@ export const Collectors: React.FC = () => {
       return;
     }
 
-    // Accept commas as well as newlines — "Allowed Domains" right below
-    // this field is comma-separated, so a user typing all URLs on one
-    // line separated by commas (an easy, natural mistake) previously
-    // produced a single malformed URL instead of being split apart.
     const urls = startUrls
       .split(/[\n,]+/)
       .map((u) => u.trim())
@@ -249,15 +318,6 @@ export const Collectors: React.FC = () => {
       .split(',')
       .map((d) => d.trim())
       .filter(Boolean);
-    // Not restricting, or restricting with nothing checked (a no-op form
-    // state), both mean the same thing to the scraper: [] = no filter,
-    // discover every file type. Only a genuine category selection narrows it.
-    const extensions =
-      restrictFileTypes && fileTypeCategories.length > 0
-        ? FILE_TYPE_CATEGORIES.filter((c) => fileTypeCategories.includes(c.label)).flatMap(
-          (c) => c.extensions
-        )
-        : [];
 
     // Preserve fields this simplified form doesn't expose (allowedUrlPatterns,
     // excludedUrlPatterns, allowedMimeTypes, maxFiles, requestDelayMs,
@@ -452,25 +512,35 @@ export const Collectors: React.FC = () => {
         />
       </div>
 
-      {/* Create Collector Modal */}
+      {/* Create / Edit Collector Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-2xl overflow-hidden my-auto">
+          <div className="relative w-full max-w-xl max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-[var(--radius-2xl)] shadow-[var(--shadow-elevated)] overflow-hidden my-auto">
             {/* Modal Header */}
             <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
-              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
-                {editingCollector ? `Edit "${editingCollector.name}"` : t('collectors.create')}
-              </h2>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] flex items-center justify-center">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+                    {editingCollector ? `Edit "${editingCollector.name}"` : t('collectors.create')}
+                  </h2>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Configure data extraction targets, presets & autonomous engines
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={closeModal}
-                className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-[var(--radius-md)] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                     Collector Type
@@ -485,24 +555,25 @@ export const Collectors: React.FC = () => {
                       type="button"
                       disabled={!!editingCollector}
                       onClick={() => setCollectorType('WEB')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${collectorType === 'WEB'
-                        ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
-                        : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-xl border transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer ${collectorType === 'WEB'
+                        ? 'border-[var(--color-brand-500)] text-[var(--color-brand-400)] bg-[var(--color-brand-500)]/10'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)]'
                         }`}
                     >
-                      Web
+                      <Globe className="w-3.5 h-3.5" />
+                      Web Collector
                     </button>
                     <button
                       type="button"
                       disabled={!!editingCollector}
                       onClick={() => setCollectorType('TELEGRAM')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-[var(--radius-md)] border transition-colors disabled:opacity-50 disabled:pointer-events-none ${collectorType === 'TELEGRAM'
-                        ? 'border-[var(--color-brand-500)] text-[var(--color-text-primary)] bg-[var(--color-bg-elevated)]'
-                        : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-xl border transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer ${collectorType === 'TELEGRAM'
+                        ? 'border-[var(--color-brand-500)] text-[var(--color-brand-400)] bg-[var(--color-brand-500)]/10'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)]'
                         }`}
                     >
                       <Send className="w-3.5 h-3.5" />
-                      Telegram
+                      Telegram Collector
                     </button>
                   </div>
                 </div>
@@ -559,9 +630,7 @@ export const Collectors: React.FC = () => {
                         placeholder="my_channel&#10;another_channel"
                       />
                       <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
-                        Public channel usernames, without the @. Requires the scraper
-                        worker's Telegram account to be logged in (see README) and to
-                        have access to each channel.
+                        Public channel usernames, without the @. Uses your authenticated personal Telegram session.
                       </p>
                     </div>
 
@@ -579,7 +648,7 @@ export const Collectors: React.FC = () => {
                         />
                       </div>
                       <div className="flex items-end pb-2">
-                        <label className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={downloadMedia}
@@ -587,7 +656,7 @@ export const Collectors: React.FC = () => {
                             className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
                           />
                           <span className="text-xs text-[var(--color-text-secondary)]">
-                            Download media
+                            Download media attachments
                           </span>
                         </label>
                       </div>
@@ -601,7 +670,7 @@ export const Collectors: React.FC = () => {
                           </label>
                           <div className="grid grid-cols-2 gap-2">
                             {ALL_MEDIA_TYPES.map((type) => (
-                              <label key={type} className="flex items-center gap-2">
+                              <label key={type} className="flex items-center gap-2 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={mediaTypes.includes(type)}
@@ -616,121 +685,50 @@ export const Collectors: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="pt-2 border-t border-[var(--color-border-subtle)]">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={restrictFileTypes}
-                              onChange={(e) => setRestrictFileTypes(e.target.checked)}
-                              className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                            />
-                            <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                              Restrict to specific file categories (PDF, Ebooks, Docs, etc.)
+                        {/* Presets Cards Grid */}
+                        <div className="space-y-2 pt-2 border-t border-[var(--color-border-subtle)]">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                              Select File Categories / Presets <span className="text-[var(--color-text-muted)] font-normal">(Multi-Select)</span>
+                            </label>
+                            <span className="text-[11px] font-mono text-[var(--color-brand-400)] font-medium">
+                              {selectedPresets.includes('all') ? 'All Formats (No Filter)' : `${selectedPresets.length} selected`}
                             </span>
-                          </label>
-                          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                            Off by default — collects every file attachment. Select a preset or check boxes below to restrict file types.
-                          </p>
-
-                          <div className="mt-2.5 flex flex-wrap gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestrictFileTypes(true);
-                                setFileTypeCategories(['PDF Documents', 'E-Books & Publications']);
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
-                                fileTypeCategories.includes('PDF Documents') &&
-                                fileTypeCategories.includes('E-Books & Publications')
-                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                                }`}
-                            >
-                              📚 Books & Ebooks Preset
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestrictFileTypes(true);
-                                setFileTypeCategories(['PDF Documents', 'Office Documents']);
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
-                                fileTypeCategories.includes('PDF Documents') &&
-                                fileTypeCategories.includes('Office Documents')
-                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                                }`}
-                            >
-                              📄 Research Docs Preset
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestrictFileTypes(true);
-                                setFileTypeCategories(['Audio Files']);
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
-                                fileTypeCategories.includes('Audio Files') &&
-                                fileTypeCategories.length === 1
-                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                                }`}
-                            >
-                              🎧 Audiobooks Preset
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestrictFileTypes(true);
-                                setFileTypeCategories(['Data & Datasets']);
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${restrictFileTypes &&
-                                fileTypeCategories.includes('Data & Datasets') &&
-                                fileTypeCategories.length === 1
-                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-secondary)]'
-                                }`}
-                            >
-                              📊 Datasets Preset
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestrictFileTypes(false);
-                                setFileTypeCategories([]);
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${!restrictFileTypes
-                                ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-brand-400)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-muted)] text-[var(--color-text-muted)]'
-                                }`}
-                            >
-                              🌐 All Files (No Filter)
-                            </button>
                           </div>
-
-                          {restrictFileTypes && (
-                            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {FILE_TYPE_CATEGORIES.map((category) => (
-                                <label key={category.label} className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={fileTypeCategories.includes(category.label)}
-                                    onChange={() => toggleFileTypeCategory(category.label)}
-                                    className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                                  />
-                                  <span className="text-xs text-[var(--color-text-secondary)]">
-                                    {category.label}
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-
-                          {restrictFileTypes && fileTypeCategories.length === 0 && (
-                            <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
-                              No file categories selected — with none checked, all file extensions will be collected.
-                            </p>
-                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {COLLECTOR_PRESETS.map((preset) => {
+                              const Icon = preset.icon;
+                              const isSelected = selectedPresets.includes(preset.id);
+                              return (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => togglePreset(preset.id)}
+                                  className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors cursor-pointer ${isSelected
+                                      ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-text-primary)] font-medium'
+                                      : 'border-[var(--color-border)] bg-[var(--color-bg-base)] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]'
+                                    }`}
+                                >
+                                  <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? 'text-[var(--color-brand-400)]' : ''}`} />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-medium truncate flex items-center justify-between">
+                                      <span>{preset.label}</span>
+                                      <div className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                                        isSelected
+                                          ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)] text-white'
+                                          : 'border-[var(--color-border)] bg-transparent'
+                                      }`}>
+                                        {isSelected && <CheckCircle2 className="w-3 h-3" />}
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] text-[var(--color-text-muted)] leading-tight mt-0.5 line-clamp-2">
+                                      {preset.description}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -762,50 +760,53 @@ export const Collectors: React.FC = () => {
                       />
                     </div>
 
-                    <div>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={restrictFileTypes}
-                          onChange={(e) => setRestrictFileTypes(e.target.checked)}
-                          className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                        />
-                        <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-                          Restrict to specific file types
+                    {/* Presets Cards Grid for Web Collector */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                          Select File Categories / Presets <span className="text-[var(--color-text-muted)] font-normal">(Multi-Select)</span>
+                        </label>
+                        <span className="text-[11px] font-mono text-[var(--color-brand-400)] font-medium">
+                          {selectedPresets.includes('all') ? 'All Formats (No Filter)' : `${selectedPresets.length} selected`}
                         </span>
-                      </label>
-                      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
-                        Off by default — the crawler discovers every file type it finds (PDFs,
-                        images, audio, video, archives, and more), not just a fixed list.
-                      </p>
-
-                      {restrictFileTypes && (
-                        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {FILE_TYPE_CATEGORIES.map((category) => (
-                            <label key={category.label} className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={fileTypeCategories.includes(category.label)}
-                                onChange={() => toggleFileTypeCategory(category.label)}
-                                className="rounded border-[var(--color-border)] bg-transparent text-[var(--color-brand-600)]"
-                              />
-                              <span className="text-xs text-[var(--color-text-secondary)]">
-                                {category.label}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-
-                      {restrictFileTypes && fileTypeCategories.length === 0 && (
-                        <p className="mt-1.5 text-[11px] text-[var(--color-warning-400)]">
-                          No file types selected — with none checked, this has no effect and every
-                          file type will still be discovered.
-                        </p>
-                      )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {COLLECTOR_PRESETS.map((preset) => {
+                          const Icon = preset.icon;
+                          const isSelected = selectedPresets.includes(preset.id);
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => togglePreset(preset.id)}
+                              className={`flex items-start gap-3 p-3 text-left rounded-xl border transition-colors cursor-pointer ${isSelected
+                                  ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 text-[var(--color-text-primary)] font-medium'
+                                  : 'border-[var(--color-border)] bg-[var(--color-bg-base)] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]'
+                                }`}
+                            >
+                              <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? 'text-[var(--color-brand-400)]' : ''}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-medium truncate flex items-center justify-between">
+                                  <span>{preset.label}</span>
+                                  <div className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                                    isSelected
+                                      ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)] text-white'
+                                      : 'border-[var(--color-border)] bg-transparent'
+                                  }`}>
+                                    {isSelected && <CheckCircle2 className="w-3 h-3" />}
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-[var(--color-text-muted)] leading-tight mt-0.5 line-clamp-2">
+                                  {preset.description}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                           Max Depth
@@ -847,10 +848,11 @@ export const Collectors: React.FC = () => {
                 )}
 
                 {collectorType === 'WEB' && (
-                  <>
+                  <div className="space-y-3 pt-1">
+                    {/* Autonomous Engine Selection */}
                     <div
                       onClick={() => setUseBrowser(!useBrowser)}
-                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${useBrowser
+                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${useBrowser
                         ? 'border-[var(--color-brand-500)] bg-[var(--color-brand-500)]/10 shadow-sm text-[var(--color-text-primary)]'
                         : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
                         }`}
@@ -882,9 +884,10 @@ export const Collectors: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Extract Web Data & Article Texts */}
                     <div
                       onClick={() => setExtractWebData(!extractWebData)}
-                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none mt-2 ${extractWebData
+                      className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none ${extractWebData
                         ? 'border-cyan-500 bg-cyan-500/10 shadow-sm text-[var(--color-text-primary)]'
                         : 'border-[var(--color-border)] bg-[var(--color-bg-base)] hover:border-[var(--color-border-strong)] text-[var(--color-text-secondary)]'
                         }`}
@@ -915,24 +918,17 @@ export const Collectors: React.FC = () => {
                           }`} />
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
 
-              {/* Pinned Footer */}
+              {/* Footer Actions */}
               <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-                <Button type="button" variant="ghost" onClick={closeModal}>
-                  {t('common.cancel')}
+                <Button type="button" variant="secondary" onClick={closeModal} disabled={createCollector.isPending || updateCollector.isPending}>
+                  Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={createCollector.isPending || updateCollector.isPending || !sourceId}
-                >
-                  {createCollector.isPending || updateCollector.isPending
-                    ? t('common.loading')
-                    : editingCollector
-                      ? 'Save Changes'
-                      : t('common.create')}
+                <Button type="submit" variant="primary" disabled={createCollector.isPending || updateCollector.isPending || !sourceId || !name}>
+                  {editingCollector ? 'Save Changes' : 'Create Collector'}
                 </Button>
               </div>
             </form>
