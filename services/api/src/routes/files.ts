@@ -238,13 +238,39 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const file = await fileService.getFileById(req.params.id);
-      if (!file.r2Key) {
-        throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
+      let buf: Buffer | null = null;
+      if (file.r2Key) {
+        try {
+          buf = await storageProvider.getBuffer(file.r2Key);
+        } catch {
+          buf = null;
+        }
       }
 
-      const buf = await storageProvider.getBuffer(file.r2Key);
       if (!buf) {
-        throw new AppError(404, 'File content not found on storage', 'FILE_NOT_FOUND');
+        // Return structured file metadata as rich fallback
+        const metadataObj = (file.metadata && typeof file.metadata === 'object' && Object.keys(file.metadata).length > 0)
+          ? file.metadata
+          : {
+              fileId: file.fileId,
+              fileName: file.fileName,
+              mimeType: file.mimeType,
+              fileSize: file.fileSize ? Number(file.fileSize) : null,
+              sha256: file.sha256,
+              status: file.status,
+              r2Key: file.r2Key,
+              sourceUrl: file.sourceUrl,
+              approvalStatus: file.approvalStatus,
+              createdAt: file.createdAt,
+            };
+
+        return res.json({
+          fileId: file.id,
+          fileName: file.fileName,
+          r2Key: file.r2Key,
+          isJson: true,
+          data: metadataObj,
+        });
       }
 
       const rawText = buf.toString('utf-8');

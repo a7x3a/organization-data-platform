@@ -209,34 +209,51 @@ export const RunDetail: React.FC = () => {
 
   const handleViewFileJson = async (f: CollectedFile) => {
     const isJsonFile = f.fileName.toLowerCase().endsWith('.json') || f.fileName.toLowerCase().endsWith('.jsonl') || isWebData(f);
+    const fallbackData = (f.metadata && typeof f.metadata === 'object' && Object.keys(f.metadata).length > 0)
+      ? f.metadata
+      : {
+          fileId: f.fileId,
+          fileName: f.fileName,
+          originalFilename: f.originalFilename,
+          fileSize: f.fileSize,
+          mimeType: f.mimeType,
+          sha256: f.sha256,
+          status: f.status,
+          r2Key: f.r2Key,
+          sourceUrl: f.sourceUrl,
+          approvalStatus: f.approvalStatus,
+        };
+
+    const typeFolder = run?.collector?.type === CollectorType.TELEGRAM ? 'telegram' : 'web';
+    const computedRelKey = f.r2Key || `00_raw/${typeFolder}/${run?.source?.slug || 'source'}/${run?.runId || 'run'}/${f.fileName}`;
+
     setJsonModalState({
       isOpen: true,
-      title: `Structured JSON Record — ${f.fileName}`,
+      title: `Structured Record — ${f.fileName}`,
       fileName: f.fileName,
-      relativePath: f.r2Key || `00_raw/.../${f.fileName}`,
-      localPath: f.r2Key ? `/app/storage/${f.r2Key}` : undefined,
-      data: f.metadata || null,
-      isLoading: isJsonFile,
+      relativePath: computedRelKey,
+      localPath: `/app/storage/${computedRelKey}`,
+      data: fallbackData,
+      isLoading: false,
     });
 
     if (isJsonFile) {
       try {
         const res = await filesApi.getJsonContent(f.id);
-        setJsonModalState({
-          isOpen: true,
-          title: `Structured JSON Record — ${f.fileName}`,
-          fileName: f.fileName,
-          relativePath: res.r2Key || f.r2Key || `00_raw/.../${f.fileName}`,
-          localPath: (res.r2Key || f.r2Key) ? `/app/storage/${res.r2Key || f.r2Key}` : undefined,
-          data: res.data || res.raw || f.metadata,
-          isLoading: false,
-        });
+        if (res.data || res.raw) {
+          const finalRelKey = res.r2Key || computedRelKey;
+          setJsonModalState({
+            isOpen: true,
+            title: `Structured JSON Record — ${f.fileName}`,
+            fileName: f.fileName,
+            relativePath: finalRelKey,
+            localPath: `/app/storage/${finalRelKey}`,
+            data: res.data || res.raw,
+            isLoading: false,
+          });
+        }
       } catch {
-        setJsonModalState((prev) => ({
-          ...prev,
-          isLoading: false,
-          data: f.metadata || { error: 'Could not fetch file payload directly from disk' },
-        }));
+        // Keeps the fallbackData cleanly without error
       }
     }
   };
