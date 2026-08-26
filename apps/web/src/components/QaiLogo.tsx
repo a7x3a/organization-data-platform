@@ -33,7 +33,7 @@ export const QaiLogo: React.FC<QaiLogoProps> = ({
         width={56}
         height={56}
         decoding="async"
-        className={`${sizeMap[size]} rounded-xl object-contain shrink-0 shadow-2xs border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] p-0.5`}
+        className={`${sizeMap[size]} object-contain shrink-0 select-none`}
       />
 
       {showText && (
