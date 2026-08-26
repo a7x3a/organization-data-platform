@@ -1,11 +1,12 @@
-import React, { useRef, useState, useMemo } from 'react';
-import { Source, isTelegramCollector, isWebCollector, CollectedFile } from '@odp/shared-types';
+import React, { useState, useMemo } from 'react';
+import { Source, isTelegramCollector, isWebCollector } from '@odp/shared-types';
 import { useCollectors } from '../hooks/useCollectors';
 import { useRuns } from '../hooks/useRuns';
 import { useFiles } from '../hooks/useFiles';
 import { Button } from './Button';
 import { QaiLogo } from './QaiLogo';
 import { formatBytes } from '../lib/utils';
+import { printSourceReportDocument, SourceReportData } from '../lib/generateSourceDoc';
 import {
   FileText,
   Printer,
@@ -13,17 +14,9 @@ import {
   Globe,
   Bot,
   PlaySquare,
-  FileArchive,
-  ShieldCheck,
-  CheckCircle2,
-  Calendar,
-  Layers,
-  HardDrive,
-  Hash,
-  Sparkles,
-  ExternalLink,
   BookOpen,
   FolderTree,
+  ExternalLink,
 } from 'lucide-react';
 
 interface SourceReportModalProps {
@@ -39,18 +32,21 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const printRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<'single' | 'all'>(source ? 'single' : 'all');
-  const [selectedSourceId, setSelectedSourceId] = useState<string>(source?.id || allSources[0]?.id || '');
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(
+    source?.id || allSources[0]?.id || ''
+  );
 
   const currentSource = useMemo(() => {
     if (activeTab === 'single') {
-      return allSources.find((s) => s.id === selectedSourceId) || source || allSources[0] || null;
+      return (
+        allSources.find((s) => s.id === selectedSourceId) || source || allSources[0] || null
+      );
     }
     return null;
   }, [activeTab, selectedSourceId, source, allSources]);
 
-  // Fetch collectors, runs, files
+  // Fetch collectors, runs, files for current scope
   const { data: collectorsData } = useCollectors({
     sourceId: activeTab === 'single' ? currentSource?.id : undefined,
     pageSize: 100,
@@ -79,18 +75,10 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
   const totalFilesDownloaded = runs.reduce((acc, r) => acc + (r.filesDownloaded || 0), 0);
   const totalBytes = files.reduce((acc, f) => acc + (Number(f.fileSize) || 0), 0);
 
-  // File extension breakdown
-  const extCounts: Record<string, number> = {};
-  files.forEach((f) => {
-    const ext = f.extension?.toLowerCase().replace('.', '') || 'unknown';
-    extCounts[ext] = (extCounts[ext] || 0) + 1;
-  });
-
-  // Website subdomains & URL sections discovery
-  const { subdomainsList, sectionsList, articlesCount, totalWords, avgQuality, languagesList } = (() => {
+  // Subdomains & sections discovery
+  const { subdomainsList, sectionsList, articlesCount, totalWords, avgQuality } = (() => {
     const subdomainsMap: Record<string, number> = {};
     const sectionsMap: Record<string, number> = {};
-    const languagesMap: Record<string, number> = {};
     let articles = 0;
     let words = 0;
     let qualityTotal = 0;
@@ -106,15 +94,14 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
 
           const pathParts = u.pathname.split('/').filter(Boolean);
           if (pathParts.length > 0) {
-            const section = `/${pathParts[0]}`;
-            sectionsMap[section] = (sectionsMap[section] || 0) + 1;
+            const sec = `/${pathParts[0]}`;
+            sectionsMap[sec] = (sectionsMap[sec] || 0) + 1;
           }
         } catch {
           // ignore
         }
       }
 
-      // Check article metadata
       const meta = f.metadata as Record<string, any> | undefined;
       if (meta) {
         if (meta.body_text || meta.paragraphs || meta.title) {
@@ -125,10 +112,6 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
           qualityTotal += Number(meta.quality.overall_score);
           qualityCount++;
         }
-        const lang = meta.language?.language_name || meta.language?.language;
-        if (lang) {
-          languagesMap[lang] = (languagesMap[lang] || 0) + 1;
-        }
       }
     });
 
@@ -138,12 +121,41 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
       articlesCount: articles,
       totalWords: words,
       avgQuality: qualityCount > 0 ? Math.round(qualityTotal / qualityCount) : null,
-      languagesList: Object.entries(languagesMap).sort((a, b) => b[1] - a[1]),
     };
   })();
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrintDocument = () => {
+    const sourcesToReport: SourceReportData[] =
+      activeTab === 'all'
+        ? allSources.map((s) => ({
+            source: s,
+            collectors: collectors.filter((c) => c.sourceId === s.id),
+            runs: runs.filter((r) => r.sourceId === s.id),
+            files: files.filter((f) => f.sourceId === s.id),
+          }))
+        : currentSource
+        ? [
+            {
+              source: currentSource,
+              collectors,
+              runs,
+              files,
+            },
+          ]
+        : [];
+
+    printSourceReportDocument({
+      title:
+        activeTab === 'all'
+          ? 'Enterprise Sources & Data Platform Dossier'
+          : `Source Audit — ${currentSource?.name || 'Report'}`,
+      reportCode:
+        activeTab === 'all'
+          ? 'QAI-PLATFORM-ALL'
+          : `QAI-SRC-${currentSource?.slug.toUpperCase() || 'REPORT'}`,
+      sourcesData: sourcesToReport,
+      isCombined: activeTab === 'all',
+    });
   };
 
   const reportDate = new Date().toLocaleDateString('en-US', {
@@ -155,27 +167,38 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white print:static">
-      <div className="relative w-full max-w-4xl bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] print:max-h-none print:border-none print:shadow-none print:w-full print:rounded-none">
-        
-        {/* Modal Toolbar (hidden in print) */}
-        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)] print:hidden">
-          <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-[var(--color-brand-400)] shrink-0" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-              Source Intelligence & Inventory Report
-            </h2>
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-xs font-sans"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-4xl h-[90vh] flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Fixed Header Toolbar */}
+        <div className="shrink-0 h-14 flex items-center justify-between px-5 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-overlay)]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] shrink-0">
+              <FileText className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] truncate">
+                Document & PDF Report Generator
+              </h2>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 shrink-0">
             {allSources.length > 1 && (
               <div className="flex items-center rounded-lg border border-[var(--color-border-subtle)] p-0.5 bg-[var(--color-bg-base)] text-[11px]">
                 <button
                   type="button"
                   onClick={() => setActiveTab('single')}
-                  className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                  className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
                     activeTab === 'single'
-                      ? 'bg-[var(--color-brand-500)] text-white font-semibold'
+                      ? 'bg-[var(--color-brand-500)] text-white font-semibold shadow-xs'
                       : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
                   }`}
                 >
@@ -184,9 +207,9 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('all')}
-                  className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                  className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
                     activeTab === 'all'
-                      ? 'bg-[var(--color-brand-500)] text-white font-semibold'
+                      ? 'bg-[var(--color-brand-500)] text-white font-semibold shadow-xs'
                       : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
                   }`}
                 >
@@ -199,7 +222,7 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
               <select
                 value={selectedSourceId}
                 onChange={(e) => setSelectedSourceId(e.target.value)}
-                className="text-xs py-1 px-2.5 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] focus:outline-none"
+                className="text-xs h-7.5 py-1 px-2.5 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] text-[var(--color-text-primary)] focus:outline-none max-w-[150px] truncate"
               >
                 {allSources.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -209,396 +232,265 @@ export const SourceReportModal: React.FC<SourceReportModalProps> = ({
               </select>
             )}
 
-            <Button variant="primary" size="sm" onClick={handlePrint} className="gap-1.5 font-medium text-xs h-7.5 px-3">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handlePrintDocument}
+              className="gap-1.5 font-semibold text-xs h-7.5 px-3"
+            >
               <Printer className="w-3.5 h-3.5" />
-              <span>Print / PDF</span>
+              <span>Generate & Print PDF</span>
             </Button>
 
             <button
+              type="button"
               onClick={onClose}
               className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer"
-              title="Close"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Printable Report Document Body */}
-        <div
-          ref={printRef}
-          className="flex-1 overflow-y-auto p-6 sm:p-10 space-y-6 bg-white dark:bg-[var(--color-bg-surface)] text-[var(--color-text-primary)] print:p-0 print:overflow-visible font-sans leading-relaxed"
-        >
-          {/* Header Branding */}
-          <div className="flex items-start justify-between border-b-2 border-[var(--color-brand-500)] pb-4">
-            <div>
-              <QaiLogo size="lg" />
-              <div className="text-[11px] text-[var(--color-text-muted)] font-mono mt-1">
-                Data Classification: <span className="font-semibold text-emerald-600 dark:text-emerald-400">ORGANIZATION RAW INTELLIGENCE</span>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--color-brand-500)]">
-                {activeTab === 'all' ? 'All Sources Platform Dossier' : 'Source Audit & Inventory'}
-              </div>
-              <div className="text-[11px] text-[var(--color-text-muted)] font-mono mt-0.5">
-                Report Code: <span className="text-[var(--color-text-primary)] font-semibold">QAI-{activeTab === 'all' ? 'PLATFORM-ALL' : currentSource?.slug.toUpperCase() || 'SRC'}</span>
-              </div>
-              <div className="text-[11px] text-[var(--color-text-muted)] font-mono mt-0.5">
-                Generated: {reportDate}
-              </div>
-            </div>
-          </div>
-
-          {/* Active Profile Header */}
-          {activeTab === 'all' ? (
-            <div className="p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)]">
-              <h2 className="text-base font-bold text-[var(--color-text-primary)]">
-                Platform Sources & Data Collection Portfolio
-              </h2>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                Comprehensive overview of all {allSources.length} registered data sources, active ingestion pipelines, discovered subdomains, and harvested content.
-              </p>
-            </div>
-          ) : currentSource ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] text-xs">
+        {/* Paper Document Preview Container */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[var(--color-bg-base)] flex justify-center">
+          <div className="w-full max-w-3xl bg-white dark:bg-[#111827] text-slate-900 dark:text-slate-100 p-8 sm:p-12 rounded-xl shadow-md border border-slate-200 dark:border-slate-800 space-y-6 text-xs transition-all">
+            {/* Header Branding */}
+            <div className="flex items-start justify-between border-b-2 border-blue-600 pb-4">
               <div>
-                <div className="text-[10px] uppercase font-mono text-[var(--color-text-muted)] font-bold">Source Name</div>
-                <div className="text-sm font-semibold text-[var(--color-text-primary)] mt-0.5 flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-[var(--color-brand-400)] shrink-0" />
-                  <span>{currentSource.name}</span>
-                </div>
-                <div className="text-[11px] font-mono text-[var(--color-text-muted)] mt-0.5 break-all">
-                  {currentSource.baseUrl}
+                <QaiLogo size="md" />
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-1">
+                  Data Classification: <span className="font-bold text-emerald-600">OFFICIAL DATA REPORT</span>
                 </div>
               </div>
-
-              <div>
-                <div className="text-[10px] uppercase font-mono text-[var(--color-text-muted)] font-bold">Identifier / Slug</div>
-                <div className="font-mono font-semibold text-[var(--color-text-primary)] mt-1 px-2 py-0.5 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded inline-block">
-                  {currentSource.slug}
+              <div className="text-right font-mono">
+                <div className="text-[10px] font-bold uppercase text-blue-600">
+                  {activeTab === 'all' ? 'PLATFORM SOURCES DOSSIER' : 'SOURCE AUDIT & INVENTORY'}
                 </div>
-                <div className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                  Robots Policy: <span className="font-semibold text-[var(--color-text-primary)]">{currentSource.robotsPolicy}</span>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  ID: QAI-{activeTab === 'all' ? 'PLATFORM-ALL' : currentSource?.slug.toUpperCase() || 'SRC'}
                 </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] uppercase font-mono text-[var(--color-text-muted)] font-bold">Storage Partition</div>
-                <div className="font-mono text-[var(--color-brand-400)] mt-1 font-semibold">
-                  00_raw/web/{currentSource.slug}/
-                </div>
-                <div className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                  Active Collectors: <span className="font-semibold text-[var(--color-text-primary)]">{collectors.length}</span>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* KPI Highlights Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-              <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase font-semibold">Total Runs</div>
-              <div className="text-xl font-bold font-mono text-[var(--color-text-primary)] mt-1">
-                {totalRuns}
-              </div>
-              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                {completedRuns} completed runs
+                <div className="text-[10px] text-slate-500 mt-0.5">{reportDate}</div>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-              <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase font-semibold">Pages Crawled</div>
-              <div className="text-xl font-bold font-mono text-[var(--color-text-primary)] mt-1">
-                {totalPagesCrawled.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
-                Crawled DOM Pages
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-              <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase font-semibold">Collected Assets</div>
-              <div className="text-xl font-bold font-mono text-[var(--color-text-primary)] mt-1">
-                {totalFilesDownloaded.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
-                Files & Extracted Docs
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-              <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase font-semibold">Total Volume</div>
-              <div className="text-xl font-bold font-mono text-[var(--color-text-primary)] mt-1">
-                {formatBytes(totalBytes)}
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
-                Raw byte volume
-              </div>
-            </div>
-          </div>
-
-          {/* Discovered Subdomains & Website Sections */}
-          {(subdomainsList.length > 0 || sectionsList.length > 0) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Subdomains */}
-              <div className="space-y-2 p-3.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-                <div className="flex items-center gap-1.5 border-b border-[var(--color-border-subtle)] pb-2">
-                  <Globe className="w-3.5 h-3.5 text-[var(--color-brand-400)]" />
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-                    Discovered Subdomains ({subdomainsList.length})
-                  </h3>
-                </div>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {subdomainsList.map(([host, count]) => (
-                    <div key={host} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-[var(--color-bg-base)]">
-                      <span className="font-mono font-medium text-[var(--color-text-primary)] truncate max-w-[200px]">{host}</span>
-                      <span className="font-mono text-[11px] text-[var(--color-brand-400)] bg-[var(--color-bg-overlay)] px-2 py-0.5 rounded">
-                        {count} {count === 1 ? 'URL' : 'URLs'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Website Sections & Parts */}
-              <div className="space-y-2 p-3.5 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-                <div className="flex items-center gap-1.5 border-b border-[var(--color-border-subtle)] pb-2">
-                  <FolderTree className="w-3.5 h-3.5 text-cyan-400" />
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-                    Targeted Sections & Categories
-                  </h3>
-                </div>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {sectionsList.map(([sec, count]) => (
-                    <div key={sec} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-[var(--color-bg-base)]">
-                      <span className="font-mono font-semibold text-[var(--color-text-secondary)]">{sec}</span>
-                      <span className="font-mono text-[11px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
-                        {count} items
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Web Data & Article Extraction Intelligence */}
-          {articlesCount > 0 && (
-            <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-2.5">
-              <div className="flex items-center gap-2 border-b border-emerald-500/20 pb-2">
-                <BookOpen className="w-4 h-4 text-emerald-500" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                  Harvested Article & Web Document Content
+            {/* Profile Overview Card */}
+            {activeTab === 'all' ? (
+              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  All Sources Platform Portfolio ({allSources.length} Sources)
                 </h3>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Consolidated inventory of all data collection channels, discovered domains, and extracted contents.
+                </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            ) : currentSource ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                 <div>
-                  <div className="text-[10px] text-[var(--color-text-muted)] uppercase font-mono">Total Articles</div>
-                  <div className="text-base font-bold font-mono text-[var(--color-text-primary)] mt-0.5">
-                    {articlesCount.toLocaleString()}
+                  <div className="text-[9px] uppercase font-mono text-slate-500 font-bold">Source Name</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-0.5 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                    <span>{currentSource.name}</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-blue-600 mt-0.5 break-all">
+                    {currentSource.baseUrl}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-[var(--color-text-muted)] uppercase font-mono">Word Count</div>
-                  <div className="text-base font-bold font-mono text-[var(--color-text-primary)] mt-0.5">
-                    {totalWords.toLocaleString()} words
+                  <div className="text-[9px] uppercase font-mono text-slate-500 font-bold">Identifier / Slug</div>
+                  <div className="font-mono font-bold text-slate-900 dark:text-slate-100 mt-1 px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded inline-block text-[11px]">
+                    {currentSource.slug}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Robots: <strong>{currentSource.robotsPolicy}</strong>
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-[var(--color-text-muted)] uppercase font-mono">Avg Quality Score</div>
-                  <div className="text-base font-bold font-mono text-emerald-400 mt-0.5">
-                    {avgQuality !== null ? `${avgQuality}/100` : '—'}
+                  <div className="text-[9px] uppercase font-mono text-slate-500 font-bold">Storage Partition</div>
+                  <div className="font-mono text-blue-600 font-bold mt-1 text-[11px]">
+                    00_raw/web/{currentSource.slug}/
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Collectors: <strong>{collectors.length} configured</strong>
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] text-[var(--color-text-muted)] uppercase font-mono">Languages Detected</div>
-                  <div className="text-[11px] font-mono font-medium text-[var(--color-text-secondary)] mt-0.5">
-                    {languagesList.slice(0, 3).map(([l]) => l).join(', ') || 'Kurdish, English'}
-                  </div>
+              </div>
+            ) : null}
+
+            {/* KPI Boxes */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+                <div className="text-base font-extrabold font-mono text-slate-900 dark:text-slate-100">
+                  {totalRuns}
                 </div>
+                <div className="text-[9px] uppercase font-bold text-slate-500 mt-0.5">Total Runs</div>
+                <div className="text-[9px] text-emerald-600 font-semibold">{completedRuns} completed</div>
+              </div>
+              <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+                <div className="text-base font-extrabold font-mono text-slate-900 dark:text-slate-100">
+                  {totalPagesCrawled.toLocaleString()}
+                </div>
+                <div className="text-[9px] uppercase font-bold text-slate-500 mt-0.5">Pages Crawled</div>
+                <div className="text-[9px] text-slate-400">HTML & DOM</div>
+              </div>
+              <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+                <div className="text-base font-extrabold font-mono text-slate-900 dark:text-slate-100">
+                  {totalFilesDownloaded.toLocaleString()}
+                </div>
+                <div className="text-[9px] uppercase font-bold text-slate-500 mt-0.5">Assets Collected</div>
+                <div className="text-[9px] text-slate-400">Files & Docs</div>
+              </div>
+              <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+                <div className="text-base font-extrabold font-mono text-slate-900 dark:text-slate-100">
+                  {formatBytes(totalBytes)}
+                </div>
+                <div className="text-[9px] uppercase font-bold text-slate-500 mt-0.5">Total Volume</div>
+                <div className="text-[9px] text-slate-400">Raw bytes</div>
               </div>
             </div>
-          )}
 
-          {/* All Sources Catalog Table (if All Sources selected) */}
-          {activeTab === 'all' && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 border-b border-[var(--color-border-subtle)] pb-2">
-                <Globe className="w-4 h-4 text-[var(--color-brand-400)]" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-                  Registered Data Sources ({allSources.length})
-                </h3>
+            {/* Subdomains & Sections */}
+            {(subdomainsList.length > 0 || sectionsList.length > 0) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold uppercase text-[10px] text-slate-700 dark:text-slate-300">
+                    <Globe className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Discovered Subdomains ({subdomainsList.length})</span>
+                  </div>
+                  <div className="space-y-1 max-h-36 overflow-y-auto">
+                    {subdomainsList.map(([host, count]) => (
+                      <div
+                        key={host}
+                        className="flex items-center justify-between py-1 px-2 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px]"
+                      >
+                        <span className="font-mono font-medium truncate max-w-[180px]">{host}</span>
+                        <span className="font-mono text-blue-600 font-bold text-[10px]">
+                          {count} URLs
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold uppercase text-[10px] text-slate-700 dark:text-slate-300">
+                    <FolderTree className="w-3.5 h-3.5 text-cyan-500" />
+                    <span>Website Sections & Paths</span>
+                  </div>
+                  <div className="space-y-1 max-h-36 overflow-y-auto">
+                    {sectionsList.map(([sec, count]) => (
+                      <div
+                        key={sec}
+                        className="flex items-center justify-between py-1 px-2 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px]"
+                      >
+                        <span className="font-mono font-semibold text-cyan-600">{sec}</span>
+                        <span className="font-mono text-slate-500 text-[10px]">{count} items</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="border border-[var(--color-border-subtle)] rounded-xl overflow-hidden text-xs">
-                <table className="w-full text-left">
-                  <thead className="bg-[var(--color-bg-base)] text-[var(--color-text-muted)] font-mono text-[10px] uppercase border-b border-[var(--color-border-subtle)]">
+            )}
+
+            {/* Extracted Articles Card */}
+            {articlesCount > 0 && (
+              <div className="p-4 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 space-y-2">
+                <div className="flex items-center gap-1.5 font-bold text-[10px] uppercase text-emerald-700 dark:text-emerald-400">
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Harvested Web Articles & Extracted Text</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="p-2 rounded bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/50">
+                    <div className="text-sm font-extrabold font-mono text-emerald-600">
+                      {articlesCount.toLocaleString()}
+                    </div>
+                    <div className="text-[9px] text-slate-500">Articles</div>
+                  </div>
+                  <div className="p-2 rounded bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/50">
+                    <div className="text-sm font-extrabold font-mono text-slate-900 dark:text-slate-100">
+                      {totalWords.toLocaleString()}
+                    </div>
+                    <div className="text-[9px] text-slate-500">Words Extracted</div>
+                  </div>
+                  <div className="p-2 rounded bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/50">
+                    <div className="text-sm font-extrabold font-mono text-cyan-600">
+                      {avgQuality !== null ? `${avgQuality}/100` : '—'}
+                    </div>
+                    <div className="text-[9px] text-slate-500">Avg Quality</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Collectors / Sources Table */}
+            {activeTab === 'all' ? (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase text-slate-700 dark:text-slate-300">
+                  All Cataloged Sources ({allSources.length})
+                </div>
+                <table className="w-full text-left text-[11px] border border-slate-200 dark:border-slate-800 rounded">
+                  <thead className="bg-slate-50 dark:bg-slate-900 font-mono text-[9px] uppercase border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="p-2.5">Source Name</th>
-                      <th className="p-2.5">Slug</th>
-                      <th className="p-2.5">Base URL</th>
-                      <th className="p-2.5">Robots</th>
-                      <th className="p-2.5 text-right">Status</th>
+                      <th className="p-2">Name</th>
+                      <th className="p-2">Slug</th>
+                      <th className="p-2">Base URL</th>
+                      <th className="p-2 text-right">Robots</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[var(--color-border-subtle)]">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {allSources.map((s) => (
                       <tr key={s.id}>
-                        <td className="p-2.5 font-bold text-[var(--color-text-primary)]">{s.name}</td>
-                        <td className="p-2.5 font-mono text-[11px] text-[var(--color-brand-400)]">{s.slug}</td>
-                        <td className="p-2.5 font-mono text-[11px] text-[var(--color-text-muted)] truncate max-w-[200px]">{s.baseUrl}</td>
-                        <td className="p-2.5 font-mono text-[11px]">{s.robotsPolicy}</td>
-                        <td className="p-2.5 text-right font-mono text-[11px] text-emerald-500 font-semibold">Active</td>
+                        <td className="p-2 font-bold">{s.name}</td>
+                        <td className="p-2 font-mono text-blue-600">{s.slug}</td>
+                        <td className="p-2 font-mono text-slate-500 truncate max-w-[200px]">{s.baseUrl}</td>
+                        <td className="p-2 text-right font-mono">{s.robotsPolicy}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
-
-          {/* Configured Collectors Breakdown */}
-          {activeTab === 'single' && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 border-b border-[var(--color-border-subtle)] pb-2">
-                <Bot className="w-4 h-4 text-[var(--color-brand-400)]" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
+            ) : (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase text-slate-700 dark:text-slate-300">
                   Configured Collectors ({collectors.length})
-                </h3>
-              </div>
-
-              {collectors.length > 0 ? (
-                <div className="border border-[var(--color-border-subtle)] rounded-xl overflow-hidden text-xs">
-                  <table className="w-full text-left">
-                    <thead className="bg-[var(--color-bg-base)] text-[var(--color-text-muted)] font-mono text-[10px] uppercase border-b border-[var(--color-border-subtle)]">
-                      <tr>
-                        <th className="p-2.5">Collector Name</th>
-                        <th className="p-2.5">Type</th>
-                        <th className="p-2.5">Target / Seed</th>
-                        <th className="p-2.5">Depth / Limits</th>
-                        <th className="p-2.5 text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--color-border-subtle)] font-sans">
-                      {collectors.map((c) => (
-                        <tr key={c.id}>
-                          <td className="p-2.5 font-semibold text-[var(--color-text-primary)]">{c.name}</td>
-                          <td className="p-2.5 font-mono text-[11px]">
-                            <span className="px-1.5 py-0.5 rounded bg-[var(--color-bg-overlay)] border border-[var(--color-border-subtle)]">
-                              {c.type}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-[var(--color-text-secondary)] font-mono text-[11px] truncate max-w-[200px]">
-                            {isWebCollector(c)
-                              ? c.configuration.startUrls?.[0] || '—'
-                              : isTelegramCollector(c)
-                              ? `@${c.configuration.channels?.[0] || '—'}`
-                              : '—'}
-                          </td>
-                          <td className="p-2.5 text-[var(--color-text-muted)] font-mono text-[11px]">
-                            {isWebCollector(c)
-                              ? `Max ${c.configuration.maxPages} pages (Depth ${c.configuration.maxDepth})`
-                              : isTelegramCollector(c)
-                              ? `Limit ${c.configuration.messageLimit} msgs`
-                              : '—'}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-[11px]">
-                            <span className={c.enabled ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-[var(--color-text-muted)]'}>
-                              {c.enabled ? 'Enabled' : 'Disabled'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
-              ) : (
-                <div className="text-xs text-[var(--color-text-muted)] py-3 text-center border border-dashed rounded-xl">
-                  No collectors configured for this source.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Downloaded Formats & Content Distribution */}
-          {Object.keys(extCounts).length > 0 && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 border-b border-[var(--color-border-subtle)] pb-2">
-                <Layers className="w-4 h-4 text-[var(--color-brand-400)]" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-                  Asset Extension Distribution
-                </h3>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(extCounts).map(([ext, count]) => (
-                  <div
-                    key={ext}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] text-xs"
-                  >
-                    <span className="font-mono font-bold uppercase text-[var(--color-brand-400)]">.{ext}</span>
-                    <span className="font-mono font-semibold text-[var(--color-text-primary)]">{count} files</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recent Collection Runs */}
-          {runs.length > 0 && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 border-b border-[var(--color-border-subtle)] pb-2">
-                <PlaySquare className="w-4 h-4 text-[var(--color-brand-400)]" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
-                  Recent Collection Runs ({runs.slice(0, 5).length})
-                </h3>
-              </div>
-
-              <div className="border border-[var(--color-border-subtle)] rounded-xl overflow-hidden text-xs">
-                <table className="w-full text-left">
-                  <thead className="bg-[var(--color-bg-base)] text-[var(--color-text-muted)] font-mono text-[10px] uppercase border-b border-[var(--color-border-subtle)]">
+                <table className="w-full text-left text-[11px] border border-slate-200 dark:border-slate-800 rounded">
+                  <thead className="bg-slate-50 dark:bg-slate-900 font-mono text-[9px] uppercase border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="p-2.5">Run ID</th>
-                      <th className="p-2.5">Date</th>
-                      <th className="p-2.5">Crawled</th>
-                      <th className="p-2.5">Downloaded</th>
-                      <th className="p-2.5 text-right">Status</th>
+                      <th className="p-2">Name</th>
+                      <th className="p-2">Type</th>
+                      <th className="p-2">Seed / Channel</th>
+                      <th className="p-2 text-right">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[var(--color-border-subtle)] font-mono text-[11px]">
-                    {runs.slice(0, 5).map((r) => (
-                      <tr key={r.id}>
-                        <td className="p-2.5 font-bold text-[var(--color-text-primary)]">{r.runId.slice(0, 16)}…</td>
-                        <td className="p-2.5 text-[var(--color-text-muted)]">
-                          {r.startedAt ? new Date(r.startedAt).toLocaleDateString() : '—'}
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {collectors.map((c) => (
+                      <tr key={c.id}>
+                        <td className="p-2 font-bold">{c.name}</td>
+                        <td className="p-2 font-mono">{c.type}</td>
+                        <td className="p-2 font-mono text-slate-500 truncate max-w-[200px]">
+                          {isWebCollector(c)
+                            ? c.configuration.startUrls?.[0] || '—'
+                            : isTelegramCollector(c)
+                            ? `@${c.configuration.channels?.[0] || '—'}`
+                            : '—'}
                         </td>
-                        <td className="p-2.5 text-[var(--color-text-secondary)]">{r.pagesCrawled}</td>
-                        <td className="p-2.5 text-[var(--color-text-secondary)]">{r.filesDownloaded}</td>
-                        <td className="p-2.5 text-right font-semibold">
-                          <span
-                            className={
-                              r.status === 'COMPLETED'
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : r.status === 'FAILED'
-                                ? 'text-rose-500'
-                                : 'text-amber-500'
-                            }
-                          >
-                            {r.status}
-                          </span>
+                        <td className="p-2 text-right font-bold text-emerald-600">
+                          {c.enabled ? 'Enabled' : 'Disabled'}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Report Footer */}
-          <div className="pt-4 border-t border-[var(--color-border-subtle)] flex items-center justify-between text-[10px] font-mono text-[var(--color-text-muted)]">
-            <div>Organization Data Platform (ODP) • Automated Pipeline Audit</div>
-            <div>Confidential & Proprietary Document</div>
+            {/* Document Footer */}
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
+              <div>Organization Data Platform (ODP) • AI Collection Engine</div>
+              <div>Confidential & Proprietary Document</div>
+            </div>
           </div>
         </div>
       </div>
