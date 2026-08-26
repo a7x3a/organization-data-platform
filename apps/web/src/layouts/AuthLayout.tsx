@@ -1,7 +1,8 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
-import { Database, Globe, ShieldCheck, Fingerprint, Copy, Archive } from 'lucide-react';
+import { Globe, ShieldCheck, Fingerprint, Copy, Archive } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { QaiLogo } from '../components/QaiLogo';
 
 const PIPELINE_STEPS = [
   { icon: Globe, label: 'Discover', desc: 'Crawl sources within explicit boundaries' },
@@ -16,9 +17,8 @@ export const AuthLayout: React.FC = () => {
     <div className="min-h-screen flex bg-[var(--color-bg-base)]">
       {/* Hero panel — hidden on small screens, the form always works standalone */}
       <div className="hidden lg:flex lg:w-[40%] flex-col justify-between p-14 border-r border-[var(--color-border)]">
-        <div className="flex items-center gap-2.5">
-          <Database className="w-5 h-5 text-[var(--color-brand-400)]" />
-          <span className="font-medium text-sm text-[var(--color-text-primary)]">ODP Platform</span>
+        <div>
+          <QaiLogo size="md" />
         </div>
 
         <div>

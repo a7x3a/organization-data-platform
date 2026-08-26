@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
-import { Database, Lock, User } from 'lucide-react';
+import { QaiLogo } from '../components/QaiLogo';
+import { Lock, User } from 'lucide-react';
 
 export const Login: React.FC = () => {
   const { t } = useTranslation();
@@ -34,11 +35,10 @@ export const Login: React.FC = () => {
 
   return (
     <div>
-      {/* Header — compact on large screens (hero panel already carries the
-          brand story), full identity on small screens where hero is hidden */}
+      {/* Header with QAI Logo */}
       <div className="mb-8">
-        <div className="lg:hidden inline-flex p-2.5 bg-[var(--color-brand-600)] text-white rounded-[var(--radius-lg)] mb-4">
-          <Database className="w-5 h-5" />
+        <div className="lg:hidden mb-5">
+          <QaiLogo size="md" />
         </div>
         <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           {t('auth.login')}

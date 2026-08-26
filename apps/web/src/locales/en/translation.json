@@ -141,8 +141,8 @@
       "password": "Password",
       "loginButton": "Sign in",
       "loginError": "Invalid username or password",
-      "platformTitle": "Organization Data Platform",
-      "platformSubtitle": "Web Collection System"
+      "platformTitle": "QAI Data Collector Platform",
+      "platformSubtitle": "Enterprise AI Data Acquisition Engine"
     },
     "common": {
       "loading": "Loading...",
