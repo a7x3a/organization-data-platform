@@ -102,12 +102,23 @@ MAX_FILENAME_LENGTH = 150
 
 
 def sanitize_filename(name: str) -> str:
-    """Make a string safe to use as a filename on both Windows and POSIX."""
-    cleaned = _UNSAFE_FILENAME_CHARS.sub(" ", name).strip(" .")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    if len(cleaned) > MAX_FILENAME_LENGTH:
-        cleaned = cleaned[:MAX_FILENAME_LENGTH].rstrip()
-    return cleaned or "unnamed"
+    """
+    Make a string safe to use as a filename on both Windows and POSIX:
+    - Replaces whitespace, hyphens, and unsafe characters with underscores ('_')
+    - Collapses multiple underscores into a single underscore
+    - Strips leading/trailing underscores, periods, and spaces
+    - Preserves Kurdish, Arabic, English, and other Unicode text
+    """
+    stem, ext = os.path.splitext(name)
+    cleaned_stem = _UNSAFE_FILENAME_CHARS.sub("_", stem)
+    cleaned_stem = re.sub(r"[\s\-_]+", "_", cleaned_stem).strip(" ._")
+    if len(cleaned_stem) > MAX_FILENAME_LENGTH:
+        cleaned_stem = cleaned_stem[:MAX_FILENAME_LENGTH].rstrip("_")
+
+    cleaned_ext = _UNSAFE_FILENAME_CHARS.sub("", ext).strip(" ._")
+    if cleaned_ext:
+        return f"{cleaned_stem or 'unnamed'}.{cleaned_ext.lower()}"
+    return cleaned_stem or "unnamed"
 
 
 def extract_pdf_title(file_path: str) -> Optional[str]:
@@ -479,11 +490,13 @@ async def download_file(
     if extracted_title and not is_generic_title(extracted_title):
         clean_title = sanitize_filename(extracted_title)
         if clean_title and clean_title != "unnamed":
-            file_name = clean_title + (extension or "")
+            base_t = os.path.splitext(clean_title)[0]
+            file_name = f"{base_t}{extension or ''}"
     elif preferred_name and not is_generic_title(preferred_name):
         clean_preferred = sanitize_filename(preferred_name)
         if clean_preferred and clean_preferred != "unnamed":
-            file_name = clean_preferred + (extension or "")
+            base_p = os.path.splitext(clean_preferred)[0]
+            file_name = f"{base_p}{extension or ''}"
 
     log.info(
         "download_completed",

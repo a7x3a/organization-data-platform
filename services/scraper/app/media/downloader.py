@@ -17,6 +17,7 @@ import httpx
 import structlog
 
 from app.config.settings import settings
+from app.downloader.downloader import sanitize_filename
 
 log = structlog.get_logger(__name__)
 
@@ -176,7 +177,7 @@ class MediaDownloader:
 
         return MediaDownloadResult(
             local_path=dest_path,
-            title=os.path.splitext(filename)[0],
+            title=sanitize_filename(os.path.splitext(filename)[0]),
             duration_seconds=None,
             mime_type=content_type,
             source_url=url,
