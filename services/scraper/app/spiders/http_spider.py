@@ -40,6 +40,7 @@ class CrawlConfig:
     request_delay_ms: int = 1000
     concurrency: int = 4
     request_timeout_seconds: int = 30
+    max_retries: int = 3
     robots_enabled: bool = True
     use_scrapling: bool = False
     stealth_mode: bool = False
