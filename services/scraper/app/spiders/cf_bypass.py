@@ -33,7 +33,20 @@ async def handle_cloudflare_challenge(page: Page, max_wait_seconds: int = 15) ->
                 log.info("cloudflare_challenge_passed", title=current_title, elapsed_seconds=i+1)
                 return True
 
-            # Scan page frames for Turnstile / Challenge iframe elements
+            # 1. Click bounding box of any Cloudflare challenge iframe on the page
+            cf_iframes = await page.query_selector_all("iframe[src*='challenges.cloudflare.com'], iframe[src*='turnstile'], #turnstile-wrapper iframe")
+            for iframe in cf_iframes:
+                try:
+                    box = await iframe.bounding_box()
+                    if box and box.get("width", 0) > 0:
+                        click_x = box["x"] + min(30, box["width"] / 2)
+                        click_y = box["y"] + box["height"] / 2
+                        await page.mouse.click(click_x, click_y)
+                        log.debug("cloudflare_turnstile_box_clicked", x=click_x, y=click_y)
+                except Exception:
+                    pass
+
+            # 2. Scan frames for Turnstile / Challenge iframe elements
             for frame in page.frames:
                 frame_url = frame.url.lower()
                 if "challenges.cloudflare.com" in frame_url or "turnstile" in frame_url or "challenge" in frame_url:

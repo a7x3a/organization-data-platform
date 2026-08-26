@@ -412,7 +412,6 @@ class CollectionJob:
         import json
         import hashlib
         from app.downloader.downloader import sanitize_filename
-        from app.pipeline.file_pipeline import canonical_filename
 
         body_text = page_doc.get("body_text", "").strip()
         if not body_text or len(body_text) < 30:
@@ -426,35 +425,44 @@ class CollectionJob:
 
         title = page_doc.get("title", "") or "web_content"
         clean_title = sanitize_filename(title)
+        file_name = f"{clean_title}.json" if clean_title else "web_content.json"
+        category = "data/web_content"
+        r2_key = f"{self._run_folder_key}/{category}/{file_name}"
 
         file_id = await self._pipeline.reserve_file_id(
             sourceUrl=page_doc.get("url"),
-            fileName=f"{clean_title}.json",
+            fileName=file_name,
             extension=".json",
             mimeType="application/json",
             fileSize=len(raw_bytes),
             sha256=sha256,
+            r2Key=r2_key,
         )
-
-        canon_name = canonical_filename(f"{clean_title}.json", file_id, ".json")
-        r2_key = f"{self._run_folder_key}/data/web_content/{canon_name}"
 
         try:
             storage.upload_bytes(raw_bytes, r2_key, "application/json")
-            manifest.record_file_downloaded(size=len(raw_bytes))
-            metadata.append({
-                "file_id": file_id,
-                "file_name": canon_name,
-                "original_filename": f"{clean_title}.json",
-                "sha256": sha256,
-                "size_bytes": len(raw_bytes),
-                "source_url": page_doc.get("url"),
-                "r2_key": r2_key,
-                "category": "data/web_content",
-                "type": "web_page_data",
-                "title": title,
-                "word_count": page_doc.get("word_count", 0),
-            }, category="data/web_content")
+            manifest.record_file_downloaded(
+                category=category,
+                file_name=file_name,
+                file_size=len(raw_bytes),
+            )
+            metadata.add(
+                file_id=file_id,
+                file_name=file_name,
+                file_type=".json",
+                mime_type="application/json",
+                file_size=len(raw_bytes),
+                sha256=sha256,
+                source_url=page_doc.get("url", ""),
+                final_url=page_doc.get("url", ""),
+                r2_key=r2_key,
+                extra_metadata={
+                    "category": category,
+                    "type": "web_page_data",
+                    "title": title,
+                    "word_count": page_doc.get("word_count", 0),
+                },
+            )
             log.info("web_data_extracted_and_stored", url=page_doc.get("url"), title=title, r2_key=r2_key)
         except Exception as e:
             log.warning("web_data_storage_failed", url=page_doc.get("url"), error=str(e))
