@@ -228,12 +228,11 @@ async def send_verification_code(phone_number: str, api_id: str, api_hash: str) 
     if not phone_clean.startswith("+"):
         phone_clean = f"+{phone_clean}"
 
-    # Save credentials in memory & .env
-    settings.telegram_api_id = api_id_int
-    settings.telegram_api_hash = api_hash_str
-    os.environ["TELEGRAM_API_ID"] = str(api_id_int)
-    os.environ["TELEGRAM_API_HASH"] = api_hash_str
-    update_env_file({"TELEGRAM_API_ID": str(api_id_int), "TELEGRAM_API_HASH": api_hash_str})
+    # Retain in-memory fallback if not already set
+    if not settings.telegram_api_id:
+        settings.telegram_api_id = api_id_int
+    if not settings.telegram_api_hash:
+        settings.telegram_api_hash = api_hash_str
 
     client = TelegramClient(StringSession(""), api_id_int, api_hash_str)
     await client.connect()
@@ -318,27 +317,13 @@ async def verify_code_and_login(
                 "error": "Failed to generate Telegram session string.",
             }
 
-        # Update active settings & environment
-        settings.telegram_session_string = session_str
-        settings.telegram_api_id = target_api_id_int
-        settings.telegram_api_hash = target_api_hash
-        os.environ["TELEGRAM_SESSION_STRING"] = session_str
-
-        save_persistent_telegram_session(target_api_id_int, target_api_hash, session_str)
-
-        update_env_file({
-            "TELEGRAM_API_ID": str(target_api_id_int),
-            "TELEGRAM_API_HASH": target_api_hash,
-            "TELEGRAM_SESSION_STRING": session_str,
-        })
-
         _pending_sessions.pop(phone_clean, None)
 
         user_info = {
             "id": getattr(me, "id", None),
             "first_name": getattr(me, "first_name", ""),
             "username": getattr(me, "username", ""),
-            "phone": getattr(me, "phone", ""),
+            "phone": getattr(me, "phone", "") or phone_clean,
         }
 
         log.info("telegram_authenticated_successfully", user=user_info)
@@ -347,6 +332,7 @@ async def verify_code_and_login(
             "success": True,
             "requires_2fa": False,
             "session_string": session_str,
+            "phone_number": phone_clean,
             "user": user_info,
         }
     finally:

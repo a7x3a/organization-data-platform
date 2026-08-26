@@ -40,7 +40,7 @@ router.post(
 // POST /api/auth/refresh
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
+    const refreshToken = req.body?.refreshToken || req.cookies?.refresh_token;
     if (!refreshToken) {
       res.status(401).json({ error: 'No refresh token', code: 'NO_REFRESH_TOKEN' });
       return;

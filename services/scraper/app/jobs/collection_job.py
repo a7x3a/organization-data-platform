@@ -424,8 +424,8 @@ class CollectionJob:
             return
 
         title = page_doc.get("title", "") or "web_content"
-        clean_title = sanitize_filename(title)
-        file_name = f"{clean_title}.json" if clean_title else "web_content.json"
+        clean_title = sanitize_filename(title)[:80]
+        file_name = f"{clean_title}_{sha256[:8]}.json" if clean_title else f"web_content_{sha256[:8]}.json"
         category = "data/web_content"
         r2_key = f"{self._run_folder_key}/{category}/{file_name}"
 

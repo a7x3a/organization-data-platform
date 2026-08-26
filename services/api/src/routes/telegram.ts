@@ -54,26 +54,16 @@ router.get('/status', async (req: Request, res: Response, _next: NextFunction) =
       });
     }
 
-    // Check system/scraper status as fallback
-    try {
-      const resp = await fetchFromScraper('/telegram/status', { timeout: 8000 } as any);
-      const data = (await resp.json()) as Record<string, unknown>;
-      return res.json({
-        ...data,
-        is_user_session: false,
-      });
-    } catch {
-      return res.json({
-        is_configured: false,
-        is_authorized: false,
-        is_user_session: false,
-      });
-    }
+    return res.json({
+      is_configured: false,
+      is_authorized: false,
+      is_user_session: false,
+    });
   } catch (err: any) {
     res.json({
       is_configured: false,
       is_authorized: false,
-      reason: err?.message || 'Scraper service unavailable',
+      reason: err?.message || 'Failed to check Telegram session status',
     });
   }
 });
@@ -107,13 +97,14 @@ router.post('/verify-code', async (req: Request, res: Response, _next: NextFunct
     const data = (await resp.json()) as any;
 
     if (resp.status === 200 && data.session_string) {
-      // Save session to current user's record in PostgreSQL
+      const phoneNumber = req.body.phone_number || req.body.phone || data.phone_number || data.user?.phone;
+      // Save session strictly to current user's record in PostgreSQL
       await prisma.userTelegramSession.upsert({
         where: { userId },
         create: {
           userId,
           sessionString: data.session_string,
-          phoneNumber: req.body.phone_number || data.phone_number,
+          phoneNumber,
           apiId: req.body.api_id ? parseInt(req.body.api_id, 10) : undefined,
           apiHash: req.body.api_hash,
           isVerified: true,
@@ -121,7 +112,7 @@ router.post('/verify-code', async (req: Request, res: Response, _next: NextFunct
         },
         update: {
           sessionString: data.session_string,
-          phoneNumber: req.body.phone_number || data.phone_number,
+          phoneNumber,
           apiId: req.body.api_id ? parseInt(req.body.api_id, 10) : undefined,
           apiHash: req.body.api_hash,
           isVerified: true,

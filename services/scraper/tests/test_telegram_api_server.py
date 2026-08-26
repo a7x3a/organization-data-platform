@@ -40,8 +40,7 @@ async def test_verify_code_and_login_successful_session():
     mock_session.save.return_value = "1BQAC..."
     mock_client.session = mock_session
 
-    with patch("app.telegram.api_server.TelegramClient", return_value=mock_client), \
-         patch("app.telegram.api_server.update_env_file"):
+    with patch("app.telegram.api_server.TelegramClient", return_value=mock_client) as mock_tg_cls:
         res = await verify_code_and_login(
             phone_number="+1234567890",
             phone_code_hash="hash123",
@@ -52,8 +51,7 @@ async def test_verify_code_and_login_successful_session():
         assert res["success"] is True
         assert res["session_string"] == "1BQAC..."
         assert res["user"]["id"] == 123
-        assert isinstance(settings.telegram_api_id, int)
-        assert settings.telegram_api_id == 12345
+        assert mock_tg_cls.call_args[0][1] == 12345
 
 
 @pytest.mark.asyncio
@@ -63,8 +61,7 @@ async def test_send_verification_code_converts_api_id_to_int():
     mock_client.send_code_request = AsyncMock(return_value=MagicMock(phone_code_hash="hash123"))
     mock_client.disconnect = AsyncMock()
 
-    with patch("app.telegram.api_server.TelegramClient", return_value=mock_client), \
-         patch("app.telegram.api_server.update_env_file"):
+    with patch("app.telegram.api_server.TelegramClient", return_value=mock_client) as mock_tg_cls:
         res = await send_verification_code(
             phone_number="+1234567890",
             api_id="99999",
@@ -72,6 +69,5 @@ async def test_send_verification_code_converts_api_id_to_int():
         )
         assert res["success"] is True
         assert res["phone_code_hash"] == "hash123"
-        assert isinstance(settings.telegram_api_id, int)
-        assert settings.telegram_api_id == 99999
+        assert mock_tg_cls.call_args[0][1] == 99999
 

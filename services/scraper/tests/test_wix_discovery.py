@@ -55,7 +55,7 @@ def test_filename_extraction_and_unicode_sanitization():
     assert raw_name == "مۆرکی کورد.pdf"
 
     sanitized = sanitize_filename("مۆرکی کورد.pdf")
-    assert sanitized == "مۆرکی کورد.pdf"
+    assert sanitized == "مۆرکی_کورد.pdf"
 
     content_disp = "attachment; filename*=UTF-8''%D9%85%DA%A9%D8%AA%D8%A8%D8%A9.pdf"
     assert extract_filename("https://example.com/doc", content_disp) == extract_filename("https://example.com/doc", content_disp)

@@ -42,7 +42,7 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
   // Phone input split state
   const [countryCode, setCountryCode] = useState('+964');
   const [customPrefix, setCustomPrefix] = useState('+');
-  const [localNumber, setLocalNumber] = useState('7766986183');
+  const [localNumber, setLocalNumber] = useState('');
 
   // Form state
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
@@ -54,7 +54,7 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
   const getFullPhoneNumber = () => {
     const activePrefix = countryCode === 'other' ? customPrefix.trim() : countryCode;
     let cleanLocal = localNumber.trim().replace(/[\s\-\(\)]/g, '');
-    // If local number starts with 0 (e.g. 07766986183), trim the leading 0 when prefix is present
+    // If local number starts with 0 (e.g. 07501234567), trim the leading 0 when prefix is present
     if (cleanLocal.startsWith('0') && activePrefix) {
       cleanLocal = cleanLocal.substring(1);
     }
@@ -96,8 +96,8 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
     setSuccessMsg(null);
 
     const fullPhone = getFullPhoneNumber();
-    if (!fullPhone || fullPhone.length < 8) {
-      setError('Please enter a valid phone number (e.g. 7766986183)');
+    if (!fullPhone || fullPhone.length < 8 || !localNumber.trim()) {
+      setError('Please enter a valid phone number (e.g. 7501234567)');
       return;
     }
 
@@ -324,7 +324,7 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
                         />
                         <Input
                           type="text"
-                          placeholder="7766986183"
+                          placeholder="7501234567"
                           value={localNumber}
                           onChange={(e) => setLocalNumber(e.target.value)}
                           required
@@ -333,7 +333,7 @@ export const TelegramSetupModal: React.FC<TelegramSetupModalProps> = ({ isOpen, 
                     ) : (
                       <Input
                         type="text"
-                        placeholder="e.g. 7766986183"
+                        placeholder="e.g. 7501234567"
                         value={localNumber}
                         onChange={(e) => setLocalNumber(e.target.value)}
                         required
