@@ -20,6 +20,9 @@ import { FileApprovalBadge } from '../components/FileApprovalBadge';
 import { DataTable, Column } from '../components/DataTable';
 import { Button } from '../components/Button';
 import { openFile, downloadFile } from '../lib/downloadFile';
+import { runsApi } from '../api/runs';
+import { filesApi } from '../api/files';
+import { JsonViewerModal } from '../components/JsonViewerModal';
 import {
   ArrowLeft,
   XCircle,
@@ -45,6 +48,8 @@ import {
   Image,
   Database,
   Sparkles,
+  FileCode2,
+  Eye,
 } from 'lucide-react';
 import { ApprovalStatus, CollectedFile, CollectorType, RunStatus, UserRole } from '@odp/shared-types';
 import { formatBytes, truncateSha256 } from '../lib/utils';
@@ -92,6 +97,149 @@ export const RunDetail: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [showPruneModal, setShowPruneModal] = useState(false);
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+
+  const [jsonModalState, setJsonModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    fileName?: string;
+    relativePath?: string;
+    localPath?: string;
+    data: unknown;
+    isLoading?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    data: null,
+  });
+
+  const handleViewManifest = async () => {
+    if (!run) return;
+    const typeFolder = run.collector?.type === CollectorType.TELEGRAM ? 'telegram' : 'web';
+    const relKey = run.manifestR2Key || `00_raw/${typeFolder}/${run.source?.slug || 'source'}/${run.runId}/manifest.json`;
+    setJsonModalState({
+      isOpen: true,
+      title: `Run Manifest — ${run.runId}`,
+      fileName: 'manifest.json',
+      relativePath: relKey,
+      localPath: `/app/storage/${relKey}`,
+      data: null,
+      isLoading: true,
+    });
+
+    try {
+      const res = await runsApi.getManifest(run.id);
+      setJsonModalState({
+        isOpen: true,
+        title: `Run Manifest — ${run.runId}`,
+        fileName: 'manifest.json',
+        relativePath: res.manifestKey || relKey,
+        localPath: `/app/storage/${res.manifestKey || relKey}`,
+        data: res.manifest || res.raw,
+        isLoading: false,
+      });
+    } catch {
+      setJsonModalState({
+        isOpen: true,
+        title: `Run Manifest — ${run.runId}`,
+        fileName: 'manifest.json',
+        relativePath: relKey,
+        localPath: `/app/storage/${relKey}`,
+        data: {
+          runId: run.runId,
+          status: run.status,
+          filesDownloaded: run.filesDownloaded,
+          filesFound: run.filesFound,
+          pagesCrawled: run.pagesCrawled,
+          r2Location: relKey,
+          note: 'Manifest saved to storage directory.',
+        },
+        isLoading: false,
+      });
+    }
+  };
+
+  const handleViewMetadata = async () => {
+    if (!run) return;
+    const typeFolder = run.collector?.type === CollectorType.TELEGRAM ? 'telegram' : 'web';
+    const relKey = `00_raw/${typeFolder}/${run.source?.slug || 'source'}/${run.runId}/metadata.jsonl`;
+    setJsonModalState({
+      isOpen: true,
+      title: `Run Metadata (JSONL) — ${run.runId}`,
+      fileName: 'metadata.jsonl',
+      relativePath: relKey,
+      localPath: `/app/storage/${relKey}`,
+      data: null,
+      isLoading: true,
+    });
+
+    try {
+      const res = await runsApi.getMetadata(run.id);
+      setJsonModalState({
+        isOpen: true,
+        title: `Run Metadata (JSONL) — ${run.runId} (${res.count ?? 0} records)`,
+        fileName: 'metadata.jsonl',
+        relativePath: res.metadataKey || relKey,
+        localPath: `/app/storage/${res.metadataKey || relKey}`,
+        data: res.lines && res.lines.length > 0 ? res.lines : res.raw,
+        isLoading: false,
+      });
+    } catch {
+      setJsonModalState({
+        isOpen: true,
+        title: `Run Metadata (JSONL) — ${run.runId}`,
+        fileName: 'metadata.jsonl',
+        relativePath: relKey,
+        localPath: `/app/storage/${relKey}`,
+        data: {
+          runId: run.runId,
+          totalFiles: files.length,
+          files: files.slice(0, 100).map((f) => ({
+            id: f.id,
+            fileName: f.fileName,
+            r2Key: f.r2Key,
+            size: f.fileSize,
+            sha256: f.sha256,
+            metadata: f.metadata,
+          })),
+        },
+        isLoading: false,
+      });
+    }
+  };
+
+  const handleViewFileJson = async (f: CollectedFile) => {
+    const isJsonFile = f.fileName.toLowerCase().endsWith('.json') || f.fileName.toLowerCase().endsWith('.jsonl') || isWebData(f);
+    setJsonModalState({
+      isOpen: true,
+      title: `Structured JSON Record — ${f.fileName}`,
+      fileName: f.fileName,
+      relativePath: f.r2Key || `00_raw/.../${f.fileName}`,
+      localPath: f.r2Key ? `/app/storage/${f.r2Key}` : undefined,
+      data: f.metadata || null,
+      isLoading: isJsonFile,
+    });
+
+    if (isJsonFile) {
+      try {
+        const res = await filesApi.getJsonContent(f.id);
+        setJsonModalState({
+          isOpen: true,
+          title: `Structured JSON Record — ${f.fileName}`,
+          fileName: f.fileName,
+          relativePath: res.r2Key || f.r2Key || `00_raw/.../${f.fileName}`,
+          localPath: (res.r2Key || f.r2Key) ? `/app/storage/${res.r2Key || f.r2Key}` : undefined,
+          data: res.data || res.raw || f.metadata,
+          isLoading: false,
+        });
+      } catch {
+        setJsonModalState((prev) => ({
+          ...prev,
+          isLoading: false,
+          data: f.metadata || { error: 'Could not fetch file payload directly from disk' },
+        }));
+      }
+    }
+  };
 
   const canManage = run ? (isAdmin || !run.createdById || run.createdById === user?.id) : false;
 
@@ -278,19 +426,22 @@ export const RunDetail: React.FC = () => {
     },
     {
       header: 'File Name',
-      accessor: (f) => (
-        <div className="truncate max-w-xs" title={f.fileName}>
-          <button
-            type="button"
-            onClick={() => openFile(f)}
-            className="font-medium text-xs text-left truncate block text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer"
-            title={f.status === 'UPLOADED' ? 'Click to open/view file' : `Open ${f.sourceUrl || f.fileName}`}
-          >
-            {f.fileName}
-          </button>
-          <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate">{f.sourceUrl || '—'}</div>
-        </div>
-      ),
+      accessor: (f) => {
+        const isJson = f.fileName.toLowerCase().endsWith('.json') || f.fileName.toLowerCase().endsWith('.jsonl') || isWebData(f);
+        return (
+          <div className="truncate max-w-xs" title={f.fileName}>
+            <button
+              type="button"
+              onClick={() => (isJson ? handleViewFileJson(f) : openFile(f))}
+              className="font-medium text-xs text-left truncate block text-[var(--color-text-primary)] hover:text-[var(--color-brand-400)] hover:underline cursor-pointer"
+              title={isJson ? 'Click to inspect structured JSON' : f.status === 'UPLOADED' ? 'Click to open/view file' : `Open ${f.sourceUrl || f.fileName}`}
+            >
+              {f.fileName}
+            </button>
+            <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate">{f.sourceUrl || '—'}</div>
+          </div>
+        );
+      },
     },
     {
       header: 'Status',
@@ -328,60 +479,73 @@ export const RunDetail: React.FC = () => {
     {
       header: 'Actions',
       className: 'text-right pr-3',
-      accessor: (f) => (
-        <div className="flex items-center justify-end gap-1">
-          {canManage && (
-            <>
+      accessor: (f) => {
+        const isJson = f.fileName.toLowerCase().endsWith('.json') || f.fileName.toLowerCase().endsWith('.jsonl') || isWebData(f);
+        return (
+          <div className="flex items-center justify-end gap-1">
+            {isJson && (
               <button
                 type="button"
-                onClick={() =>
-                  setApprovalTarget({
-                    action: 'APPROVE',
-                    scope: 'SINGLE',
-                    fileId: f.id,
-                  })
-                }
-                title="Approve File"
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                  f.approvalStatus === ApprovalStatus.APPROVED
-                    ? 'text-emerald-400 bg-emerald-500/10'
-                    : 'text-[var(--color-text-muted)] hover:text-emerald-400 hover:bg-emerald-500/10'
-                }`}
+                onClick={() => handleViewFileJson(f)}
+                title="Inspect JSON Data & Path"
+                className="p-1.5 rounded-md text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer"
               >
-                <Check className="w-3.5 h-3.5" />
+                <FileCode2 className="w-3.5 h-3.5" />
               </button>
+            )}
+            {canManage && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'APPROVE',
+                      scope: 'SINGLE',
+                      fileId: f.id,
+                    })
+                  }
+                  title="Approve File"
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    f.approvalStatus === ApprovalStatus.APPROVED
+                      ? 'text-emerald-400 bg-emerald-500/10'
+                      : 'text-[var(--color-text-muted)] hover:text-emerald-400 hover:bg-emerald-500/10'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setApprovalTarget({
+                      action: 'REJECT',
+                      scope: 'SINGLE',
+                      fileId: f.id,
+                    })
+                  }
+                  title="Decline / Reject File"
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    f.approvalStatus === ApprovalStatus.REJECTED
+                      ? 'text-rose-400 bg-rose-500/10'
+                      : 'text-[var(--color-text-muted)] hover:text-rose-400 hover:bg-rose-500/10'
+                  }`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+            {f.status === 'UPLOADED' && (
               <button
                 type="button"
-                onClick={() =>
-                  setApprovalTarget({
-                    action: 'REJECT',
-                    scope: 'SINGLE',
-                    fileId: f.id,
-                  })
-                }
-                title="Decline / Reject File"
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                  f.approvalStatus === ApprovalStatus.REJECTED
-                    ? 'text-rose-400 bg-rose-500/10'
-                    : 'text-[var(--color-text-muted)] hover:text-rose-400 hover:bg-rose-500/10'
-                }`}
+                onClick={() => handleDownload(f.id)}
+                title="Download file directly"
+                className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-brand-400)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <Download className="w-3.5 h-3.5" />
               </button>
-            </>
-          )}
-          {f.status === 'UPLOADED' && (
-            <button
-              type="button"
-              onClick={() => downloadFile(f)}
-              title="Download file"
-              className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-brand-400)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      ),
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -696,12 +860,40 @@ export const RunDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* R2 Run folder reference */}
-      <div className="text-xs font-mono flex flex-wrap items-center justify-between bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl px-4 py-3 shadow-xs gap-2">
-        <span className="text-[var(--color-text-muted)] font-medium">R2 Raw Storage Location:</span>
-        <span className="text-[var(--color-brand-400)] bg-[var(--color-bg-overlay)] px-2.5 py-1 rounded-md border border-[var(--color-border-subtle)] select-all font-semibold">
-          00_raw/{run.collector?.type === CollectorType.TELEGRAM ? 'telegram' : 'web'}/{run.source?.slug}/{run.runId}/
-        </span>
+      {/* R2 Run folder reference & Quick Manifest/Metadata Viewers */}
+      <div className="text-xs font-mono flex flex-wrap items-center justify-between bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl px-4 py-3 shadow-xs gap-3">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <span className="text-[var(--color-text-muted)] font-medium">Storage Folder (Relative):</span>
+          <span className="text-[var(--color-brand-400)] bg-[var(--color-bg-overlay)] px-2.5 py-1 rounded-md border border-[var(--color-border-subtle)] select-all font-semibold break-all">
+            00_raw/{run.collector?.type === CollectorType.TELEGRAM ? 'telegram' : 'web'}/{run.source?.slug || 'source'}/{run.runId}/
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleViewManifest}
+            className="text-xs font-semibold h-7.5 px-2.5 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10"
+            title="Inspect run manifest JSON"
+          >
+            <FileCode2 className="w-3.5 h-3.5 mr-1 text-cyan-400" />
+            Manifest JSON
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleViewMetadata}
+            className="text-xs font-semibold h-7.5 px-2.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+            title="Inspect run metadata JSONL"
+          >
+            <Database className="w-3.5 h-3.5 mr-1 text-amber-400" />
+            Metadata JSONL
+          </Button>
+        </div>
       </div>
 
       {/* Live Log Console Terminal */}
@@ -1018,6 +1210,18 @@ export const RunDetail: React.FC = () => {
         onConfirm={handleBulkDelete}
         onCancel={() => setShowBulkDeleteModal(false)}
         isLoading={bulkDelete.isPending}
+      />
+
+      {/* Structured JSON Modal Viewer */}
+      <JsonViewerModal
+        isOpen={jsonModalState.isOpen}
+        onClose={() => setJsonModalState((prev) => ({ ...prev, isOpen: false }))}
+        title={jsonModalState.title}
+        fileName={jsonModalState.fileName}
+        relativePath={jsonModalState.relativePath}
+        localPath={jsonModalState.localPath}
+        data={jsonModalState.data}
+        isLoading={jsonModalState.isLoading}
       />
     </div>
   );

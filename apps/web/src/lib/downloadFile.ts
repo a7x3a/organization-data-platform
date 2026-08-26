@@ -102,7 +102,20 @@ export async function downloadFile(fileOrId: Pick<CollectedFile, 'id' | 'fileNam
         document.body.removeChild(a);
       }
     } catch (fallbackErr: any) {
-      alert(fallbackErr?.response?.data?.message || err?.response?.data?.message || 'Could not download file');
+      alert(fallbackErr?.response?.data?.message || fallbackErr?.response?.data?.error || err?.response?.data?.error || err?.message || 'Could not download file');
     }
   }
+}
+
+export function downloadJsonData(data: unknown, filename: string): void {
+  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename.endsWith('.json') || filename.endsWith('.jsonl') ? filename : `${filename}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
 }

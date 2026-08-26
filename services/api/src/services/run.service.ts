@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
+import { storageProvider } from './storage';
 import { AppError } from '../middleware/errorHandler';
 import { parsePagination, toPrismaSkipTake, buildPaginatedResult } from '../utils/pagination';
 import { collectionQueue } from '../queues/collection.queue';
@@ -189,8 +190,6 @@ export async function startCollectionRun(collectorId: string, userId: string) {
 }
 
 const ACTIVE_STATUSES: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
-
-import { storageProvider } from './storage';
 
 export async function deleteRun(id: string, deleteFiles: boolean = false, currentUser?: CurrentUser) {
   const run = await getRunById(id, currentUser);
@@ -589,4 +588,50 @@ export async function getDashboardStats() {
     totalFailedFiles: failedCount,
     recentRuns,
   };
+}
+
+export async function getRunManifest(id: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id, currentUser);
+  const typeFolder = run.collector?.type?.toLowerCase() === 'telegram' ? 'telegram' : 'web';
+  const slug = run.source?.slug || 'unknown';
+  const manifestKey = run.manifestR2Key || `00_raw/${typeFolder}/${slug}/${run.runId}/manifest.json`;
+
+  const buf = await storageProvider.getBuffer(manifestKey);
+  if (!buf) {
+    throw new AppError(404, 'Run manifest file not found on storage', 'MANIFEST_NOT_FOUND');
+  }
+
+  try {
+    const json = JSON.parse(buf.toString('utf-8'));
+    return { manifestKey, manifest: json };
+  } catch {
+    return { manifestKey, raw: buf.toString('utf-8') };
+  }
+}
+
+export async function getRunMetadata(id: string, currentUser?: CurrentUser) {
+  const run = await getRunById(id, currentUser);
+  const typeFolder = run.collector?.type?.toLowerCase() === 'telegram' ? 'telegram' : 'web';
+  const slug = run.source?.slug || 'unknown';
+  const metadataKey = `00_raw/${typeFolder}/${slug}/${run.runId}/metadata.jsonl`;
+
+  const buf = await storageProvider.getBuffer(metadataKey);
+  if (!buf) {
+    throw new AppError(404, 'Run metadata file not found on storage', 'METADATA_NOT_FOUND');
+  }
+
+  const raw = buf.toString('utf-8');
+  const lines = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return { raw: l };
+      }
+    });
+
+  return { metadataKey, lines, count: lines.length, raw };
 }

@@ -47,6 +47,36 @@ router.get(
   }
 );
 
+// GET /api/runs/:id/manifest — Fetch raw/parsed run manifest JSON
+router.get(
+  '/:id/manifest',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const manifestData = await runService.getRunManifest(req.params.id, currentUser);
+      res.json(manifestData);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// GET /api/runs/:id/metadata — Fetch run metadata JSONL
+router.get(
+  '/:id/metadata',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const currentUser = req.user ? { sub: req.user.sub, roles: req.user.roles || [] } : undefined;
+      const metadataData = await runService.getRunMetadata(req.params.id, currentUser);
+      res.json(metadataData);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // DELETE /api/runs/:id — Data Manager+ or run owner. Only terminal-status runs can be cleared
 router.delete(
   '/:id',

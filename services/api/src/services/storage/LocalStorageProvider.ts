@@ -15,7 +15,14 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   private resolveKey(key: string): string {
-    const resolved = path.resolve(this.root, key);
+    // Normalize key: strip leading slashes/backslashes and strip any redundant storage/ or app/storage/ prefix
+    let cleanKey = key.trim().replace(/^[/\\]+/, '');
+    if (cleanKey.startsWith('storage/')) {
+      cleanKey = cleanKey.slice('storage/'.length);
+    } else if (cleanKey.startsWith('app/storage/')) {
+      cleanKey = cleanKey.slice('app/storage/'.length);
+    }
+    const resolved = path.resolve(this.root, cleanKey);
     // Never allow a storage key to escape the storage root.
     if (!resolved.startsWith(this.root + path.sep) && resolved !== this.root) {
       throw new Error(`Storage key resolves outside storage root: ${key}`);

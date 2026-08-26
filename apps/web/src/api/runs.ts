@@ -53,4 +53,14 @@ export const runsApi = {
     const res = await apiClient.post<CollectionRun>(`/runs/${id}/reject`, { notes });
     return res.data;
   },
+
+  getManifest: async (id: string): Promise<{ manifestKey: string; manifest?: any; raw?: string }> => {
+    const res = await apiClient.get<{ manifestKey: string; manifest?: any; raw?: string }>(`/runs/${id}/manifest`);
+    return res.data;
+  },
+
+  getMetadata: async (id: string): Promise<{ metadataKey: string; lines?: any[]; count: number; raw?: string }> => {
+    const res = await apiClient.get<{ metadataKey: string; lines?: any[]; count: number; raw?: string }>(`/runs/${id}/metadata`);
+    return res.data;
+  },
 };

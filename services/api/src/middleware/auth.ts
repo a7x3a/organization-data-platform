@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
+import { prisma } from '../config/prisma';
 import { UserRole } from '@odp/shared-types';
 
 export interface JwtPayload {
@@ -21,11 +22,11 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or invalid authorization header' });
+    res.status(401).json({ error: 'Missing or invalid authorization header', code: 'UNAUTHORIZED' });
     return;
   }
 
@@ -33,7 +34,26 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
   try {
     const payload = jwt.verify(token, env.AUTH_ACCESS_SECRET) as JwtPayload;
-    req.user = payload;
+
+    // Verify user still exists in database and has not been deleted or deactivated
+    const dbUser = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, isActive: true, roles: true, username: true },
+    });
+
+    if (!dbUser || !dbUser.isActive) {
+      res.status(401).json({
+        error: 'User account has been deleted or deactivated',
+        code: 'USER_DELETED_OR_INACTIVE',
+      });
+      return;
+    }
+
+    req.user = {
+      ...payload,
+      roles: dbUser.roles as UserRole[],
+      username: dbUser.username,
+    };
     next();
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) {

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
@@ -19,6 +20,27 @@ import {
 } from '../schemas/index';
 import * as fileService from '../services/file.service';
 import { storageProvider, LocalStorageProvider } from '../services/storage';
+
+function getEffectiveMimeType(fileName: string, mimeType?: string | null): string {
+  if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
+  const ext = path.extname(fileName).toLowerCase();
+  switch (ext) {
+    case '.json': return 'application/json; charset=utf-8';
+    case '.jsonl': return 'application/x-ndjson; charset=utf-8';
+    case '.pdf': return 'application/pdf';
+    case '.txt': return 'text/plain; charset=utf-8';
+    case '.md': return 'text/markdown; charset=utf-8';
+    case '.csv': return 'text/csv; charset=utf-8';
+    case '.epub': return 'application/epub+zip';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.png': return 'image/png';
+    case '.webp': return 'image/webp';
+    case '.mp3': return 'audio/mpeg';
+    case '.mp4': return 'video/mp4';
+    default: return mimeType || 'application/octet-stream';
+  }
+}
 
 const router = Router();
 
@@ -133,10 +155,29 @@ router.get(
       if (!file.r2Key) {
         throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
       }
+
       if (storageProvider instanceof LocalStorageProvider) {
-        const filePath = storageProvider.resolvePath(file.r2Key);
-        return res.download(filePath, file.fileName || path.basename(filePath));
+        let filePath = storageProvider.resolvePath(file.r2Key);
+        if (!fs.existsSync(filePath)) {
+          const cleanKey = file.r2Key.replace(/^[/\\]+/, '');
+          const altPath = storageProvider.resolvePath(cleanKey);
+          if (fs.existsSync(altPath)) {
+            filePath = altPath;
+          }
+        }
+
+        const effectiveName = file.fileName || path.basename(filePath);
+        const effectiveMime = getEffectiveMimeType(effectiveName, file.mimeType);
+
+        res.setHeader('Content-Type', effectiveMime);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
+        return res.download(filePath, effectiveName, (err) => {
+          if (err && !res.headersSent) {
+            next(new AppError(404, 'File not found on local storage', 'FILE_NOT_FOUND'));
+          }
+        });
       }
+
       const { url } = await storageProvider.getSignedUrl(file.r2Key);
       return res.redirect(url);
     } catch (err) {
@@ -145,7 +186,7 @@ router.get(
   }
 );
 
-// GET /api/files/:id/content — Serves file inline (view PDF/media directly in browser)
+// GET /api/files/:id/content — Serves file inline (view PDF/media/JSON directly in browser)
 router.get(
   '/:id/content',
   validate(idParamSchema, 'params'),
@@ -155,16 +196,76 @@ router.get(
       if (!file.r2Key) {
         throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
       }
+
       if (storageProvider instanceof LocalStorageProvider) {
-        const filePath = storageProvider.resolvePath(file.r2Key);
-        if (file.mimeType) {
-          res.setHeader('Content-Type', file.mimeType);
+        let filePath = storageProvider.resolvePath(file.r2Key);
+        if (!fs.existsSync(filePath)) {
+          const cleanKey = file.r2Key.replace(/^[/\\]+/, '');
+          const altPath = storageProvider.resolvePath(cleanKey);
+          if (fs.existsSync(altPath)) {
+            filePath = altPath;
+          }
         }
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.fileName || path.basename(filePath))}"`);
-        return res.sendFile(filePath);
+
+        const effectiveName = file.fileName || path.basename(filePath);
+        const effectiveMime = getEffectiveMimeType(effectiveName, file.mimeType);
+
+        res.setHeader('Content-Type', effectiveMime);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
+        res.setHeader(
+          'Content-Disposition',
+          `inline; filename="${encodeURIComponent(effectiveName)}"`
+        );
+        return res.sendFile(filePath, (err) => {
+          if (err && !res.headersSent) {
+            next(new AppError(404, 'File not found on local storage', 'FILE_NOT_FOUND'));
+          }
+        });
       }
+
       const { url } = await storageProvider.getSignedUrl(file.r2Key);
       return res.redirect(url);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// GET /api/files/:id/json — Fetch parsed JSON content for structured previewing
+router.get(
+  '/:id/json',
+  validate(idParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = await fileService.getFileById(req.params.id);
+      if (!file.r2Key) {
+        throw new AppError(404, 'File not uploaded or missing key', 'FILE_NOT_FOUND');
+      }
+
+      const buf = await storageProvider.getBuffer(file.r2Key);
+      if (!buf) {
+        throw new AppError(404, 'File content not found on storage', 'FILE_NOT_FOUND');
+      }
+
+      const rawText = buf.toString('utf-8');
+      try {
+        const parsed = JSON.parse(rawText);
+        return res.json({
+          fileId: file.id,
+          fileName: file.fileName,
+          r2Key: file.r2Key,
+          isJson: true,
+          data: parsed,
+        });
+      } catch {
+        return res.json({
+          fileId: file.id,
+          fileName: file.fileName,
+          r2Key: file.r2Key,
+          isJson: false,
+          raw: rawText,
+        });
+      }
     } catch (err) {
       next(err);
     }
@@ -181,7 +282,9 @@ router.get('/local-storage/*', (req: Request, res: Response, next: NextFunction)
     const rawKey = req.params[0] || req.path.replace(/^\/local-storage\//, '');
     const filePath = storageProvider.resolvePath(decodeURIComponent(rawKey));
     res.sendFile(filePath, (err) => {
-      if (err) next(new AppError(404, 'File not found on local storage', 'FILE_NOT_FOUND'));
+      if (err && !res.headersSent) {
+        next(new AppError(404, 'File not found on local storage', 'FILE_NOT_FOUND'));
+      }
     });
   } catch (err) {
     next(err);

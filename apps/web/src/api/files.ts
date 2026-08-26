@@ -130,6 +130,10 @@ export const filesApi = {
 
   getContentUrl: (id: string) => `/api/files/${id}/content`,
   getDownloadUrlDirect: (id: string) => `/api/files/${id}/download`,
+  getJsonContent: async (id: string): Promise<{ fileId: string; fileName: string; r2Key?: string; isJson: boolean; data?: any; raw?: string }> => {
+    const res = await apiClient.get<{ fileId: string; fileName: string; r2Key?: string; isJson: boolean; data?: any; raw?: string }>(`/files/${id}/json`);
+    return res.data;
+  },
 };
 
 export function openCollectedFile(file: Pick<CollectedFile, 'id' | 'status' | 'sourceUrl'>) {
