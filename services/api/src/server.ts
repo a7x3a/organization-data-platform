@@ -22,6 +22,7 @@ import runsRouter from './routes/runs';
 import filesRouter from './routes/files';
 import usersRouter from './routes/users';
 import telegramRouter from './routes/telegram';
+import * as fileService from './services/file.service';
 
 // ─── App setup ───────────────────────────────────────────────
 
@@ -137,6 +138,13 @@ async function start() {
         { port: env.API_PORT, host: env.API_HOST, env: env.NODE_ENV },
         'API server started'
       );
+
+      // Background storage directory auto-discovery & healing on startup
+      setTimeout(() => {
+        fileService.syncStorageDirectories().catch((err: unknown) => {
+          logger.warn({ err }, 'startup_storage_sync_warning');
+        });
+      }, 1000);
     });
 
     // ─── Graceful Shutdown ────────────────────────────────────

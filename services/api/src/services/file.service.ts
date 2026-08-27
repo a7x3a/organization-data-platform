@@ -472,15 +472,27 @@ export async function syncStorageDirectories() {
   let syncedCount = 0;
   let missingCount = 0;
   let indexedNewCount = 0;
+  let restoredRunsCount = 0;
+  let restoredMetadataCount = 0;
 
   const existingR2KeysInDb = new Set<string>();
+  const existingSha256InDb = new Set<string>();
+
+  for (const f of dbFiles) {
+    if (f.r2Key) {
+      existingR2KeysInDb.add(f.r2Key);
+      existingR2KeysInDb.add(f.r2Key.replace(/^[/\\]+/, ''));
+    }
+    if (f.sha256) {
+      existingSha256InDb.add(f.sha256.toLowerCase());
+    }
+  }
 
   // 1. Reconcile DB -> Storage: verify files in DB without deleting any database records
   for (const f of dbFiles) {
     if (f.r2Key) {
       const exists = await storageProvider.exists(f.r2Key);
       if (exists) {
-        existingR2KeysInDb.add(f.r2Key);
         syncedCount++;
       } else {
         missingCount++;
@@ -488,10 +500,9 @@ export async function syncStorageDirectories() {
     }
   }
 
-  // 2. Reconcile Storage -> DB: scan local storage folder to index any uncataloged files
+  // 2. Reconcile Storage -> DB: Deep multi-pass directory scanner
   try {
     const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
-    const rawRoot = path.join(localStorageDir, '00_raw');
 
     async function walkDir(dir: string, fileList: string[] = []): Promise<string[]> {
       try {
@@ -499,9 +510,14 @@ export async function syncStorageDirectories() {
         for (const entry of entries) {
           const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
-            await walkDir(fullPath, fileList);
+            // Skip system hidden dirs
+            if (!entry.name.startsWith('.')) {
+              await walkDir(fullPath, fileList);
+            }
           } else if (entry.isFile()) {
-            fileList.push(fullPath);
+            if (!entry.name.startsWith('.') && !entry.name.endsWith('.tmp')) {
+              fileList.push(fullPath);
+            }
           }
         }
       } catch {
@@ -510,94 +526,332 @@ export async function syncStorageDirectories() {
       return fileList;
     }
 
-    const diskFiles = await walkDir(rawRoot);
+    const allDiskFiles = await walkDir(localStorageDir);
     const sources = await prisma.source.findMany();
-    const sourceMap = new Map(sources.map((s) => [s.slug, s.id]));
-    const runs = await prisma.collectionRun.findMany();
-    const runMap = new Map(runs.map((r) => [r.runId, r.id]));
+    const sourceMap = new Map<string, string>();
+    for (const s of sources) {
+      sourceMap.set(s.slug.toLowerCase(), s.id);
+      sourceMap.set(s.name.toLowerCase(), s.id);
+    }
 
-    for (const diskFile of diskFiles) {
+    const runs = await prisma.collectionRun.findMany();
+    const runMap = new Map<string, string>();
+    for (const r of runs) {
+      runMap.set(r.runId, r.id);
+      runMap.set(r.id, r.id);
+    }
+
+    // Helper to get or create source by slug
+    async function getOrCreateSource(slug: string, name?: string, baseUrl?: string): Promise<string> {
+      const normalizedSlug = slug.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'general-source';
+      if (sourceMap.has(normalizedSlug)) {
+        return sourceMap.get(normalizedSlug)!;
+      }
+      const newSource = await prisma.source.create({
+        data: {
+          name: name || slug.replace(/[-_]/g, ' ').toUpperCase(),
+          slug: normalizedSlug,
+          baseUrl: baseUrl || `https://${normalizedSlug}.com`,
+          robotsPolicy: 'RESPECT',
+          enabled: true,
+        },
+      });
+      sourceMap.set(normalizedSlug, newSource.id);
+      sourceMap.set(newSource.name.toLowerCase(), newSource.id);
+      return newSource.id;
+    }
+
+    // Helper to get or create collector
+    async function getOrCreateCollector(sourceId: string, name = 'Auto-Discovered Web Crawler'): Promise<string> {
+      const existing = await prisma.collector.findFirst({
+        where: { sourceId },
+      });
+      if (existing) return existing.id;
+      const newC = await prisma.collector.create({
+        data: {
+          sourceId,
+          name,
+          type: 'WEB',
+          configuration: { maxPages: 500, maxDepth: 4 },
+          enabled: true,
+        },
+      });
+      return newC.id;
+    }
+
+    // Helper to get or create collection run
+    async function getOrCreateRun(runId: string, sourceId: string, collectorId?: string): Promise<string> {
+      if (runMap.has(runId)) {
+        return runMap.get(runId)!;
+      }
+      const cId = collectorId || (await getOrCreateCollector(sourceId));
+      const newRun = await prisma.collectionRun.create({
+        data: {
+          runId,
+          sourceId,
+          collectorId: cId,
+          status: 'COMPLETED',
+          startedAt: new Date(),
+          completedAt: new Date(),
+          pagesCrawled: 1,
+          filesDownloaded: 1,
+        },
+      });
+      runMap.set(runId, newRun.id);
+      restoredRunsCount++;
+      return newRun.id;
+    }
+
+    // Categorize disk files
+    const manifestFiles = allDiskFiles.filter((f) => path.basename(f) === 'manifest.json');
+    const metadataJsonlFiles = allDiskFiles.filter((f) => path.basename(f) === 'metadata.jsonl');
+    const contentFiles = allDiskFiles.filter(
+      (f) => path.basename(f) !== 'manifest.json' && path.basename(f) !== 'metadata.jsonl'
+    );
+
+    // PASS 1: Recover from manifest.json
+    for (const mFile of manifestFiles) {
+      try {
+        const rawContent = await fs.readFile(mFile, 'utf-8');
+        const manifest = JSON.parse(rawContent);
+        const relKey = path.relative(localStorageDir, mFile).replace(/\\/g, '/');
+        const parts = relKey.split('/');
+
+        let sourceSlug = manifest.source_slug || manifest.target_slug;
+        if (!sourceSlug && parts.length >= 3) {
+          sourceSlug = parts[2];
+        }
+        if (!sourceSlug) sourceSlug = 'recovered-source';
+
+        const sourceId = await getOrCreateSource(
+          sourceSlug,
+          manifest.source_name,
+          manifest.base_url || manifest.start_url
+        );
+        const collectorId = await getOrCreateCollector(sourceId, manifest.collector_name);
+
+        const runId = manifest.run_id || (parts.length >= 4 ? parts[3] : `run_${Date.now()}`);
+        const existingRun = await prisma.collectionRun.findFirst({
+          where: { OR: [{ runId }, { id: runId }] },
+        });
+
+        if (!existingRun) {
+          const newRun = await prisma.collectionRun.create({
+            data: {
+              runId,
+              sourceId,
+              collectorId,
+              status: manifest.status || 'COMPLETED',
+              startedAt: manifest.started_at ? new Date(manifest.started_at) : new Date(),
+              completedAt: manifest.completed_at ? new Date(manifest.completed_at) : new Date(),
+              pagesCrawled: Number(manifest.stats?.pages_crawled || manifest.stats?.pages_visited || 0),
+              filesDownloaded: Number(manifest.stats?.files_downloaded || manifest.stats?.total_files || 0),
+              manifestR2Key: relKey,
+            },
+          });
+          runMap.set(runId, newRun.id);
+          restoredRunsCount++;
+        } else if (!existingRun.manifestR2Key) {
+          await prisma.collectionRun.update({
+            where: { id: existingRun.id },
+            data: { manifestR2Key: relKey },
+          });
+        }
+      } catch (err) {
+        logger.warn({ mFile, err }, 'failed_to_parse_manifest_json');
+      }
+    }
+
+    // PASS 2: Recover rich metadata from metadata.jsonl
+    for (const jsonlFile of metadataJsonlFiles) {
+      try {
+        const rawContent = await fs.readFile(jsonlFile, 'utf-8');
+        const lines = rawContent.split('\n').filter((l) => l.trim().length > 0);
+        const relDir = path.dirname(path.relative(localStorageDir, jsonlFile)).replace(/\\/g, '/');
+        const parts = relDir.split('/');
+
+        let sourceSlug = parts.length >= 3 ? parts[2] : 'recovered-source';
+        let runFolderKey = parts.length >= 4 ? parts[3] : '';
+
+        for (const line of lines) {
+          try {
+            const obj = JSON.parse(line);
+            const sha256 = (obj.sha256 || '').toLowerCase();
+            const relKey = obj.relative_path || obj.r2_key || (obj.file_name ? `${relDir}/${obj.file_name}` : null);
+            const fileName = obj.file_name || obj.title || (relKey ? path.basename(relKey) : 'document');
+            const ext = obj.extension || path.extname(fileName).toLowerCase() || '.json';
+
+            if (sha256 && existingSha256InDb.has(sha256)) {
+              continue;
+            }
+            if (relKey && existingR2KeysInDb.has(relKey)) {
+              continue;
+            }
+
+            const sourceId = await getOrCreateSource(obj.source_slug || sourceSlug);
+            let collectionRunId: string | null = null;
+            const targetRunKey = obj.run_id || runFolderKey;
+            if (targetRunKey) {
+              collectionRunId = await getOrCreateRun(targetRunKey, sourceId);
+            }
+
+            const seq = (await prisma.collectedFile.count()) + 1;
+            const fileId = obj.file_id || formatFileId(seq);
+
+            await prisma.collectedFile.create({
+              data: {
+                fileId,
+                sourceId,
+                collectionRunId,
+                sourceUrl: obj.url || obj.source_url || null,
+                finalUrl: obj.final_url || obj.url || null,
+                fileName,
+                originalFilename: obj.original_filename || fileName,
+                canonicalFilename: canonicalFilename(fileName, fileId, ext),
+                extension: ext,
+                mimeType: obj.mime_type || (ext === '.pdf' ? 'application/pdf' : ext === '.json' ? 'application/json' : 'application/octet-stream'),
+                fileSize: BigInt(obj.file_size || obj.size || 0),
+                sha256: sha256 || crypto.createHash('sha256').update(line).digest('hex'),
+                r2Key: relKey || `${relDir}/${fileName}`,
+                status: 'UPLOADED',
+                metadata: obj.metadata || {
+                  title: obj.title,
+                  word_count: obj.word_count,
+                  quality: obj.quality,
+                  language: obj.language,
+                  kurdish_category: obj.kurdish_category,
+                  headings: obj.headings,
+                  paragraphs: obj.paragraphs,
+                  body_text: obj.body_text,
+                },
+                downloadedAt: obj.downloaded_at ? new Date(obj.downloaded_at) : new Date(),
+              },
+            });
+
+            if (sha256) existingSha256InDb.add(sha256);
+            if (relKey) existingR2KeysInDb.add(relKey);
+            restoredMetadataCount++;
+            indexedNewCount++;
+            syncedCount++;
+          } catch {
+            // single line parse error ignored
+          }
+        }
+      } catch (err) {
+        logger.warn({ jsonlFile, err }, 'failed_to_process_metadata_jsonl');
+      }
+    }
+
+    // PASS 3: Index all standalone / uncataloged content files on disk
+    for (const diskFile of contentFiles) {
       const relKey = path.relative(localStorageDir, diskFile).replace(/\\/g, '/');
       const ext = path.extname(diskFile).toLowerCase();
       const baseName = path.basename(diskFile);
-
-      // Skip internal manifest & jsonl files from being indexed as standalone collected files
-      if (baseName === 'manifest.json' || baseName === 'metadata.jsonl') {
-        continue;
-      }
 
       if (existingR2KeysInDb.has(relKey)) {
         continue;
       }
 
-      // Check if already in DB
-      const existingInDb = await prisma.collectedFile.findFirst({ where: { r2Key: relKey } });
+      // Check DB directly
+      const existingInDb = await prisma.collectedFile.findFirst({
+        where: { r2Key: relKey },
+      });
       if (existingInDb) {
         existingR2KeysInDb.add(relKey);
         continue;
       }
 
-      // Parse path structure: 00_raw/{type}/{sourceSlug}/{runId}/...
-      const parts = relKey.split('/');
-      if (parts.length >= 3) {
-        const sourceSlug = parts[2];
-        let sourceId = sourceMap.get(sourceSlug);
-        if (!sourceId) {
-          // Auto-create source if not found
-          const newSource = await prisma.source.create({
-            data: {
-              name: sourceSlug.replace(/[-_]/g, ' ').toUpperCase(),
-              slug: sourceSlug,
-              baseUrl: `https://${sourceSlug}.com`,
-            },
-          });
-          sourceId = newSource.id;
-          sourceMap.set(sourceSlug, sourceId);
-        }
+      try {
+        const fileBuf = await fs.readFile(diskFile);
+        const sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex').toLowerCase();
 
-        let collectionRunId: string | null = null;
-        if (parts.length >= 4 && parts[3].includes('_run_')) {
-          const runKey = parts[3];
-          collectionRunId = runMap.get(runKey) || null;
-        }
-
-        try {
-          const fileBuf = await fs.readFile(diskFile);
-          const sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex');
-          const stat = await fs.stat(diskFile);
-          const seq = (await prisma.collectedFile.count()) + 1;
-          const fileId = formatFileId(seq);
-
-          await prisma.collectedFile.create({
-            data: {
-              fileId,
-              sourceId,
-              collectionRunId,
-              fileName: baseName,
-              originalFilename: baseName,
-              canonicalFilename: canonicalFilename(baseName, fileId, ext),
-              extension: ext,
-              mimeType: ext === '.pdf' ? 'application/pdf' : 'application/octet-stream',
-              fileSize: BigInt(stat.size),
-              sha256,
-              r2Key: relKey,
-              status: 'UPLOADED',
-              downloadedAt: stat.mtime || new Date(),
-            },
-          });
+        if (existingSha256InDb.has(sha256)) {
+          // File already known by hash under another key
           existingR2KeysInDb.add(relKey);
-          indexedNewCount++;
-          syncedCount++;
-        } catch (err) {
-          logger.warn({ diskFile, err }, 'failed_to_index_discovered_disk_file');
+          continue;
         }
+
+        const stat = await fs.stat(diskFile);
+        const parts = relKey.split('/');
+
+        // Determine source slug
+        let sourceSlug = 'recovered-source';
+        if (parts.length >= 3 && (parts[0] === '00_raw' || parts[0] === 'raw')) {
+          sourceSlug = parts[2];
+        } else if (parts.length >= 2) {
+          sourceSlug = parts[0] === '00_raw' ? parts[1] : parts[0];
+        }
+
+        const sourceId = await getOrCreateSource(sourceSlug);
+
+        // Determine collection run ID
+        let collectionRunId: string | null = null;
+        for (const segment of parts) {
+          if (segment.includes('_run_') || segment.startsWith('run_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(segment)) {
+            collectionRunId = await getOrCreateRun(segment, sourceId);
+            break;
+          }
+        }
+
+        // If JSON file, check if it contains article metadata
+        let metadata: Record<string, unknown> | undefined;
+        if (ext === '.json') {
+          try {
+            const parsed = JSON.parse(fileBuf.toString('utf-8'));
+            if (typeof parsed === 'object' && parsed !== null) {
+              metadata = parsed;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        const seq = (await prisma.collectedFile.count()) + 1;
+        const fileId = formatFileId(seq);
+
+        let mimeType = 'application/octet-stream';
+        if (ext === '.pdf') mimeType = 'application/pdf';
+        else if (ext === '.json') mimeType = 'application/json';
+        else if (ext === '.html' || ext === '.htm') mimeType = 'text/html; charset=utf-8';
+        else if (ext === '.txt') mimeType = 'text/plain; charset=utf-8';
+        else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+        else if (ext === '.png') mimeType = 'image/png';
+        else if (ext === '.webp') mimeType = 'image/webp';
+        else if (ext === '.mp3') mimeType = 'audio/mpeg';
+        else if (ext === '.mp4') mimeType = 'video/mp4';
+
+        await prisma.collectedFile.create({
+          data: {
+            fileId,
+            sourceId,
+            collectionRunId,
+            fileName: baseName,
+            originalFilename: baseName,
+            canonicalFilename: canonicalFilename(baseName, fileId, ext),
+            extension: ext,
+            mimeType,
+            fileSize: BigInt(stat.size),
+            sha256,
+            r2Key: relKey,
+            status: 'UPLOADED',
+            metadata: metadata ? (metadata as any) : undefined,
+            downloadedAt: stat.mtime || new Date(),
+          },
+        });
+
+        existingR2KeysInDb.add(relKey);
+        existingSha256InDb.add(sha256);
+        indexedNewCount++;
+        syncedCount++;
+      } catch (err) {
+        logger.warn({ diskFile, err }, 'failed_to_index_discovered_disk_file');
       }
     }
   } catch (err) {
     logger.warn({ err }, 'storage_directory_scan_failed');
   }
 
-  // 3. Recalculate run statistics in database to match actual files
+  // 4. Recalculate all collection run statistics to match actual recovered records
   try {
     const allRuns = await prisma.collectionRun.findMany({ select: { id: true } });
     for (const r of allRuns) {
@@ -614,7 +868,7 @@ export async function syncStorageDirectories() {
         where: { id: r.id },
         data: {
           filesDownloaded: actualUploadedCount,
-          filesFound: actualUploadedCount + actualDuplicateCount + actualFailedCount,
+          filesFound: Math.max(actualUploadedCount, actualUploadedCount + actualDuplicateCount + actualFailedCount),
           filesDuplicate: actualDuplicateCount,
           filesFailed: actualFailedCount,
         },
@@ -624,11 +878,24 @@ export async function syncStorageDirectories() {
     // ignore
   }
 
+  logger.info(
+    {
+      syncedCount,
+      indexedNewCount,
+      restoredRunsCount,
+      restoredMetadataCount,
+      missingCount,
+    },
+    'storage_synchronization_and_recovery_completed'
+  );
+
   return {
     provider: env.STORAGE_PROVIDER,
     totalChecked: dbFiles.length + indexedNewCount,
     syncedCount,
     indexedNewCount,
+    restoredRunsCount,
+    restoredMetadataCount,
     missingCount,
     timestamp: new Date().toISOString(),
   };

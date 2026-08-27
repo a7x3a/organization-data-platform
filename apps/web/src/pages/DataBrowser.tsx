@@ -881,7 +881,8 @@ export const DataBrowser: React.FC = () => {
     totalChecked: number;
     syncedCount: number;
     indexedNewCount?: number;
-    prunedOrphansCount?: number;
+    restoredRunsCount?: number;
+    restoredMetadataCount?: number;
     missingCount: number;
     timestamp: string;
   } | null>(null);
@@ -952,13 +953,12 @@ export const DataBrowser: React.FC = () => {
       {syncReport && (
         <div className="flex items-center justify-between p-4 rounded-[var(--radius-xl)] bg-[var(--color-bg-surface)] border border-[var(--color-brand-500)]/30 text-xs">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[var(--color-success-400)]" />
+            <CheckCircle2 className="w-4 h-4 text-[var(--color-success-400)] shrink-0" />
             <span>
-              <strong>Storage Sync Completed:</strong> Checked {syncReport.totalChecked} files under{' '}
-              <code className="font-mono">{syncReport.provider}</code> mode ({syncReport.syncedCount} verified on disk, {syncReport.indexedNewCount ?? 0} newly indexed from storage). All records preserved.
+              <strong>Storage Deep Sync &amp; Recovery Completed:</strong> Verified {syncReport.totalChecked} files ({syncReport.syncedCount} on disk, {syncReport.indexedNewCount ?? 0} newly recovered from storage, {syncReport.restoredRunsCount ?? 0} runs restored, {syncReport.restoredMetadataCount ?? 0} metadata records linked). <strong>0 files removed — all historical data safely preserved.</strong>
             </span>
           </div>
-          <button onClick={() => setSyncReport(null)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+          <button onClick={() => setSyncReport(null)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer ml-3">
             <X className="w-4 h-4" />
           </button>
         </div>

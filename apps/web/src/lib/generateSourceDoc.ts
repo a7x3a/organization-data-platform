@@ -1,4 +1,4 @@
-import { Source, CollectedFile, CollectionRun, Collector, isWebCollector, isTelegramCollector } from '@odp/shared-types';
+import { Source, CollectedFile, CollectionRun, Collector } from '@odp/shared-types';
 import { formatBytes } from './utils';
 
 export interface SourceReportData {
@@ -13,990 +13,491 @@ export function generateSourceReportHtml(options: {
   reportCode: string;
   sourcesData: SourceReportData[];
   isCombined?: boolean;
+  userName?: string;
 }): string {
-  const { title, reportCode, sourcesData, isCombined = false } = options;
+  const { title, reportCode, sourcesData, isCombined = false, userName = 'System Administrator' } = options;
   const now = new Date().toLocaleString('en-US', {
-    dateStyle: 'full',
-    timeStyle: 'medium',
+    dateStyle: 'medium',
+    timeStyle: 'short',
   });
 
-  // Calculate platform totals
-  const totalSources = sourcesData.length;
-  const totalCollectors = sourcesData.reduce((acc, s) => acc + s.collectors.length, 0);
-  const totalRuns = sourcesData.reduce((acc, s) => acc + s.runs.length, 0);
-  const completedRuns = sourcesData.reduce(
-    (acc, s) => acc + s.runs.filter((r) => r.status === 'COMPLETED').length,
-    0
-  );
-  const totalPages = sourcesData.reduce(
-    (acc, s) => acc + s.runs.reduce((rAcc, r) => rAcc + (r.pagesCrawled || 0), 0),
-    0
-  );
-  const totalFiles = sourcesData.reduce(
-    (acc, s) => acc + s.runs.reduce((rAcc, r) => rAcc + (r.filesDownloaded || 0), 0),
-    0
-  );
-  const totalBytes = sourcesData.reduce(
-    (acc, s) => acc + s.files.reduce((fAcc, f) => fAcc + (Number(f.fileSize) || 0), 0),
-    0
-  );
-
-  const successRate = totalRuns > 0 ? Math.round((completedRuns / totalRuns) * 100) : 100;
-
-  const renderSourceDetails = (data: SourceReportData, index: number) => {
+  // Calculate detailed source-by-source metrics
+  const sourceStats = sourcesData.map((data) => {
     const { source, collectors, runs, files } = data;
 
-    // Subdomains & sections extraction
-    const subdomainsMap: Record<string, number> = {};
-    const sectionsMap: Record<string, number> = {};
-    let articlesCount = 0;
-    let totalWords = 0;
-    let qualityTotal = 0;
-    let qualityCount = 0;
+    let totalPdfCount = 0;
+    let digitalPdfCount = 0;
+    let ocrPdfCount = 0;
     const extCounts: Record<string, number> = {};
+    const subdomainsMap: Record<string, number> = {};
+    const pathSectionsMap: Record<string, number> = {};
+
+    let totalSize = 0;
 
     files.forEach((f) => {
       const ext = f.extension?.toLowerCase().replace('.', '') || 'other';
       extCounts[ext] = (extCounts[ext] || 0) + 1;
+      totalSize += Number(f.fileSize) || 0;
 
+      // Classify PDF (Digital vs OCR)
+      const isPdf = ext === 'pdf' || (f.mimeType || '').includes('pdf') || (f.r2Key || '').includes('.pdf');
+      if (isPdf) {
+        totalPdfCount++;
+        const key = (f.r2Key || '').toLowerCase();
+        const meta = (f.metadata as Record<string, any>) || {};
+        const isOcr =
+          key.includes('/ocr/') ||
+          key.includes('/pdf/ocr/') ||
+          meta.ocr === true ||
+          meta.pdf_type === 'ocr' ||
+          meta.is_scanned === true;
+
+        if (isOcr) {
+          ocrPdfCount++;
+        } else {
+          digitalPdfCount++;
+        }
+      }
+
+      // Discover subdomains & paths from website URLs
       if (f.sourceUrl) {
         try {
           const u = new URL(f.sourceUrl);
-          const hostname = u.hostname.toLowerCase();
-          subdomainsMap[hostname] = (subdomainsMap[hostname] || 0) + 1;
+          const host = u.hostname.toLowerCase();
+          subdomainsMap[host] = (subdomainsMap[host] || 0) + 1;
 
-          const parts = u.pathname.split('/').filter(Boolean);
-          if (parts.length > 0) {
-            const sec = `/${parts[0]}`;
-            sectionsMap[sec] = (sectionsMap[sec] || 0) + 1;
+          const paths = u.pathname.split('/').filter(Boolean);
+          if (paths.length > 0) {
+            const topPath = `/${paths[0]}`;
+            pathSectionsMap[topPath] = (pathSectionsMap[topPath] || 0) + 1;
           }
         } catch {
           // ignore
         }
       }
-
-      const meta = f.metadata as Record<string, any> | undefined;
-      if (meta) {
-        if (meta.body_text || meta.paragraphs || meta.title) {
-          articlesCount++;
-          if (meta.word_count) totalWords += Number(meta.word_count) || 0;
-        }
-        if (meta.quality?.overall_score !== undefined) {
-          qualityTotal += Number(meta.quality.overall_score);
-          qualityCount++;
-        }
-      }
     });
 
+    const digitalPct = totalPdfCount > 0 ? Math.round((digitalPdfCount / totalPdfCount) * 100) : 0;
+    const ocrPct = totalPdfCount > 0 ? Math.round((ocrPdfCount / totalPdfCount) * 100) : 0;
+
     const subdomains = Object.entries(subdomainsMap).sort((a, b) => b[1] - a[1]);
-    const sections = Object.entries(sectionsMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    const avgQuality = qualityCount > 0 ? Math.round(qualityTotal / qualityCount) : null;
-    const sourcePages = runs.reduce((acc, r) => acc + (r.pagesCrawled || 0), 0);
-    const sourceDownloaded = runs.reduce((acc, r) => acc + (r.filesDownloaded || 0), 0);
-    const sourceBytes = files.reduce((acc, f) => acc + (Number(f.fileSize) || 0), 0);
+    const pathSections = Object.entries(pathSectionsMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
 
-    return `
-      <div class="source-dossier-entry ${isCombined && index > 0 ? 'page-break' : ''}">
-        <!-- Section Header -->
-        <div class="section-title-bar">
-          <div class="section-num">${isCombined ? `2.${index + 1}` : '2.0'}</div>
-          <div class="section-heading">
-            <h3>TARGET SPECIFICATION: ${source.name.toUpperCase()}</h3>
-            <span class="section-sub">${source.baseUrl}</span>
-          </div>
-          <div class="section-badge">PARTITION: 00_raw/web/${source.slug}/</div>
-        </div>
+    return {
+      source,
+      collectors,
+      runs,
+      files,
+      totalFiles: files.length,
+      totalSize,
+      totalPdfCount,
+      digitalPdfCount,
+      ocrPdfCount,
+      digitalPct,
+      ocrPct,
+      extCounts,
+      subdomains,
+      pathSections,
+    };
+  });
 
-        <!-- Source Specification Metadata Grid -->
-        <table class="doc-meta-table">
-          <tbody>
-            <tr>
-              <th style="width: 20%;">Source Name</th>
-              <td style="width: 30%;"><strong>${source.name}</strong></td>
-              <th style="width: 20%;">Identifier Slug</th>
-              <td style="width: 30%;" class="mono">${source.slug}</td>
-            </tr>
-            <tr>
-              <th>Base Root URL</th>
-              <td class="mono url-cell">${source.baseUrl}</td>
-              <th>Robots.txt Policy</th>
-              <td><span class="policy-tag">${source.robotsPolicy}</span></td>
-            </tr>
-            <tr>
-              <th>Storage Directory</th>
-              <td class="mono">/storage/00_raw/web/${source.slug}/</td>
-              <th>Operational Status</th>
-              <td><span class="status-pill status-active">REGISTERED & ACTIVE</span></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- Source Metrics Summary -->
-        <div class="metrics-row">
-          <div class="metric-cell">
-            <span class="metric-label">Execution Runs</span>
-            <span class="metric-val">${runs.length}</span>
-            <span class="metric-sub">${runs.filter((r) => r.status === 'COMPLETED').length} Successful</span>
-          </div>
-          <div class="metric-cell">
-            <span class="metric-label">Crawled Pages</span>
-            <span class="metric-val">${sourcePages.toLocaleString()}</span>
-            <span class="metric-sub">DOM Ingested</span>
-          </div>
-          <div class="metric-cell">
-            <span class="metric-label">Harvested Assets</span>
-            <span class="metric-val">${sourceDownloaded.toLocaleString()}</span>
-            <span class="metric-sub">Deduplicated</span>
-          </div>
-          <div class="metric-cell">
-            <span class="metric-label">Storage Footprint</span>
-            <span class="metric-val">${formatBytes(sourceBytes)}</span>
-            <span class="metric-sub">Raw Byte Volume</span>
-          </div>
-        </div>
-
-        <!-- Collectors Specification Table -->
-        <div class="sub-block">
-          <div class="sub-block-title">CONFIGURED CRAWLERS & INGESTION COLLECTORS (${collectors.length})</div>
-          ${
-            collectors.length > 0
-              ? `
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 25%;">Collector Name</th>
-                  <th style="width: 15%;">Engine Type</th>
-                  <th style="width: 35%;">Seed Target / Channel</th>
-                  <th style="width: 15%;">Depth / Limit</th>
-                  <th style="width: 10%; text-align: center;">State</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${collectors
-                  .map(
-                    (c) => `
-                  <tr>
-                    <td><strong>${c.name}</strong></td>
-                    <td><span class="type-badge">${c.type}</span></td>
-                    <td class="mono url-cell">${
-                      isWebCollector(c)
-                        ? c.configuration.startUrls?.[0] || '—'
-                        : isTelegramCollector(c)
-                        ? `@${c.configuration.channels?.[0] || '—'}`
-                        : '—'
-                    }</td>
-                    <td>${
-                      isWebCollector(c)
-                        ? `${c.configuration.maxPages || 50} pages (depth ${c.configuration.maxDepth || 2})`
-                        : isTelegramCollector(c)
-                        ? `${c.configuration.messageLimit || 100} msgs`
-                        : '—'
-                    }</td>
-                    <td style="text-align: center;">
-                      <span class="status-pill ${c.enabled ? 'status-active' : 'status-disabled'}">
-                        ${c.enabled ? 'ENABLED' : 'DISABLED'}
-                      </span>
-                    </td>
-                  </tr>
-                `
-                  )
-                  .join('')}
-              </tbody>
-            </table>
-          `
-              : '<div class="empty-notice">No collectors currently registered under this source.</div>'
-          }
-        </div>
-
-        <!-- Taxonomy & Reconnaissance Grid -->
-        ${
-          subdomains.length > 0 || sections.length > 0
-            ? `
-          <div class="dual-columns">
-            <div class="column-box">
-              <div class="sub-block-title">DISCOVERED SUBDOMAINS (${subdomains.length})</div>
-              <table class="data-table compact-table">
-                <thead>
-                  <tr>
-                    <th>Domain / Subdomain</th>
-                    <th style="text-align: right; width: 30%;">Discovered URLs</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${subdomains.slice(0, 6).map(([host, count]) => `
-                    <tr>
-                      <td class="mono">${host}</td>
-                      <td style="text-align: right;" class="mono font-bold">${count.toLocaleString()}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-
-            <div class="column-box">
-              <div class="sub-block-title">DISCOVERED TAXONOMY & SECTIONS</div>
-              <table class="data-table compact-table">
-                <thead>
-                  <tr>
-                    <th>Endpoint / Section</th>
-                    <th style="text-align: right; width: 30%;">Objects</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${sections.length > 0 ? sections.map(([sec, count]) => `
-                    <tr>
-                      <td class="mono">${sec}</td>
-                      <td style="text-align: right;" class="mono font-bold">${count.toLocaleString()}</td>
-                    </tr>
-                  `).join('') : '<tr><td colspan="2" class="empty-notice">No path categories discovered.</td></tr>'}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        `
-            : ''
-        }
-
-        <!-- Intelligence & Web Articles Breakdown -->
-        ${
-          articlesCount > 0
-            ? `
-          <div class="sub-block">
-            <div class="sub-block-title">EXTRACTED CONTENT & INTELLIGENCE ASSETS</div>
-            <div class="intel-summary-box">
-              <div class="intel-col">
-                <span class="intel-label">Extracted Articles / Documents</span>
-                <span class="intel-val">${articlesCount.toLocaleString()} items</span>
-              </div>
-              <div class="intel-col">
-                <span class="intel-label">Total Corpus Volume</span>
-                <span class="intel-val">${totalWords.toLocaleString()} words</span>
-              </div>
-              <div class="intel-col">
-                <span class="intel-label">Clean Quality Index</span>
-                <span class="intel-val">${avgQuality !== null ? `${avgQuality} / 100` : 'Evaluated (Pass)'}</span>
-              </div>
-              <div class="intel-col">
-                <span class="intel-label">Linguistic Domain</span>
-                <span class="intel-val">Kurdish / Regional Corpus</span>
-              </div>
-            </div>
-          </div>
-        `
-            : ''
-        }
-
-        <!-- File Distribution Breakdown -->
-        ${
-          Object.keys(extCounts).length > 0
-            ? `
-          <div class="sub-block">
-            <div class="sub-block-title">RAW FILE ASSET INVENTORY BY FORMAT</div>
-            <div class="format-chips-container">
-              ${Object.entries(extCounts)
-                .map(
-                  ([ext, count]) => `
-                <div class="format-chip">
-                  <span class="chip-ext">.${ext.toUpperCase()}</span>
-                  <span class="chip-count">${count.toLocaleString()}</span>
-                </div>
-              `
-                )
-                .join('')}
-            </div>
-          </div>
-        `
-            : ''
-        }
-
-        <!-- Recent Execution Log Table -->
-        ${
-          runs.length > 0
-            ? `
-          <div class="sub-block">
-            <div class="sub-block-title">RECENT PIPELINE EXECUTION AUDIT LOG</div>
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 25%;">Execution Run ID</th>
-                  <th style="width: 25%;">Timestamp</th>
-                  <th style="width: 15%; text-align: right;">Pages Ingested</th>
-                  <th style="width: 15%; text-align: right;">Files Stored</th>
-                  <th style="width: 20%; text-align: center;">Audit Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${runs.slice(0, 5).map((r) => `
-                  <tr>
-                    <td class="mono font-bold">${r.runId}</td>
-                    <td>${r.startedAt ? new Date(r.startedAt).toLocaleString() : '—'}</td>
-                    <td style="text-align: right;" class="mono">${r.pagesCrawled ?? 0}</td>
-                    <td style="text-align: right;" class="mono">${r.filesDownloaded ?? 0}</td>
-                    <td style="text-align: center;">
-                      <span class="status-pill ${r.status === 'COMPLETED' ? 'status-active' : r.status === 'FAILED' ? 'status-failed' : 'status-pending'}">
-                        ${r.status}
-                      </span>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        `
-            : ''
-        }
-      </div>
-    `;
-  };
+  const grandTotalFiles = sourceStats.reduce((acc, s) => acc + s.totalFiles, 0);
+  const grandTotalSize = sourceStats.reduce((acc, s) => acc + s.totalSize, 0);
+  const grandTotalPdfs = sourceStats.reduce((acc, s) => acc + s.totalPdfCount, 0);
+  const grandDigitalPdfs = sourceStats.reduce((acc, s) => acc + s.digitalPdfCount, 0);
+  const grandOcrPdfs = sourceStats.reduce((acc, s) => acc + s.ocrPdfCount, 0);
+  const grandDigitalPct = grandTotalPdfs > 0 ? Math.round((grandDigitalPdfs / grandTotalPdfs) * 100) : 0;
+  const grandOcrPct = grandTotalPdfs > 0 ? Math.round((grandOcrPdfs / grandTotalPdfs) * 100) : 0;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${title} — QAI Official Document</title>
+  <title>${title} — QAI Data Platform</title>
   <style>
-    /* ==========================================================================
-       A4 OFFICIAL EXECUTIVE DOCUMENT STYLESHEET (GOVERNMENT & ENTERPRISE SPEC)
-       ========================================================================== */
     @page {
       size: A4 portrait;
-      margin: 14mm 15mm 14mm 15mm;
+      margin: 12mm 14mm 12mm 14mm;
     }
-
     *, *::before, *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
-
-    html, body {
-      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 11px;
-      line-height: 1.45;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 10.5px;
+      line-height: 1.4;
       color: #0f172a;
-      background-color: #f1f5f9;
+      background-color: #ffffff;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
 
-    /* Screen Preview Container */
-    .document-page {
+    .report-sheet {
+      width: 100%;
       max-width: 210mm;
-      min-height: 297mm;
-      margin: 20px auto;
+      margin: 0 auto;
       background: #ffffff;
-      padding: 16mm 18mm;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    /* 1. Header: [Logo - Platform Name - User] */
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-logo {
+      width: 38px;
+      height: 38px;
+      object-fit: contain;
+    }
+    .brand-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #0f172a;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .brand-sub {
+      font-size: 9px;
+      color: #475569;
+      font-family: monospace;
+    }
+    .header-user-meta {
+      text-align: right;
+      font-family: monospace;
+      font-size: 9px;
+      color: #334155;
+      line-height: 1.35;
+    }
+    .header-user-meta strong {
+      color: #0f172a;
+    }
+
+    /* Section Headings */
+    .section-title {
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #0f172a;
+      letter-spacing: 0.5px;
+      background: #f1f5f9;
+      border-left: 3px solid #0f172a;
+      padding: 3px 6px;
+      margin-top: 10px;
+      margin-bottom: 6px;
+      break-after: avoid;
+    }
+
+    /* Clean Minimal Tables */
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      margin-bottom: 10px;
+      break-inside: avoid;
+    }
+    .report-table th {
+      background: #f8fafc;
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 8.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding: 4px 6px;
       border: 1px solid #cbd5e1;
-      position: relative;
+      border-bottom: 1.5px solid #0f172a;
+      text-align: left;
+    }
+    .report-table td {
+      padding: 4px 6px;
+      border: 1px solid #e2e8f0;
+      color: #1e293b;
+      vertical-align: middle;
+    }
+    .report-table tr:nth-child(even) td {
+      background: #fbfcfe;
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 9px;
+    }
+    .text-right {
+      text-align: right;
+    }
+    .text-center {
+      text-align: center;
+    }
+    .font-bold {
+      font-weight: 700;
+    }
+
+    /* PDF Badge styles */
+    .pct-tag {
+      font-family: monospace;
+      font-size: 8.5px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    .pct-digital {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+    }
+    .pct-ocr {
+      background: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
+    }
+
+    /* Sub-columns layout */
+    .two-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+      break-inside: avoid;
+    }
+    .col-box {
+      border: 1px solid #cbd5e1;
+      padding: 4px 6px;
+      background: #ffffff;
+    }
+    .col-header {
+      font-size: 8.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 3px;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 2px;
+    }
+
+    /* Footer */
+    .report-footer {
+      border-top: 1px solid #cbd5e1;
+      margin-top: 12px;
+      padding-top: 4px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8px;
+      font-family: monospace;
+      color: #64748b;
+      break-inside: avoid;
     }
 
     @media print {
       body {
         background: #ffffff !important;
       }
-      .document-page {
-        max-width: 100% !important;
-        min-height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        box-shadow: none !important;
-        border: none !important;
-      }
-      .no-print {
-        display: none !important;
-      }
       .page-break {
-        page-break-before: always !important;
-        break-before: page !important;
-        padding-top: 15mm !important;
+        page-break-before: always;
+        break-before: page;
+        padding-top: 8mm;
       }
-    }
-
-    /* Institutional Header Banner */
-    .official-header {
-      border-bottom: 2.5px solid #0f172a;
-      padding-bottom: 12px;
-      margin-bottom: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-
-    .org-branding {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .org-logo-crest {
-      width: 46px;
-      height: 46px;
-      border: 2px solid #0f172a;
-      padding: 4px;
-      background: #ffffff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .org-logo-crest img {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-    }
-
-    .org-title-block h1 {
-      font-size: 16px;
-      font-weight: 900;
-      letter-spacing: 0.5px;
-      color: #0f172a;
-      text-transform: uppercase;
-      line-height: 1.15;
-    }
-
-    .org-title-block .sub-agency {
-      font-size: 9.5px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      color: #334155;
-      text-transform: uppercase;
-      margin-top: 2px;
-    }
-
-    .org-title-block .doc-classification {
-      font-size: 8.5px;
-      font-weight: 700;
-      color: #1e3a8a;
-      background: #dbeafe;
-      border: 1px solid #93c5fd;
-      padding: 1px 6px;
-      display: inline-block;
-      margin-top: 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .header-metadata {
-      text-align: right;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    .report-control-num {
-      font-size: 11px;
-      font-weight: 800;
-      color: #0f172a;
-      letter-spacing: 0.5px;
-    }
-
-    .header-meta-item {
-      font-size: 9px;
-      color: #475569;
-      margin-top: 2px;
-    }
-
-    /* Section Heading Styles */
-    .section-title-bar {
-      display: flex;
-      align-items: center;
-      background: #0f172a;
-      color: #ffffff;
-      padding: 5px 8px;
-      margin-top: 18px;
-      margin-bottom: 10px;
-      border-left: 4px solid #2563eb;
-      break-after: avoid;
-    }
-
-    .section-num {
-      font-family: "SFMono-Regular", Consolas, monospace;
-      font-weight: 900;
-      font-size: 11px;
-      background: #2563eb;
-      color: #ffffff;
-      padding: 1px 6px;
-      margin-right: 8px;
-    }
-
-    .section-heading {
-      flex: 1;
-    }
-
-    .section-heading h3 {
-      font-size: 11.5px;
-      font-weight: 800;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-
-    .section-sub {
-      font-size: 9px;
-      color: #94a3b8;
-      font-family: monospace;
-    }
-
-    .section-badge {
-      font-size: 9px;
-      font-family: monospace;
-      color: #93c5fd;
-      background: rgba(255, 255, 255, 0.1);
-      padding: 2px 6px;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-    }
-
-    /* Meta & Specification Tables */
-    .doc-meta-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 12px;
-      border: 1px solid #cbd5e1;
-      font-size: 10px;
-    }
-
-    .doc-meta-table th {
-      background: #f8fafc;
-      color: #334155;
-      font-weight: 700;
-      text-align: left;
-      padding: 5px 8px;
-      border: 1px solid #cbd5e1;
-      text-transform: uppercase;
-      font-size: 9px;
-    }
-
-    .doc-meta-table td {
-      padding: 5px 8px;
-      border: 1px solid #cbd5e1;
-      color: #0f172a;
-    }
-
-    /* High-Impact Executive KPI Grid */
-    .metrics-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
-      break-inside: avoid;
-    }
-
-    .metric-cell {
-      background: #ffffff;
-      border: 1.5px solid #0f172a;
-      padding: 8px 10px;
-      text-align: center;
-    }
-
-    .metric-label {
-      display: block;
-      font-size: 8.5px;
-      font-weight: 800;
-      text-transform: uppercase;
-      color: #475569;
-      letter-spacing: 0.5px;
-    }
-
-    .metric-val {
-      display: block;
-      font-size: 17px;
-      font-weight: 900;
-      font-family: "SFMono-Regular", Consolas, monospace;
-      color: #0f172a;
-      margin: 2px 0;
-    }
-
-    .metric-sub {
-      display: block;
-      font-size: 8.5px;
-      color: #059669;
-      font-weight: 700;
-      font-family: monospace;
-    }
-
-    /* Structured Data Tables */
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 10px;
-      margin-bottom: 12px;
-      border: 1px solid #cbd5e1;
-      break-inside: avoid;
-    }
-
-    .data-table thead th {
-      background: #f1f5f9;
-      color: #0f172a;
-      font-weight: 800;
-      text-transform: uppercase;
-      font-size: 8.5px;
-      letter-spacing: 0.5px;
-      padding: 5px 7px;
-      border: 1px solid #cbd5e1;
-      border-bottom: 2px solid #0f172a;
-      text-align: left;
-    }
-
-    .data-table tbody td {
-      padding: 5px 7px;
-      border: 1px solid #e2e8f0;
-      color: #1e293b;
-      vertical-align: middle;
-    }
-
-    .data-table tbody tr:nth-child(even) {
-      background-color: #f8fafc;
-    }
-
-    .compact-table td, .compact-table th {
-      padding: 3.5px 6px;
-      font-size: 9.5px;
-    }
-
-    /* Sub Blocks & Columns */
-    .sub-block {
-      margin-bottom: 12px;
-      break-inside: avoid;
-    }
-
-    .sub-block-title {
-      font-size: 9.5px;
-      font-weight: 800;
-      text-transform: uppercase;
-      color: #1e293b;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-      border-bottom: 1px solid #cbd5e1;
-      padding-bottom: 2px;
-    }
-
-    .dual-columns {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 12px;
-      break-inside: avoid;
-    }
-
-    .column-box {
-      border: 1px solid #cbd5e1;
-      padding: 6px 8px;
-      background: #ffffff;
-    }
-
-    /* Status Pills & Tags */
-    .status-pill {
-      display: inline-block;
-      font-size: 8px;
-      font-weight: 800;
-      font-family: monospace;
-      padding: 1px 5px;
-      border-radius: 2px;
-      text-transform: uppercase;
-      border: 1px solid transparent;
-    }
-
-    .status-active {
-      background: #ecfdf5;
-      color: #065f46;
-      border-color: #a7f3d0;
-    }
-
-    .status-disabled {
-      background: #f1f5f9;
-      color: #475569;
-      border-color: #cbd5e1;
-    }
-
-    .status-failed {
-      background: #fef2f2;
-      color: #991b1b;
-      border-color: #fecaca;
-    }
-
-    .status-pending {
-      background: #fffbeb;
-      color: #92400e;
-      border-color: #fde68a;
-    }
-
-    .policy-tag {
-      font-family: monospace;
-      font-weight: 700;
-      font-size: 9px;
-      color: #1d4ed8;
-      background: #eff6ff;
-      border: 1px solid #bfdbfe;
-      padding: 1px 4px;
-    }
-
-    .type-badge {
-      font-family: monospace;
-      font-size: 8.5px;
-      font-weight: 700;
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
-      padding: 1px 4px;
-    }
-
-    /* Intelligence & Content Assets Box */
-    .intel-summary-box {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      padding: 8px;
-      gap: 6px;
-      text-align: center;
-    }
-
-    .intel-label {
-      display: block;
-      font-size: 8px;
-      text-transform: uppercase;
-      font-weight: 700;
-      color: #64748b;
-    }
-
-    .intel-val {
-      display: block;
-      font-size: 11px;
-      font-weight: 800;
-      color: #0f172a;
-      margin-top: 2px;
-    }
-
-    /* Format Distribution Chips */
-    .format-chips-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 6px;
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-    }
-
-    .format-chip {
-      display: flex;
-      align-items: center;
-      border: 1px solid #cbd5e1;
-      background: #ffffff;
-      padding: 2px 6px;
-      font-family: monospace;
-      font-size: 9px;
-    }
-
-    .chip-ext {
-      font-weight: 800;
-      color: #1d4ed8;
-      margin-right: 5px;
-    }
-
-    .chip-count {
-      color: #334155;
-      font-weight: 700;
-    }
-
-    /* Typography helpers */
-    .mono {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 9.5px;
-    }
-
-    .font-bold {
-      font-weight: 700;
-    }
-
-    .url-cell {
-      word-break: break-all;
-      max-width: 250px;
-    }
-
-    .empty-notice {
-      padding: 8px;
-      text-align: center;
-      font-style: italic;
-      color: #64748b;
-      border: 1px dashed #cbd5e1;
-      font-size: 9.5px;
-    }
-
-    /* Verification & Attestation Sign-off */
-    .official-signoff {
-      margin-top: 24px;
-      border-top: 2px solid #0f172a;
-      padding-top: 12px;
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 16px;
-      break-inside: avoid;
-    }
-
-    .attestation-text {
-      font-size: 8.5px;
-      color: #475569;
-      line-height: 1.4;
-    }
-
-    .attestation-seal {
-      border: 1.5px solid #0f172a;
-      padding: 6px 8px;
-      text-align: center;
-      background: #f8fafc;
-    }
-
-    .seal-title {
-      font-size: 8.5px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #0f172a;
-    }
-
-    .seal-status {
-      font-size: 11px;
-      font-weight: 900;
-      font-family: monospace;
-      color: #059669;
-      margin: 2px 0;
-    }
-
-    .seal-code {
-      font-size: 7.5px;
-      font-family: monospace;
-      color: #64748b;
-    }
-
-    /* Running Footer */
-    .official-footer {
-      margin-top: 18px;
-      padding-top: 8px;
-      border-top: 1px solid #cbd5e1;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 8.5px;
-      font-family: monospace;
-      color: #64748b;
-      break-inside: avoid;
     }
   </style>
 </head>
 <body>
-  <div class="document-page">
+  <div class="report-sheet">
     
-    <!-- Institutional Document Header -->
-    <div class="official-header">
-      <div class="org-branding">
-        <div class="org-logo-crest">
-          <img src="/qai.webp" alt="QAI Seal" onerror="this.style.display='none'" />
-        </div>
-        <div class="org-title-block">
-          <h1>QAI Data Platform &bull; Intelligence Audit</h1>
-          <div class="sub-agency">Enterprise Raw Data Ingestion &amp; Repository Dossier</div>
-          <div class="doc-classification">Official Record &bull; Restricted Distribution</div>
+    <!-- 1. Top Header: [Logo - Platform Name - User] -->
+    <div class="header-bar">
+      <div class="header-brand">
+        <img src="/qai.webp" alt="QAI Logo" class="header-logo" onerror="this.style.display='none'" />
+        <div>
+          <div class="brand-title">QAI Organization Data Platform</div>
+          <div class="brand-sub">Enterprise Raw Data Ingestion &amp; Content Audit Dossier</div>
         </div>
       </div>
-
-      <div class="header-metadata">
-        <div class="report-control-num">${reportCode}</div>
-        <div class="header-meta-item">Date: ${now}</div>
-        <div class="header-meta-item">Compliance: ISO/IEC 27001 Stds</div>
+      <div class="header-user-meta">
+        <div><strong>User / Operator:</strong> ${userName}</div>
+        <div><strong>Date:</strong> ${now}</div>
+        <div><strong>Report Code:</strong> ${reportCode}</div>
       </div>
     </div>
 
-    <!-- Section 1.0 Executive Summary -->
-    <div class="section-title-bar">
-      <div class="section-num">1.0</div>
-      <div class="section-heading">
-        <h3>EXECUTIVE PLATFORM INGESTION STATUS &amp; METRICS</h3>
-      </div>
-      <div class="section-badge">SYSTEM-WIDE AUDIT</div>
-    </div>
+    <!-- 2. Table of Contents / Main Sources Summary Table -->
+    <div class="section-title">1.0 Source Targets &amp; Data Volume Breakdown</div>
+    <table class="report-table">
+      <thead>
+        <tr>
+          <th style="width: 22%;">Source Name &amp; URL</th>
+          <th style="width: 14%; text-align: right;">Downloaded Data</th>
+          <th style="width: 20%;">Data Types</th>
+          <th style="width: 26%;">PDF Breakdown (% Digital vs OCR)</th>
+          <th style="width: 18%;">Discovered Hosts</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${sourceStats
+          .map((s) => {
+            const extSummaries = Object.entries(s.extCounts)
+              .map(([ext, cnt]) => `.${ext}: ${cnt}`)
+              .slice(0, 3)
+              .join(', ');
 
-    <!-- Key Metrics Quad -->
-    <div class="metrics-row">
-      <div class="metric-cell">
-        <span class="metric-label">Target Data Sources</span>
-        <span class="metric-val">${totalSources}</span>
-        <span class="metric-sub">Active Repositories</span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">Registered Crawlers</span>
-        <span class="metric-val">${totalCollectors}</span>
-        <span class="metric-sub">Ingestion Engines</span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">Harvested Assets</span>
-        <span class="metric-val">${totalFiles.toLocaleString()}</span>
-        <span class="metric-sub">Pages &amp; Files</span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">Ingested Raw Volume</span>
-        <span class="metric-val">${formatBytes(totalBytes)}</span>
-        <span class="metric-sub">${successRate}% Pipeline Success</span>
-      </div>
-    </div>
-
-    <!-- Portfolio Table (If Multi-Source Dossier) -->
-    ${
-      isCombined
-        ? `
-      <div class="sub-block">
-        <div class="sub-block-title">COMPLETE REGISTERED TARGET INVENTORY (${sourcesData.length})</div>
-        <table class="data-table">
-          <thead>
+            return `
             <tr>
-              <th style="width: 5%;">#</th>
-              <th style="width: 25%;">Target Source Name</th>
-              <th style="width: 25%;">Base Endpoint URL</th>
-              <th style="width: 20%;">Storage Zone Root</th>
-              <th style="width: 12%; text-align: center;">Robots Policy</th>
-              <th style="width: 13%; text-align: right;">Harvested Files</th>
+              <td>
+                <div class="font-bold">${s.source.name}</div>
+                <div class="mono" style="color: #2563eb; font-size: 8.5px;">${s.source.baseUrl}</div>
+              </td>
+              <td class="text-right">
+                <div class="mono font-bold">${s.totalFiles.toLocaleString()} items</div>
+                <div class="mono" style="color: #64748b; font-size: 8.5px;">${formatBytes(s.totalSize)}</div>
+              </td>
+              <td class="mono" style="font-size: 8.5px;">
+                ${extSummaries || '—'}
+              </td>
+              <td>
+                ${
+                  s.totalPdfCount > 0
+                    ? `
+                  <div class="mono font-bold">${s.totalPdfCount.toLocaleString()} PDFs</div>
+                  <div style="margin-top: 2px; display: flex; gap: 4px;">
+                    <span class="pct-tag pct-digital">Digital: ${s.digitalPdfCount} (${s.digitalPct}%)</span>
+                    <span class="pct-tag pct-ocr">OCR: ${s.ocrPdfCount} (${s.ocrPct}%)</span>
+                  </div>
+                `
+                    : '<span style="color: #94a3b8; font-size: 8.5px;">No PDFs collected</span>'
+                }
+              </td>
+              <td class="mono" style="font-size: 8.5px;">
+                ${s.subdomains.length} hostnames (${s.subdomains.slice(0, 1).map((h) => h[0]).join('') || 'root'})
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            ${sourcesData
-              .map((d, i) => {
-                const sFiles = d.runs.reduce((acc, r) => acc + (r.filesDownloaded || 0), 0);
-                return `
-                <tr>
-                  <td class="mono font-bold">${i + 1}</td>
-                  <td><strong>${d.source.name}</strong></td>
-                  <td class="mono url-cell">${d.source.baseUrl}</td>
-                  <td class="mono">00_raw/web/${d.source.slug}/</td>
-                  <td style="text-align: center;"><span class="policy-tag">${d.source.robotsPolicy}</span></td>
-                  <td style="text-align: right;" class="mono font-bold">${sFiles.toLocaleString()}</td>
-                </tr>
-              `;
-              })
-              .join('')}
-          </tbody>
-        </table>
-      </div>
-    `
-        : ''
-    }
+          `;
+          })
+          .join('')}
+        
+        ${
+          sourceStats.length > 1
+            ? `
+          <tr style="background: #f1f5f9; font-weight: 700; border-top: 2px solid #0f172a;">
+            <td>TOTAL PLATFORM DATA</td>
+            <td class="text-right mono font-bold">
+              ${grandTotalFiles.toLocaleString()} items<br />
+              <span style="font-size: 8.5px; color: #475569;">${formatBytes(grandTotalSize)}</span>
+            </td>
+            <td class="mono" style="font-size: 8.5px;">All Registered Targets</td>
+            <td>
+              <div class="mono font-bold">${grandTotalPdfs.toLocaleString()} Total PDFs</div>
+              <div style="margin-top: 2px; display: flex; gap: 4px;">
+                <span class="pct-tag pct-digital">Digital: ${grandDigitalPdfs} (${grandDigitalPct}%)</span>
+                <span class="pct-tag pct-ocr">OCR: ${grandOcrPdfs} (${grandOcrPct}%)</span>
+              </div>
+            </td>
+            <td class="mono font-bold">${sourceStats.reduce((acc, s) => acc + s.subdomains.length, 0)} Total Hosts</td>
+          </tr>
+        `
+            : ''
+        }
+      </tbody>
+    </table>
 
-    <!-- Individual Source Detailed Breakdowns -->
-    ${sourcesData.map((d, i) => renderSourceDetails(d, i)).join('')}
+    <!-- 3. Per-Source Detailed Sections: Discovered Subdomains & Web Links -->
+    <div class="section-title">2.0 Website Taxonomy, Subdomains &amp; Content Discovery</div>
 
-    <!-- Section 3.0 Attestation & Signature Block -->
-    <div class="official-signoff">
-      <div class="attestation-text">
-        <strong>OFFICIAL AUDIT ATTESTATION:</strong><br />
-        This document certifies that the raw data ingestion metrics, crawler executions, and cataloged file structures recorded herein have been verified against the QAI Data Repository partition scheme (<code>00_raw/web/</code>). All crawler operations comply with enterprise rate-limiting and access policies.
-      </div>
-      <div class="attestation-seal">
-        <div class="seal-title">QAI Automated Ingestion</div>
-        <div class="seal-status">SEALED &amp; VERIFIED</div>
-        <div class="seal-code">HASH: ${reportCode}-${Math.random().toString(36).substring(2, 9).toUpperCase()}</div>
-      </div>
-    </div>
+    ${sourceStats
+      .map((s, idx) => `
+      <div class="source-detail-entry ${idx > 0 && isCombined ? 'page-break' : ''}">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; margin-bottom: 4px; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px;">
+          <div class="font-bold" style="font-size: 10px;">
+            TARGET ${idx + 1}: ${s.source.name} &bull; <span class="mono" style="color: #2563eb;">${s.source.baseUrl}</span>
+          </div>
+          <div class="mono" style="font-size: 8.5px; color: #64748b;">
+            Partition: 00_raw/web/${s.source.slug}/ &bull; ${s.totalFiles} items (${formatBytes(s.totalSize)})
+          </div>
+        </div>
 
-    <!-- Document Footer -->
-    <div class="official-footer">
-      <div>Organization Data Platform (ODP) &bull; Official Pipeline Dossier</div>
-      <div>Page 1 of 1 &bull; Confidential &bull; Proprietary System Data</div>
+        <div class="two-cols">
+          <!-- Discovered Subdomains -->
+          <div class="col-box">
+            <div class="col-header">Discovered Subdomains (${s.subdomains.length})</div>
+            ${
+              s.subdomains.length > 0
+                ? `
+              <table class="report-table" style="margin-bottom: 0;">
+                <thead>
+                  <tr>
+                    <th>Domain / Subdomain</th>
+                    <th style="width: 25%; text-align: right;">URLs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${s.subdomains.slice(0, 6).map(([host, count]) => `
+                    <tr>
+                      <td class="mono font-bold">${host}</td>
+                      <td class="mono text-right" style="color: #2563eb;">${count.toLocaleString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `
+                : '<div style="color: #94a3b8; font-size: 8.5px; padding: 4px;">No separate subdomains discovered.</div>'
+            }
+          </div>
+
+          <!-- Discovered Web Categories & Path Links -->
+          <div class="col-box">
+            <div class="col-header">Discovered Website Categories &amp; Path Endpoints</div>
+            ${
+              s.pathSections.length > 0
+                ? `
+              <table class="report-table" style="margin-bottom: 0;">
+                <thead>
+                  <tr>
+                    <th>Endpoint Path / Category</th>
+                    <th style="width: 25%; text-align: right;">Objects</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${s.pathSections.slice(0, 6).map(([sec, count]) => `
+                    <tr>
+                      <td class="mono font-bold" style="color: #0f766e;">${sec}</td>
+                      <td class="mono text-right">${count.toLocaleString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `
+                : '<div style="color: #94a3b8; font-size: 8.5px; padding: 4px;">No distinct path categories recorded.</div>'
+            }
+          </div>
+        </div>
+
+        <!-- Format Breakdown for this source -->
+        <div style="display: flex; align-items: center; gap: 6px; font-size: 8.5px; margin-bottom: 8px; font-family: monospace;">
+          <span style="font-weight: 700; color: #475569;">Format Counts:</span>
+          ${Object.entries(s.extCounts)
+            .map(
+              ([ext, count]) => `
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 2px;">
+              <strong>.${ext.toUpperCase()}</strong>: ${count}
+            </span>
+          `
+            )
+            .join(' ')}
+        </div>
+      </div>
+    `).join('')}
+
+    <!-- Official Running Footer -->
+    <div class="report-footer">
+      <div>Organization Data Platform (ODP) &bull; Official A4 Ingestion Dossier</div>
+      <div>Confidential &bull; Generated for ${userName}</div>
     </div>
 
   </div>
@@ -1005,18 +506,18 @@ export function generateSourceReportHtml(options: {
 }
 
 /**
- * Robust and seamless A4 Document Printer using an isolated hidden iframe
- * (Never blocked by browser popup blockers, ensures 100% pixel-perfect output).
+ * Direct A4 Document Printer using an isolated hidden iframe
+ * (Zero popups, zero redirects, 100% reliable native print dialog).
  */
 export function printSourceReportDocument(options: {
   title: string;
   reportCode: string;
   sourcesData: SourceReportData[];
   isCombined?: boolean;
+  userName?: string;
 }): void {
   const html = generateSourceReportHtml(options);
 
-  // Check if an existing print iframe exists and remove it
   const existingIframe = document.getElementById('qai-print-dossier-frame');
   if (existingIframe) {
     existingIframe.remove();
@@ -1036,16 +537,7 @@ export function printSourceReportDocument(options: {
 
   const doc = iframe.contentWindow?.document;
   if (!doc) {
-    // Fallback if iframe fails
-    const w = window.open('', '_blank');
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-      setTimeout(() => {
-        w.focus();
-        w.print();
-      }, 300);
-    }
+    window.print();
     return;
   }
 
@@ -1063,8 +555,8 @@ export function printSourceReportDocument(options: {
       } finally {
         setTimeout(() => {
           iframe.remove();
-        }, 60000); // Keep for a minute then clean
+        }, 60000);
       }
-    }, 300);
+    }, 200);
   };
 }
