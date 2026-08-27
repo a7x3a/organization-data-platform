@@ -593,12 +593,13 @@ export function printSourceReportDocument(options: {
   const iframe = document.createElement('iframe');
   iframe.id = 'qai-print-dossier-frame';
   iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
+  iframe.style.top = '-9999px';
+  iframe.style.left = '-9999px';
+  iframe.style.width = '210mm';
+  iframe.style.height = '297mm';
   iframe.style.border = '0';
-  iframe.style.visibility = 'hidden';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
 
   document.body.appendChild(iframe);
 
@@ -618,11 +619,20 @@ export function printSourceReportDocument(options: {
       iframe.contentWindow?.print();
     } catch (err) {
       console.error('Print iframe error:', err);
-      window.print();
+      // Fallback: open print preview
+      const printWin = window.open('', '_blank');
+      if (printWin) {
+        printWin.document.write(html);
+        printWin.document.close();
+        printWin.focus();
+        printWin.print();
+      } else {
+        window.print();
+      }
     } finally {
       setTimeout(() => {
         iframe.remove();
       }, 60000);
     }
-  }, 250);
+  }, 300);
 }

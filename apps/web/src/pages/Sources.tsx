@@ -107,16 +107,16 @@ export const Sources: React.FC = () => {
     try {
       const allSourcesList = data?.data || [];
       const [collectorsRes, runsRes, filesRes] = await Promise.all([
-        collectorsApi.list({ pageSize: 200 }),
-        runsApi.list({ pageSize: 200 }),
-        filesApi.list({ pageSize: 500 }),
+        collectorsApi.list({ pageSize: 100 }),
+        runsApi.list({ pageSize: 100 }),
+        filesApi.list({ pageSize: 100 }),
       ]);
 
       const sourcesToReport: SourceReportData[] = allSourcesList.map((s) => ({
         source: s,
-        collectors: (collectorsRes.data || []).filter((c) => c.sourceId === s.id),
-        runs: (runsRes.data || []).filter((r) => r.sourceId === s.id),
-        files: (filesRes.data || []).filter((f) => f.sourceId === s.id),
+        collectors: (collectorsRes?.data || []).filter((c) => c.sourceId === s.id),
+        runs: (runsRes?.data || []).filter((r) => r.sourceId === s.id),
+        files: (filesRes?.data || []).filter((f) => f.sourceId === s.id),
       }));
 
       printSourceReportDocument({
@@ -126,6 +126,8 @@ export const Sources: React.FC = () => {
         isCombined: true,
         userName: user?.name || user?.username || 'Administrator',
       });
+    } catch (err) {
+      console.error('Failed to prepare print dossier:', err);
     } finally {
       setIsPrintingAll(false);
     }
@@ -138,7 +140,7 @@ export const Sources: React.FC = () => {
       const [collectorsRes, runsRes, filesRes] = await Promise.all([
         collectorsApi.list({ sourceId: source.id, pageSize: 100 }),
         runsApi.list({ sourceId: source.id, pageSize: 100 }),
-        filesApi.list({ sourceId: source.id, pageSize: 200 }),
+        filesApi.list({ sourceId: source.id, pageSize: 100 }),
       ]);
 
       printSourceReportDocument({
@@ -147,14 +149,16 @@ export const Sources: React.FC = () => {
         sourcesData: [
           {
             source,
-            collectors: collectorsRes.data || [],
-            runs: runsRes.data || [],
-            files: filesRes.data || [],
+            collectors: collectorsRes?.data || [],
+            runs: runsRes?.data || [],
+            files: filesRes?.data || [],
           },
         ],
         isCombined: false,
         userName: user?.name || user?.username || 'Administrator',
       });
+    } catch (err) {
+      console.error('Failed to print source report:', err);
     } finally {
       setPrintingSourceId(null);
     }
