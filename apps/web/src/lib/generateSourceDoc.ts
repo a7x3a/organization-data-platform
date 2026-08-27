@@ -21,23 +21,31 @@ export function generateSourceReportHtml(options: {
     timeStyle: 'short',
   });
 
-  // Calculate detailed source-by-source metrics
   const sourceStats = sourcesData.map((data) => {
     const { source, collectors, runs, files } = data;
 
     let totalPdfCount = 0;
     let digitalPdfCount = 0;
     let ocrPdfCount = 0;
+    let htmlCount = 0;
+    let jsonCount = 0;
+    let mediaCount = 0;
+    let otherCount = 0;
+
     const extCounts: Record<string, number> = {};
     const subdomainsMap: Record<string, number> = {};
     const pathSectionsMap: Record<string, number> = {};
-
     let totalSize = 0;
 
     files.forEach((f) => {
       const ext = f.extension?.toLowerCase().replace('.', '') || 'other';
       extCounts[ext] = (extCounts[ext] || 0) + 1;
       totalSize += Number(f.fileSize) || 0;
+
+      if (ext === 'html' || ext === 'htm') htmlCount++;
+      else if (ext === 'json' || ext === 'jsonl') jsonCount++;
+      else if (['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mp3', 'wav'].includes(ext)) mediaCount++;
+      else otherCount++;
 
       // Classify PDF (Digital vs OCR)
       const isPdf = ext === 'pdf' || (f.mimeType || '').includes('pdf') || (f.r2Key || '').includes('.pdf');
@@ -79,9 +87,8 @@ export function generateSourceReportHtml(options: {
 
     const digitalPct = totalPdfCount > 0 ? Math.round((digitalPdfCount / totalPdfCount) * 100) : 0;
     const ocrPct = totalPdfCount > 0 ? Math.round((ocrPdfCount / totalPdfCount) * 100) : 0;
-
     const subdomains = Object.entries(subdomainsMap).sort((a, b) => b[1] - a[1]);
-    const pathSections = Object.entries(pathSectionsMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const pathSections = Object.entries(pathSectionsMap).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
     return {
       source,
@@ -95,6 +102,10 @@ export function generateSourceReportHtml(options: {
       ocrPdfCount,
       digitalPct,
       ocrPct,
+      htmlCount,
+      jsonCount,
+      mediaCount,
+      otherCount,
       extCounts,
       subdomains,
       pathSections,
@@ -117,7 +128,7 @@ export function generateSourceReportHtml(options: {
   <style>
     @page {
       size: A4 portrait;
-      margin: 12mm 14mm 12mm 14mm;
+      margin: 10mm 12mm 10mm 12mm;
     }
     *, *::before, *::after {
       box-sizing: border-box;
@@ -125,9 +136,9 @@ export function generateSourceReportHtml(options: {
       padding: 0;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 10.5px;
-      line-height: 1.4;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 10px;
+      line-height: 1.35;
       color: #0f172a;
       background-color: #ffffff;
       -webkit-print-color-adjust: exact !important;
@@ -148,7 +159,7 @@ export function generateSourceReportHtml(options: {
       align-items: center;
       border-bottom: 2px solid #0f172a;
       padding-bottom: 8px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .header-brand {
       display: flex;
@@ -156,12 +167,12 @@ export function generateSourceReportHtml(options: {
       gap: 10px;
     }
     .header-logo {
-      width: 38px;
-      height: 38px;
+      width: 36px;
+      height: 36px;
       object-fit: contain;
     }
     .brand-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 800;
       color: #0f172a;
       text-transform: uppercase;
@@ -170,12 +181,12 @@ export function generateSourceReportHtml(options: {
     .brand-sub {
       font-size: 9px;
       color: #475569;
-      font-family: monospace;
+      font-weight: 500;
     }
     .header-user-meta {
       text-align: right;
       font-family: monospace;
-      font-size: 9px;
+      font-size: 8.5px;
       color: #334155;
       line-height: 1.35;
     }
@@ -183,9 +194,42 @@ export function generateSourceReportHtml(options: {
       color: #0f172a;
     }
 
+    /* Executive KPIs Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .kpi-card {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    .kpi-label {
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+      letter-spacing: 0.3px;
+    }
+    .kpi-val {
+      font-size: 13px;
+      font-weight: 800;
+      color: #0f172a;
+      font-family: monospace;
+      margin-top: 1px;
+    }
+    .kpi-sub {
+      font-size: 7.5px;
+      color: #475569;
+      margin-top: 1px;
+    }
+
     /* Section Headings */
     .section-title {
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 800;
       text-transform: uppercase;
       color: #0f172a;
@@ -193,7 +237,7 @@ export function generateSourceReportHtml(options: {
       background: #f1f5f9;
       border-left: 3px solid #0f172a;
       padding: 3px 6px;
-      margin-top: 10px;
+      margin-top: 8px;
       margin-bottom: 6px;
       break-after: avoid;
     }
@@ -202,15 +246,15 @@ export function generateSourceReportHtml(options: {
     .report-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 9.5px;
-      margin-bottom: 10px;
+      font-size: 9px;
+      margin-bottom: 8px;
       break-inside: avoid;
     }
     .report-table th {
       background: #f8fafc;
       color: #0f172a;
       font-weight: 700;
-      font-size: 8.5px;
+      font-size: 8px;
       text-transform: uppercase;
       letter-spacing: 0.3px;
       padding: 4px 6px;
@@ -230,7 +274,7 @@ export function generateSourceReportHtml(options: {
 
     .mono {
       font-family: "SFMono-Regular", Consolas, monospace;
-      font-size: 9px;
+      font-size: 8.5px;
     }
     .text-right {
       text-align: right;
@@ -242,13 +286,14 @@ export function generateSourceReportHtml(options: {
       font-weight: 700;
     }
 
-    /* PDF Badge styles */
+    /* PDF Status Badges */
     .pct-tag {
       font-family: monospace;
-      font-size: 8.5px;
+      font-size: 8px;
       font-weight: 700;
       padding: 1px 4px;
       border-radius: 2px;
+      display: inline-block;
     }
     .pct-digital {
       background: #eff6ff;
@@ -265,17 +310,18 @@ export function generateSourceReportHtml(options: {
     .two-cols {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 6px;
+      margin-bottom: 6px;
       break-inside: avoid;
     }
     .col-box {
       border: 1px solid #cbd5e1;
       padding: 4px 6px;
       background: #ffffff;
+      border-radius: 2px;
     }
     .col-header {
-      font-size: 8.5px;
+      font-size: 8px;
       font-weight: 700;
       text-transform: uppercase;
       color: #475569;
@@ -284,10 +330,21 @@ export function generateSourceReportHtml(options: {
       padding-bottom: 2px;
     }
 
+    /* Explanatory notes for non-technical readers */
+    .info-note {
+      font-size: 8px;
+      color: #64748b;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 4px 6px;
+      border-radius: 2px;
+      margin-bottom: 8px;
+    }
+
     /* Footer */
     .report-footer {
       border-top: 1px solid #cbd5e1;
-      margin-top: 12px;
+      margin-top: 10px;
       padding-top: 4px;
       display: flex;
       justify-content: space-between;
@@ -304,7 +361,7 @@ export function generateSourceReportHtml(options: {
       .page-break {
         page-break-before: always;
         break-before: page;
-        padding-top: 8mm;
+        padding-top: 6mm;
       }
     }
   </style>
@@ -318,26 +375,50 @@ export function generateSourceReportHtml(options: {
         <img src="/qai.webp" alt="QAI Logo" class="header-logo" onerror="this.style.display='none'" />
         <div>
           <div class="brand-title">QAI Organization Data Platform</div>
-          <div class="brand-sub">Enterprise Raw Data Ingestion &amp; Content Audit Dossier</div>
+          <div class="brand-sub">Executive Ingestion Status &amp; Content Architecture Dossier</div>
         </div>
       </div>
       <div class="header-user-meta">
-        <div><strong>User / Operator:</strong> ${userName}</div>
-        <div><strong>Date:</strong> ${now}</div>
-        <div><strong>Report Code:</strong> ${reportCode}</div>
+        <div><strong>Operator:</strong> ${userName}</div>
+        <div><strong>Generated:</strong> ${now}</div>
+        <div><strong>Ref:</strong> ${reportCode}</div>
+      </div>
+    </div>
+
+    <!-- Executive KPI Summary Cards (Instantly readable by both executives & engineers) -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Targets</div>
+        <div class="kpi-val">${sourceStats.length} Sources</div>
+        <div class="kpi-sub">${sourceStats.reduce((acc, s) => acc + s.subdomains.length, 0)} Total Hostnames</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Ingested Data</div>
+        <div class="kpi-val">${grandTotalFiles.toLocaleString()} Items</div>
+        <div class="kpi-sub">${formatBytes(grandTotalSize)} Storage Volume</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Digital Native PDFs</div>
+        <div class="kpi-val" style="color: #1d4ed8;">${grandDigitalPdfs.toLocaleString()} (${grandDigitalPct}%)</div>
+        <div class="kpi-sub">Direct Text Extraction Ready</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Scanned / OCR PDFs</div>
+        <div class="kpi-val" style="color: #b45309;">${grandOcrPdfs.toLocaleString()} (${grandOcrPct}%)</div>
+        <div class="kpi-sub">Requires OCR Pipeline</div>
       </div>
     </div>
 
     <!-- 2. Table of Contents / Main Sources Summary Table -->
-    <div class="section-title">1.0 Source Targets &amp; Data Volume Breakdown</div>
+    <div class="section-title">1.0 Source Targets &amp; Data Inventory</div>
     <table class="report-table">
       <thead>
         <tr>
-          <th style="width: 22%;">Source Name &amp; URL</th>
-          <th style="width: 14%; text-align: right;">Downloaded Data</th>
-          <th style="width: 20%;">Data Types</th>
-          <th style="width: 26%;">PDF Breakdown (% Digital vs OCR)</th>
-          <th style="width: 18%;">Discovered Hosts</th>
+          <th style="width: 22%;">Target Source</th>
+          <th style="width: 14%; text-align: right;">Total Data</th>
+          <th style="width: 20%;">File Distribution</th>
+          <th style="width: 26%;">PDF Processing Classification</th>
+          <th style="width: 18%;">Discovered Endpoints</th>
         </tr>
       </thead>
       <tbody>
@@ -352,30 +433,30 @@ export function generateSourceReportHtml(options: {
             <tr>
               <td>
                 <div class="font-bold">${s.source.name}</div>
-                <div class="mono" style="color: #2563eb; font-size: 8.5px;">${s.source.baseUrl}</div>
+                <div class="mono" style="color: #2563eb; font-size: 8px;">${s.source.baseUrl}</div>
               </td>
               <td class="text-right">
-                <div class="mono font-bold">${s.totalFiles.toLocaleString()} items</div>
-                <div class="mono" style="color: #64748b; font-size: 8.5px;">${formatBytes(s.totalSize)}</div>
+                <div class="mono font-bold">${s.totalFiles.toLocaleString()} files</div>
+                <div class="mono" style="color: #64748b; font-size: 8px;">${formatBytes(s.totalSize)}</div>
               </td>
-              <td class="mono" style="font-size: 8.5px;">
+              <td class="mono" style="font-size: 8px;">
                 ${extSummaries || '—'}
               </td>
               <td>
                 ${
                   s.totalPdfCount > 0
                     ? `
-                  <div class="mono font-bold">${s.totalPdfCount.toLocaleString()} PDFs</div>
+                  <div class="mono font-bold">${s.totalPdfCount.toLocaleString()} PDFs (${formatBytes(s.totalSize)})</div>
                   <div style="margin-top: 2px; display: flex; gap: 4px;">
                     <span class="pct-tag pct-digital">Digital: ${s.digitalPdfCount} (${s.digitalPct}%)</span>
                     <span class="pct-tag pct-ocr">OCR: ${s.ocrPdfCount} (${s.ocrPct}%)</span>
                   </div>
                 `
-                    : '<span style="color: #94a3b8; font-size: 8.5px;">No PDFs collected</span>'
+                    : '<span style="color: #94a3b8; font-size: 8px;">No PDFs collected</span>'
                 }
               </td>
-              <td class="mono" style="font-size: 8.5px;">
-                ${s.subdomains.length} hostnames (${s.subdomains.slice(0, 1).map((h) => h[0]).join('') || 'root'})
+              <td class="mono" style="font-size: 8px;">
+                ${s.subdomains.length} host(s) &bull; ${s.pathSections.length} sections
               </td>
             </tr>
           `;
@@ -386,12 +467,12 @@ export function generateSourceReportHtml(options: {
           sourceStats.length > 1
             ? `
           <tr style="background: #f1f5f9; font-weight: 700; border-top: 2px solid #0f172a;">
-            <td>TOTAL PLATFORM DATA</td>
+            <td>TOTAL ENTERPRISE DATA</td>
             <td class="text-right mono font-bold">
-              ${grandTotalFiles.toLocaleString()} items<br />
-              <span style="font-size: 8.5px; color: #475569;">${formatBytes(grandTotalSize)}</span>
+              ${grandTotalFiles.toLocaleString()} files<br />
+              <span style="font-size: 8px; color: #475569;">${formatBytes(grandTotalSize)}</span>
             </td>
-            <td class="mono" style="font-size: 8.5px;">All Registered Targets</td>
+            <td class="mono" style="font-size: 8px;">All Registered Targets</td>
             <td>
               <div class="mono font-bold">${grandTotalPdfs.toLocaleString()} Total PDFs</div>
               <div style="margin-top: 2px; display: flex; gap: 4px;">
@@ -408,16 +489,16 @@ export function generateSourceReportHtml(options: {
     </table>
 
     <!-- 3. Per-Source Detailed Sections: Discovered Subdomains & Web Links -->
-    <div class="section-title">2.0 Website Taxonomy, Subdomains &amp; Content Discovery</div>
+    <div class="section-title">2.0 Website Taxonomy, Discovered Subdomains &amp; Links</div>
 
     ${sourceStats
       .map((s, idx) => `
       <div class="source-detail-entry ${idx > 0 && isCombined ? 'page-break' : ''}">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; margin-bottom: 4px; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px;">
-          <div class="font-bold" style="font-size: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; margin-bottom: 4px; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px;">
+          <div class="font-bold" style="font-size: 9.5px;">
             TARGET ${idx + 1}: ${s.source.name} &bull; <span class="mono" style="color: #2563eb;">${s.source.baseUrl}</span>
           </div>
-          <div class="mono" style="font-size: 8.5px; color: #64748b;">
+          <div class="mono" style="font-size: 8px; color: #64748b;">
             Partition: 00_raw/web/${s.source.slug}/ &bull; ${s.totalFiles} items (${formatBytes(s.totalSize)})
           </div>
         </div>
@@ -425,7 +506,7 @@ export function generateSourceReportHtml(options: {
         <div class="two-cols">
           <!-- Discovered Subdomains -->
           <div class="col-box">
-            <div class="col-header">Discovered Subdomains (${s.subdomains.length})</div>
+            <div class="col-header">Discovered Subdomains &amp; Hostnames (${s.subdomains.length})</div>
             ${
               s.subdomains.length > 0
                 ? `
@@ -446,20 +527,20 @@ export function generateSourceReportHtml(options: {
                 </tbody>
               </table>
             `
-                : '<div style="color: #94a3b8; font-size: 8.5px; padding: 4px;">No separate subdomains discovered.</div>'
+                : '<div style="color: #94a3b8; font-size: 8px; padding: 4px;">Primary domain only (no separate subdomains).</div>'
             }
           </div>
 
           <!-- Discovered Web Categories & Path Links -->
           <div class="col-box">
-            <div class="col-header">Discovered Website Categories &amp; Path Endpoints</div>
+            <div class="col-header">Discovered Content Sections &amp; URL Paths</div>
             ${
               s.pathSections.length > 0
                 ? `
               <table class="report-table" style="margin-bottom: 0;">
                 <thead>
                   <tr>
-                    <th>Endpoint Path / Category</th>
+                    <th>URL Path / Section</th>
                     <th style="width: 25%; text-align: right;">Objects</th>
                   </tr>
                 </thead>
@@ -473,31 +554,17 @@ export function generateSourceReportHtml(options: {
                 </tbody>
               </table>
             `
-                : '<div style="color: #94a3b8; font-size: 8.5px; padding: 4px;">No distinct path categories recorded.</div>'
+                : '<div style="color: #94a3b8; font-size: 8px; padding: 4px;">Standard root index.</div>'
             }
           </div>
-        </div>
-
-        <!-- Format Breakdown for this source -->
-        <div style="display: flex; align-items: center; gap: 6px; font-size: 8.5px; margin-bottom: 8px; font-family: monospace;">
-          <span style="font-weight: 700; color: #475569;">Format Counts:</span>
-          ${Object.entries(s.extCounts)
-            .map(
-              ([ext, count]) => `
-            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 2px;">
-              <strong>.${ext.toUpperCase()}</strong>: ${count}
-            </span>
-          `
-            )
-            .join(' ')}
         </div>
       </div>
     `).join('')}
 
     <!-- Official Running Footer -->
     <div class="report-footer">
-      <div>Organization Data Platform (ODP) &bull; Official A4 Ingestion Dossier</div>
-      <div>Confidential &bull; Generated for ${userName}</div>
+      <div>Organization Data Platform (ODP) &bull; Official Ingestion &amp; Quality Audit Dossier</div>
+      <div>Confidential Document &bull; Generated for ${userName}</div>
     </div>
 
   </div>

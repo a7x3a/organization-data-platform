@@ -464,6 +464,104 @@ export async function deleteFile(id: string) {
   }
 }
 
+export function beautifySourceMetadata(slug: string, rawName?: string, rawBaseUrl?: string) {
+  let cleanSlug = slug.toLowerCase().trim();
+
+  // Telegram detection
+  if (cleanSlug.startsWith('telegram-') || cleanSlug.startsWith('tg-') || (rawBaseUrl && rawBaseUrl.includes('t.me/'))) {
+    const channel = cleanSlug.replace(/^(telegram-|tg-)/, '').replace(/@/, '');
+    return {
+      name: `Telegram: @${channel}`,
+      slug: `telegram-${channel}`,
+      baseUrl: `https://t.me/${channel}`,
+      description: `Telegram Channel Collector for @${channel}`,
+    };
+  }
+
+  // Domain reconstruction from slug
+  let domain = cleanSlug;
+
+  // Replace common TLD patterns from hyphenated slugs
+  domain = domain
+    .replace(/^www[-_]/i, 'www.')
+    .replace(/[-_]gov[-_]krd$/i, '.gov.krd')
+    .replace(/[-_]gov[-_]iq$/i, '.gov.iq')
+    .replace(/[-_]com$/i, '.com')
+    .replace(/[-_]org$/i, '.org')
+    .replace(/[-_]net$/i, '.net')
+    .replace(/[-_]krd$/i, '.krd')
+    .replace(/[-_]iq$/i, '.iq')
+    .replace(/[-_]edu$/i, '.edu')
+    .replace(/[-_]info$/i, '.info')
+    .replace(/[-_]io$/i, '.io')
+    .replace(/[-_]ai$/i, '.ai')
+    .replace(/[-_]me$/i, '.me')
+    .replace(/[-_]tv$/i, '.tv');
+
+  if (domain.startsWith('diyako-yageyziman')) {
+    domain = domain.replace('diyako-yageyziman', 'diyako.yageyziman');
+  }
+
+  // Derive a clean, human-readable Title
+  let cleanName = rawName;
+  const isMangledName =
+    !cleanName ||
+    cleanName.includes('WWW ') ||
+    cleanName.includes(' COM') ||
+    cleanName.includes(' ORG') ||
+    cleanName.includes(' NET') ||
+    cleanName.includes(' KRD') ||
+    cleanName.includes('-') ||
+    cleanName === cleanName.toUpperCase() ||
+    cleanName.toLowerCase() === slug.toLowerCase();
+
+  if (isMangledName) {
+    const lowerSlug = cleanSlug.toLowerCase();
+    if (lowerSlug.includes('basnews')) {
+      cleanName = 'BasNews';
+    } else if (lowerSlug.includes('kurdishcentral')) {
+      cleanName = 'Kurdish Central';
+    } else if (lowerSlug.includes('diyako') && lowerSlug.includes('yageyziman')) {
+      cleanName = 'Diyako (Yagey Ziman)';
+    } else if (lowerSlug.includes('yageyziman')) {
+      cleanName = 'Yagey Ziman';
+    } else if (lowerSlug === 'gov-krd' || lowerSlug === 'gov.krd') {
+      cleanName = 'Gov.krd (Kurdistan Regional Government)';
+    } else if (lowerSlug.includes('rudaw')) {
+      cleanName = 'Rudaw';
+    } else {
+      let nameCore = domain.replace(/^www\./i, '').replace(/\.(com|org|net|krd|iq|gov|edu|info|io|ai|me|tv)$/i, '');
+      cleanName = nameCore
+        .split(/[-_.]/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+    }
+  }
+
+  // Derive clean Base URL
+  let cleanBaseUrl = rawBaseUrl;
+  if (
+    !cleanBaseUrl ||
+    cleanBaseUrl.includes('-com.com') ||
+    cleanBaseUrl.includes('-org.com') ||
+    cleanBaseUrl.endsWith('-krd.com') ||
+    cleanBaseUrl.includes('https://www-') ||
+    cleanBaseUrl.includes('https://diyako-yageyziman-')
+  ) {
+    cleanBaseUrl = `https://${domain}`;
+  } else if (!cleanBaseUrl.startsWith('http://') && !cleanBaseUrl.startsWith('https://')) {
+    cleanBaseUrl = `https://${cleanBaseUrl}`;
+  }
+
+  return {
+    name: cleanName || cleanSlug,
+    slug: cleanSlug,
+    baseUrl: cleanBaseUrl,
+    description: `Auto-created source for ${domain}`,
+  };
+}
+
 export async function syncStorageDirectories() {
   const dbFiles = await prisma.collectedFile.findMany({
     select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true },
@@ -500,24 +598,40 @@ export async function syncStorageDirectories() {
     }
   }
 
-  // 2. Reconcile Storage -> DB: Deep multi-pass directory scanner
+  const errors: string[] = [];
+
   try {
     const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
 
-    async function walkDir(dir: string, fileList: string[] = []): Promise<string[]> {
+    // PASS 0: Clean up and heal any existing damaged / mangled source names and URLs in the DB
+    const allExistingSources = await prisma.source.findMany();
+    for (const s of allExistingSources) {
+      const fixed = beautifySourceMetadata(s.slug, s.name, s.baseUrl);
+      if (fixed.name !== s.name || fixed.baseUrl !== s.baseUrl) {
+        await prisma.source.update({
+          where: { id: s.id },
+          data: {
+            name: fixed.name,
+            baseUrl: fixed.baseUrl,
+            description: s.description?.startsWith('Auto-created') ? fixed.description : s.description,
+          },
+        });
+        logger.info({ oldName: s.name, newName: fixed.name, oldUrl: s.baseUrl, newUrl: fixed.baseUrl }, 'healed_source_metadata');
+      }
+    }
+
+    // Helper: walk directory recursively
+    async function walkDir(dir: string): Promise<string[]> {
+      let fileList: string[] = [];
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
-            // Skip system hidden dirs
-            if (!entry.name.startsWith('.')) {
-              await walkDir(fullPath, fileList);
-            }
+            const nested = await walkDir(fullPath);
+            fileList = fileList.concat(nested);
           } else if (entry.isFile()) {
-            if (!entry.name.startsWith('.') && !entry.name.endsWith('.tmp')) {
-              fileList.push(fullPath);
-            }
+            fileList.push(fullPath);
           }
         }
       } catch {
@@ -542,16 +656,18 @@ export async function syncStorageDirectories() {
     }
 
     // Helper to get or create source by slug
-    async function getOrCreateSource(slug: string, name?: string, baseUrl?: string): Promise<string> {
-      const normalizedSlug = slug.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'general-source';
+    async function getOrCreateSource(slug: string, rawName?: string, rawBaseUrl?: string): Promise<string> {
+      const meta = beautifySourceMetadata(slug, rawName, rawBaseUrl);
+      const normalizedSlug = meta.slug;
       if (sourceMap.has(normalizedSlug)) {
         return sourceMap.get(normalizedSlug)!;
       }
       const newSource = await prisma.source.create({
         data: {
-          name: name || slug.replace(/[-_]/g, ' ').toUpperCase(),
+          name: meta.name,
           slug: normalizedSlug,
-          baseUrl: baseUrl || `https://${normalizedSlug}.com`,
+          baseUrl: meta.baseUrl,
+          description: meta.description,
           robotsPolicy: 'RESPECT',
           enabled: true,
         },
