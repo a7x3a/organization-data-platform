@@ -67,8 +67,9 @@ export const RunDetail: React.FC = () => {
   const isRunning =
     run ? (run.status === RunStatus.RUNNING || run.status === RunStatus.PENDING || run.status === RunStatus.PAUSED || run.status === RunStatus.CANCEL_REQUESTED) : false;
 
+  const targetRunId = run?.id || id!;
   const { data: filesData } = useFiles(
-    { collectionRunId: id!, pageSize: 100 },
+    { collectionRunId: targetRunId, pageSize: 100 },
     { refetchInterval: isRunning ? 2000 : false }
   );
 

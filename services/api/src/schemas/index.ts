@@ -254,13 +254,11 @@ export const updateRunStatusSchema = z.object({
   pagesCrawled: z.number().int().min(0).optional(),
 });
 
-// ─── Collected File reporting (scraper worker callback) ───────
-
 export const recordFileSchema = z.object({
-  collectionRunId: z.string().min(1),
-  sourceId: z.string().min(1),
-  sourceUrl: z.string().min(1),
-  finalUrl: z.string().optional(),
+  collectionRunId: z.string().optional(),
+  sourceId: z.string().optional(),
+  sourceUrl: z.string().nullable().optional(),
+  finalUrl: z.string().nullable().optional(),
   fileName: z.string().min(1),
   extension: z.string().nullable().optional(),
   mimeType: z.string().nullable().optional(),
@@ -268,6 +266,7 @@ export const recordFileSchema = z.object({
   sha256: z.string().optional(),
   r2Key: z.string().optional(),
   status: z.enum(['DISCOVERED', 'DOWNLOADING', 'UPLOADED', 'DUPLICATE', 'SKIPPED', 'FAILED']),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 // User-editable file fields only — deliberately excludes sha256/r2Key/status/

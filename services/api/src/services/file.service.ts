@@ -193,22 +193,77 @@ export async function getFileById(id: string) {
 // run.service.ts — acceptable given today's single-worker concurrency model,
 // but would need a real DB sequence if the scraper is ever scaled out.
 export async function recordFile(input: RecordFileInput) {
+  let targetRunId = input.collectionRunId;
+  let targetSourceId = input.sourceId;
+
+  // Resolve collectionRunId if it is a display ID or string
+  if (targetRunId) {
+    const run = await prisma.collectionRun.findFirst({
+      where: { OR: [{ id: targetRunId }, { runId: targetRunId }] },
+      select: { id: true, sourceId: true },
+    });
+    if (run) {
+      targetRunId = run.id;
+      if (!targetSourceId) targetSourceId = run.sourceId;
+    }
+  }
+
+  // If sourceId is missing, resolve from sourceSlug or run
+  if (!targetSourceId && input.sourceId) {
+    const src = await prisma.source.findFirst({
+      where: { OR: [{ id: input.sourceId }, { slug: input.sourceId }] },
+      select: { id: true },
+    });
+    if (src) targetSourceId = src.id;
+  }
+
   const sequence = (await prisma.collectedFile.count()) + 1;
+  const fileId = formatFileId(sequence);
+  const ext = input.extension || path.extname(input.fileName).toLowerCase() || null;
+  const canonical = canonicalFilename(input.fileName, fileId, ext);
+
+  // Check if file with sha256 or r2Key already exists
+  if (input.sha256 || input.r2Key) {
+    const existing = await prisma.collectedFile.findFirst({
+      where: {
+        OR: [
+          input.sha256 ? { sha256: input.sha256 } : undefined,
+          input.r2Key ? { r2Key: input.r2Key } : undefined,
+        ].filter(Boolean) as any,
+      },
+    });
+    if (existing) {
+      const updated = await prisma.collectedFile.update({
+        where: { id: existing.id },
+        data: {
+          collectionRunId: targetRunId || existing.collectionRunId,
+          sourceId: targetSourceId || existing.sourceId,
+          status: input.status,
+          r2Key: input.r2Key || existing.r2Key,
+          metadata: input.metadata ? (input.metadata as any) : existing.metadata,
+        },
+      });
+      return serializeFile(updated);
+    }
+  }
 
   const file = await prisma.collectedFile.create({
     data: {
-      fileId: formatFileId(sequence),
-      collectionRunId: input.collectionRunId,
-      sourceId: input.sourceId,
-      sourceUrl: input.sourceUrl,
-      finalUrl: input.finalUrl,
+      fileId,
+      collectionRunId: targetRunId,
+      sourceId: targetSourceId!,
+      sourceUrl: input.sourceUrl || null,
+      finalUrl: input.finalUrl || null,
       fileName: input.fileName,
-      extension: input.extension,
-      mimeType: input.mimeType,
+      originalFilename: input.fileName,
+      canonicalFilename: canonical,
+      extension: ext,
+      mimeType: input.mimeType || null,
       fileSize: input.fileSize !== undefined ? BigInt(input.fileSize) : null,
-      sha256: input.sha256,
-      r2Key: input.r2Key,
+      sha256: input.sha256 || crypto.createHash('sha256').update(input.fileName).digest('hex'),
+      r2Key: input.r2Key || null,
       status: input.status,
+      metadata: input.metadata ? (input.metadata as any) : undefined,
       downloadedAt: input.status === 'UPLOADED' ? new Date() : null,
     },
   });
