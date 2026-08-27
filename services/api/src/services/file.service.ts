@@ -7,6 +7,7 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { parsePagination, toPrismaSkipTake, buildPaginatedResult } from '../utils/pagination';
 import { storageProvider } from './storage';
+import { LocalStorageProvider } from './storage/LocalStorageProvider';
 import { formatFileId } from '../utils/fileId';
 import { canonicalFilename, categorizeFile } from '../utils/naming';
 import type { RecordFileInput, ManualEntryInput, UpdateFileInput } from '../schemas/index';
@@ -188,10 +189,38 @@ export async function getFileById(id: string) {
   return serializeFile(file);
 }
 
+export async function getNextFileId(): Promise<string> {
+  const lastFile = await prisma.collectedFile.findFirst({
+    where: { fileId: { startsWith: 'RAW-' } },
+    orderBy: { fileId: 'desc' },
+    select: { fileId: true },
+  });
+
+  let nextNum = 1;
+  if (lastFile?.fileId) {
+    const match = lastFile.fileId.match(/^RAW-(\d+)$/);
+    if (match) {
+      nextNum = parseInt(match[1], 10) + 1;
+    }
+  }
+
+  const count = await prisma.collectedFile.count();
+  nextNum = Math.max(nextNum, count + 1);
+
+  while (true) {
+    const candidate = formatFileId(nextNum);
+    const exists = await prisma.collectedFile.findUnique({
+      where: { fileId: candidate },
+      select: { id: true },
+    });
+    if (!exists) {
+      return candidate;
+    }
+    nextNum++;
+  }
+}
+
 // Called by the scraper worker to record a downloaded/duplicate/failed file.
-// Sequence uses count()+1, same non-atomic convention as generateRunId() in
-// run.service.ts — acceptable given today's single-worker concurrency model,
-// but would need a real DB sequence if the scraper is ever scaled out.
 export async function recordFile(input: RecordFileInput) {
   let targetRunId = input.collectionRunId;
   let targetSourceId = input.sourceId;
@@ -217,10 +246,7 @@ export async function recordFile(input: RecordFileInput) {
     if (src) targetSourceId = src.id;
   }
 
-  const sequence = (await prisma.collectedFile.count()) + 1;
-  const fileId = formatFileId(sequence);
   const ext = input.extension || path.extname(input.fileName).toLowerCase() || null;
-  const canonical = canonicalFilename(input.fileName, fileId, ext);
 
   // Check if file with sha256 or r2Key already exists
   if (input.sha256 || input.r2Key) {
@@ -247,28 +273,41 @@ export async function recordFile(input: RecordFileInput) {
     }
   }
 
-  const file = await prisma.collectedFile.create({
-    data: {
-      fileId,
-      collectionRunId: targetRunId,
-      sourceId: targetSourceId!,
-      sourceUrl: input.sourceUrl || null,
-      finalUrl: input.finalUrl || null,
-      fileName: input.fileName,
-      originalFilename: input.fileName,
-      canonicalFilename: canonical,
-      extension: ext,
-      mimeType: input.mimeType || null,
-      fileSize: input.fileSize !== undefined ? BigInt(input.fileSize) : null,
-      sha256: input.sha256 || crypto.createHash('sha256').update(input.fileName).digest('hex'),
-      r2Key: input.r2Key || null,
-      status: input.status,
-      metadata: input.metadata ? (input.metadata as any) : undefined,
-      downloadedAt: input.status === 'UPLOADED' ? new Date() : null,
-    },
-  });
-
-  return serializeFile(file);
+  let attempts = 0;
+  while (attempts < 5) {
+    attempts++;
+    try {
+      const fileId = await getNextFileId();
+      const canonical = canonicalFilename(input.fileName, fileId, ext);
+      const file = await prisma.collectedFile.create({
+        data: {
+          fileId,
+          collectionRunId: targetRunId,
+          sourceId: targetSourceId!,
+          sourceUrl: input.sourceUrl || null,
+          finalUrl: input.finalUrl || null,
+          fileName: input.fileName,
+          originalFilename: input.fileName,
+          canonicalFilename: canonical,
+          extension: ext,
+          mimeType: input.mimeType || null,
+          fileSize: input.fileSize !== undefined ? BigInt(input.fileSize) : null,
+          sha256: input.sha256 || crypto.createHash('sha256').update(input.fileName).digest('hex'),
+          r2Key: input.r2Key || null,
+          status: input.status,
+          metadata: input.metadata ? (input.metadata as any) : undefined,
+          downloadedAt: input.status === 'UPLOADED' ? new Date() : null,
+        },
+      });
+      return serializeFile(file);
+    } catch (err: any) {
+      if (err?.code === 'P2002' && attempts < 5) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new AppError(500, 'Failed to reserve unique file ID after multiple attempts', 'FILE_ID_GENERATION_FAILED');
 }
 
 // A human uploads a file directly through the UI (no scrape run involved).
@@ -285,11 +324,9 @@ export async function createManualUpload(input: {
   if (!source) throw new AppError(404, 'Source not found', 'SOURCE_NOT_FOUND');
 
   const sha256 = crypto.createHash('sha256').update(input.buffer).digest('hex');
-
   const duplicate = await prisma.collectedFile.findFirst({ where: { sha256 } });
 
-  const sequence = (await prisma.collectedFile.count()) + 1;
-  const fileId = formatFileId(sequence);
+  const fileId = await getNextFileId();
   const extension = input.originalFilename.includes('.')
     ? input.originalFilename.slice(input.originalFilename.lastIndexOf('.'))
     : null;
@@ -349,8 +386,7 @@ export async function createManualEntry(input: ManualEntryInput & { uploadedByUs
   const source = await prisma.source.findUnique({ where: { id: input.sourceId } });
   if (!source) throw new AppError(404, 'Source not found', 'SOURCE_NOT_FOUND');
 
-  const sequence = (await prisma.collectedFile.count()) + 1;
-  const fileId = formatFileId(sequence);
+  const fileId = await getNextFileId();
 
   const file = await prisma.collectedFile.create({
     data: {
@@ -681,15 +717,33 @@ function extractSourceAndRunFromRelKey(relKey: string): {
 }
 
 export async function syncStorageDirectories() {
-  const dbFiles = await prisma.collectedFile.findMany({
-    select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true, sourceId: true },
-  });
-
   let syncedCount = 0;
   let missingCount = 0;
   let indexedNewCount = 0;
   let restoredRunsCount = 0;
   let restoredMetadataCount = 0;
+
+  const localStorageDir = storageProvider instanceof LocalStorageProvider
+    ? storageProvider.resolvePath('')
+    : path.resolve(env.LOCAL_STORAGE_DIR);
+
+  // PASS 0A: Self-heal any 'RAW-UNKNOWN' or malformed fileIds directly in PostgreSQL
+  const unknownFiles = await prisma.collectedFile.findMany({
+    where: { OR: [{ fileId: 'RAW-UNKNOWN' }, { fileId: { contains: 'UNKNOWN' } }] },
+    select: { id: true },
+  });
+  for (const uf of unknownFiles) {
+    const freshId = await getNextFileId();
+    await prisma.collectedFile.update({
+      where: { id: uf.id },
+      data: { fileId: freshId },
+    });
+    restoredMetadataCount++;
+  }
+
+  const dbFiles = await prisma.collectedFile.findMany({
+    select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true, sourceId: true },
+  });
 
   const existingR2KeysInDb = new Set<string>();
   const existingSha256InDb = new Set<string>();
@@ -717,9 +771,7 @@ export async function syncStorageDirectories() {
   }
 
   try {
-    const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
-
-    // PASS 0: Clean up and heal any existing damaged / mangled source names and URLs in the DB
+    // PASS 0B: Clean up and heal any existing damaged / mangled source names and URLs in the DB
     const allExistingSources = await prisma.source.findMany();
     for (const s of allExistingSources) {
       const fixed = beautifySourceMetadata(s.slug, s.name, s.baseUrl);
@@ -888,8 +940,11 @@ export async function syncStorageDirectories() {
               status: manifest.status || 'COMPLETED',
               startedAt: manifest.started_at ? new Date(manifest.started_at) : new Date(),
               completedAt: manifest.completed_at ? new Date(manifest.completed_at) : new Date(),
-              pagesCrawled: Number(manifest.stats?.pages_crawled || manifest.stats?.pages_visited || 0),
-              filesDownloaded: Number(manifest.stats?.files_downloaded || manifest.stats?.total_files || 0),
+              pagesCrawled: Number(manifest.pages_crawled || manifest.stats?.pages_crawled || manifest.stats?.pages_visited || 0),
+              filesDownloaded: Number(manifest.files_downloaded || manifest.stats?.files_downloaded || manifest.stats?.total_files || 0),
+              filesFound: Number(manifest.files_found || manifest.stats?.files_found || 0),
+              filesDuplicate: Number(manifest.files_duplicate || manifest.stats?.files_duplicate || 0),
+              filesFailed: Number(manifest.files_failed || manifest.stats?.files_failed || 0),
               manifestR2Key: relKey,
             },
           });
@@ -907,13 +962,15 @@ export async function syncStorageDirectories() {
       }
     }
 
-    // PASS 2: Recover rich metadata from metadata.jsonl & auto-heal run associations
+    // PASS 2: Recover rich metadata from metadata.jsonl & auto-heal run associations & heal RAW-UNKNOWN
     for (const jsonlFile of metadataJsonlFiles) {
       try {
         const rawContent = await fs.readFile(jsonlFile, 'utf-8');
         const lines = rawContent.split('\n').filter((l) => l.trim().length > 0);
         const relDir = path.dirname(path.relative(localStorageDir, jsonlFile)).replace(/\\/g, '/');
         const info = extractSourceAndRunFromRelKey(relDir);
+        let hasModifiedLines = false;
+        const updatedLines: string[] = [];
 
         for (const line of lines) {
           try {
@@ -930,6 +987,13 @@ export async function syncStorageDirectories() {
               collectionRunId = await getOrCreateRun(targetRunKey, sourceId);
             }
 
+            let validFileId = obj.file_id;
+            if (!validFileId || validFileId === 'RAW-UNKNOWN' || validFileId.includes('UNKNOWN')) {
+              validFileId = await getNextFileId();
+              obj.file_id = validFileId;
+              hasModifiedLines = true;
+            }
+
             // Check if file is already in DB
             const existingFile = await prisma.collectedFile.findFirst({
               where: {
@@ -941,37 +1005,40 @@ export async function syncStorageDirectories() {
             });
 
             if (existingFile) {
-              // Self-heal missing run association or missing sourceId
+              const updates: Record<string, unknown> = {};
               if (!existingFile.collectionRunId && collectionRunId) {
-                await prisma.collectedFile.update({
-                  where: { id: existingFile.id },
-                  data: { collectionRunId },
-                });
+                updates.collectionRunId = collectionRunId;
               }
               if (!existingFile.sourceId && sourceId) {
+                updates.sourceId = sourceId;
+              }
+              if (existingFile.fileId === 'RAW-UNKNOWN' || existingFile.fileId.includes('UNKNOWN')) {
+                updates.fileId = validFileId;
+              }
+              if (Object.keys(updates).length > 0) {
                 await prisma.collectedFile.update({
                   where: { id: existingFile.id },
-                  data: { sourceId },
+                  data: updates,
                 });
               }
               if (sha256) existingSha256InDb.add(sha256);
               if (relKey) existingR2KeysInDb.add(relKey);
+              updatedLines.push(JSON.stringify(obj));
               continue;
             }
 
-            const seq = (await prisma.collectedFile.count()) + 1;
-            const fileId = obj.file_id || formatFileId(seq);
+            const canonical = canonicalFilename(fileName, validFileId, ext);
 
             await prisma.collectedFile.create({
               data: {
-                fileId,
+                fileId: validFileId,
                 sourceId,
                 collectionRunId,
                 sourceUrl: obj.url || obj.source_url || null,
                 finalUrl: obj.final_url || obj.url || null,
                 fileName,
                 originalFilename: obj.original_filename || fileName,
-                canonicalFilename: canonicalFilename(fileName, fileId, ext),
+                canonicalFilename: canonical,
                 extension: ext,
                 mimeType: obj.mime_type || (ext === '.pdf' ? 'application/pdf' : ext === '.json' ? 'application/json' : 'application/octet-stream'),
                 fileSize: BigInt(obj.file_size || obj.size || 0),
@@ -997,8 +1064,19 @@ export async function syncStorageDirectories() {
             restoredMetadataCount++;
             indexedNewCount++;
             syncedCount++;
+            updatedLines.push(JSON.stringify(obj));
           } catch {
-            // single line parse error ignored
+            updatedLines.push(line);
+          }
+        }
+
+        // Rewrite healed metadata.jsonl if any IDs were updated
+        if (hasModifiedLines && updatedLines.length > 0) {
+          try {
+            await fs.writeFile(jsonlFile, updatedLines.join('\n') + '\n', 'utf-8');
+            logger.info({ jsonlFile }, 'healed_metadata_jsonl_saved');
+          } catch {
+            // ignore
           }
         }
       } catch (err) {
@@ -1063,8 +1141,7 @@ export async function syncStorageDirectories() {
           }
         }
 
-        const seq = (await prisma.collectedFile.count()) + 1;
-        const fileId = formatFileId(seq);
+        const fileId = await getNextFileId();
 
         let mimeType = 'application/octet-stream';
         if (ext === '.pdf') mimeType = 'application/pdf';
@@ -1141,11 +1218,15 @@ export async function syncStorageDirectories() {
       const actualFailedCount = await prisma.collectedFile.count({
         where: { collectionRunId: r.id, status: 'FAILED' },
       });
+      const totalCount = await prisma.collectedFile.count({
+        where: { collectionRunId: r.id },
+      });
+
       await prisma.collectionRun.update({
         where: { id: r.id },
         data: {
           filesDownloaded: actualUploadedCount,
-          filesFound: Math.max(actualUploadedCount, actualUploadedCount + actualDuplicateCount + actualFailedCount),
+          filesFound: Math.max(actualUploadedCount, totalCount),
           filesDuplicate: actualDuplicateCount,
           filesFailed: actualFailedCount,
         },

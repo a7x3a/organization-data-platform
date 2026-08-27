@@ -30,6 +30,33 @@ class Settings(BaseSettings):
     storage_provider: str = "local"
     local_storage_dir: str = "/app/storage"
 
+    @field_validator("local_storage_dir", mode="before")
+    @classmethod
+    def resolve_local_storage_dir(cls, v: Optional[str]) -> str:
+        dir_val = v or "/app/storage"
+        import os
+        from pathlib import Path
+
+        # If direct path exists, use it
+        if os.path.exists(dir_val):
+            return os.path.abspath(dir_val)
+
+        # Look in REPO_ROOT / "storage"
+        repo_storage = REPO_ROOT / "storage"
+        if repo_storage.exists():
+            return str(repo_storage.resolve())
+
+        # If running inside docker with /app/storage
+        if os.path.exists("/app/storage"):
+            return "/app/storage"
+
+        # Fallback to creating REPO_ROOT / "storage" or normalized path
+        try:
+            repo_storage.mkdir(parents=True, exist_ok=True)
+            return str(repo_storage.resolve())
+        except Exception:
+            return os.path.abspath(dir_val)
+
     # ── Cloudflare R2 (only required when storage_provider=r2) ─
     r2_endpoint: Optional[str] = None
     r2_bucket: Optional[str] = None

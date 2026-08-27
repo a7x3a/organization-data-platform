@@ -68,8 +68,17 @@ export const RunDetail: React.FC = () => {
     run ? (run.status === RunStatus.RUNNING || run.status === RunStatus.PENDING || run.status === RunStatus.PAUSED || run.status === RunStatus.CANCEL_REQUESTED) : false;
 
   const targetRunId = run?.id || id!;
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+
   const { data: filesData } = useFiles(
-    { collectionRunId: targetRunId, pageSize: 100 },
+    {
+      collectionRunId: targetRunId,
+      page,
+      pageSize,
+      category: typeFilter !== 'all' ? typeFilter : undefined,
+    },
     { refetchInterval: isRunning ? 2000 : false }
   );
 
@@ -95,7 +104,6 @@ export const RunDetail: React.FC = () => {
     fileId?: string;
   } | null>(null);
 
-  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [showPruneModal, setShowPruneModal] = useState(false);
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
 
@@ -1012,7 +1020,10 @@ export const RunDetail: React.FC = () => {
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
           <button
             type="button"
-            onClick={() => setTypeFilter('all')}
+            onClick={() => {
+              setTypeFilter('all');
+              setPage(1);
+            }}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
               typeFilter === 'all'
                 ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1029,7 +1040,10 @@ export const RunDetail: React.FC = () => {
           {digitalPdfCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('digital')}
+              onClick={() => {
+                setTypeFilter('digital');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'digital'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1047,7 +1061,10 @@ export const RunDetail: React.FC = () => {
           {ocrPdfCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('ocr')}
+              onClick={() => {
+                setTypeFilter('ocr');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'ocr'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1065,7 +1082,10 @@ export const RunDetail: React.FC = () => {
           {webDataCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('web_data')}
+              onClick={() => {
+                setTypeFilter('web_data');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'web_data'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1083,7 +1103,10 @@ export const RunDetail: React.FC = () => {
           {ebookCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('ebooks')}
+              onClick={() => {
+                setTypeFilter('ebooks');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'ebooks'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1101,7 +1124,10 @@ export const RunDetail: React.FC = () => {
           {docCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('documents')}
+              onClick={() => {
+                setTypeFilter('documents');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'documents'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1119,7 +1145,10 @@ export const RunDetail: React.FC = () => {
           {audioCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('audio')}
+              onClick={() => {
+                setTypeFilter('audio');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'audio'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1137,7 +1166,10 @@ export const RunDetail: React.FC = () => {
           {videoCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('video')}
+              onClick={() => {
+                setTypeFilter('video');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'video'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1155,7 +1187,10 @@ export const RunDetail: React.FC = () => {
           {imageCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('images')}
+              onClick={() => {
+                setTypeFilter('images');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'images'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1173,7 +1208,10 @@ export const RunDetail: React.FC = () => {
           {dataCount > 0 && (
             <button
               type="button"
-              onClick={() => setTypeFilter('datasets')}
+              onClick={() => {
+                setTypeFilter('datasets');
+                setPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
                 typeFilter === 'datasets'
                   ? 'bg-[var(--color-brand-500)]/15 text-[var(--color-brand-400)] border border-[var(--color-brand-500)]/30'
@@ -1194,6 +1232,15 @@ export const RunDetail: React.FC = () => {
           data={filteredFiles}
           keyExtractor={(f) => f.id}
           isLoading={false}
+          pagination={
+            filesData && filesData.totalPages > 1
+              ? {
+                  page,
+                  totalPages: filesData.totalPages,
+                  onPageChange: setPage,
+                }
+              : undefined
+          }
           emptyMessage={
             typeFilter === 'all'
               ? 'No files discovered yet.'

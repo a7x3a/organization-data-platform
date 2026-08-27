@@ -134,10 +134,13 @@ function formatCategoryLabel(cat: string): string {
 
 async function fetchAllFilesForSource(sourceId: string) {
   const all: CollectedFile[] = [];
-  for (let page = 1; page <= 20; page++) {
-    const res = await filesApi.list({ sourceId, page, pageSize: 100 });
+  let page = 1;
+  while (true) {
+    const res = await filesApi.list({ sourceId, page, pageSize: 200 });
+    if (!res?.data || res.data.length === 0) break;
     all.push(...res.data);
-    if (all.length >= res.total) break;
+    if (all.length >= res.total || page >= res.totalPages) break;
+    page++;
   }
   return all;
 }

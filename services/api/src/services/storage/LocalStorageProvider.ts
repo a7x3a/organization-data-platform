@@ -1,8 +1,37 @@
 import fs from 'fs/promises';
+import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 import type { StorageProvider } from './StorageProvider';
+
+function findStorageRoot(): string {
+  const envPath = env.LOCAL_STORAGE_DIR;
+  if (existsSync(envPath)) {
+    return path.resolve(envPath);
+  }
+
+  // Search up to find repo root storage directory
+  let curr = __dirname;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(curr, 'storage');
+    if (existsSync(candidate)) {
+      return path.resolve(candidate);
+    }
+    const parent = path.dirname(curr);
+    if (parent === curr) break;
+    curr = parent;
+  }
+
+  // Fallback to normalized path
+  const fallback = path.resolve(envPath.startsWith('/app/') ? './storage' : envPath);
+  try {
+    mkdirSync(fallback, { recursive: true });
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
 
 // Local filesystem storage — the default for development so the app is
 // fully functional without any R2 credentials. Keys are relative paths
@@ -11,7 +40,7 @@ export class LocalStorageProvider implements StorageProvider {
   private readonly root: string;
 
   constructor() {
-    this.root = path.resolve(env.LOCAL_STORAGE_DIR);
+    this.root = findStorageRoot();
   }
 
   private resolveKey(key: string): string {
@@ -78,3 +107,4 @@ export class LocalStorageProvider implements StorageProvider {
     return this.resolveKey(key);
   }
 }
+

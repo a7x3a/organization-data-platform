@@ -20,9 +20,8 @@ class LocalStorageProvider:
         try:
             os.makedirs(self._root, exist_ok=True)
         except Exception as e:
-            log.warning("storage_dir_unwritable_fallback_to_tmp", error=str(e), original_path=self._root)
-            self._root = os.path.abspath("/tmp/scraper/storage")
-            os.makedirs(self._root, exist_ok=True)
+            log.error("storage_dir_creation_failed", error=str(e), path=self._root)
+            raise
 
     def _resolve(self, key: str) -> str:
         clean_key = key.lstrip("/\\")
@@ -42,20 +41,13 @@ class LocalStorageProvider:
         content_type: Optional[str] = None,
     ) -> None:
         dest = self._resolve(r2_key)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copyfile(local_path, dest)
         try:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.copyfile(local_path, dest)
-            try:
-                os.chmod(dest, 0o666)
-            except Exception:
-                pass
-            log.info("local_storage_upload_completed", key=r2_key)
-        except Exception as e:
-            alt_root = os.path.abspath("/tmp/scraper/storage")
-            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key.lstrip("/\\")))
-            os.makedirs(os.path.dirname(alt_dest), exist_ok=True)
-            shutil.copyfile(local_path, alt_dest)
-            log.info("local_storage_upload_completed_fallback", key=r2_key, error=str(e))
+            os.chmod(dest, 0o666)
+        except Exception:
+            pass
+        log.info("local_storage_upload_completed", key=r2_key)
 
     def upload_bytes(
         self,
@@ -64,22 +56,15 @@ class LocalStorageProvider:
         content_type: str = "application/octet-stream",
     ) -> None:
         dest = self._resolve(r2_key)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(data)
         try:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, "wb") as f:
-                f.write(data)
-            try:
-                os.chmod(dest, 0o666)
-            except Exception:
-                pass
-            log.info("local_storage_bytes_upload_completed", key=r2_key, size=len(data))
-        except Exception as e:
-            alt_root = os.path.abspath("/tmp/scraper/storage")
-            alt_dest = os.path.abspath(os.path.join(alt_root, r2_key.lstrip("/\\")))
-            os.makedirs(os.path.dirname(alt_dest), exist_ok=True)
-            with open(alt_dest, "wb") as f:
-                f.write(data)
-            log.info("local_storage_bytes_upload_completed_fallback", key=r2_key, size=len(data), error=str(e))
+            os.chmod(dest, 0o666)
+        except Exception:
+            pass
+        log.info("local_storage_bytes_upload_completed", key=r2_key, size=len(data))
 
     def object_exists(self, r2_key: str) -> bool:
         return os.path.exists(self._resolve(r2_key))
+

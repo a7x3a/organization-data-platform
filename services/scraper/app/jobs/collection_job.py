@@ -420,28 +420,35 @@ class CollectionJob:
         raw_bytes = json.dumps(page_doc, ensure_ascii=False, indent=2).encode("utf-8")
         sha256 = hashlib.sha256(raw_bytes).hexdigest()
 
-        if await self._pipeline.is_duplicate(sha256):
-            return
-
         title = page_doc.get("title", "") or "web_content"
         clean_title = sanitize_filename(title)[:80]
         file_name = f"{clean_title}_{sha256[:8]}.json" if clean_title else f"web_content_{sha256[:8]}.json"
         category = "data/web_content"
         r2_key = f"{self._run_folder_key}/{category}/{file_name}"
+        page_url = page_doc.get("url", "")
 
-        file_id = await self._pipeline.reserve_file_id(
-            sourceUrl=page_doc.get("url"),
-            fileName=file_name,
-            extension=".json",
-            mimeType="application/json",
-            fileSize=len(raw_bytes),
-            sha256=sha256,
-            r2Key=r2_key,
-            metadata=page_doc,
-        )
+        if await self._pipeline.is_duplicate(sha256):
+            log.info("duplicate_web_data_detected", url=page_url, sha256=sha256)
+            manifest.record_file_duplicate()
+            await self._pipeline.report_file_status(
+                page_url, file_name, sha256, "DUPLICATE"
+            )
+            await self._pipeline.report_progress(manifest)
+            return
 
         try:
             storage.upload_bytes(raw_bytes, r2_key, "application/json")
+            file_id = await self._pipeline.reserve_file_id(
+                sourceUrl=page_url,
+                fileName=file_name,
+                extension=".json",
+                mimeType="application/json",
+                fileSize=len(raw_bytes),
+                sha256=sha256,
+                r2Key=r2_key,
+                metadata=page_doc,
+            )
+
             manifest.record_file_downloaded(
                 category=category,
                 file_name=file_name,
@@ -454,8 +461,8 @@ class CollectionJob:
                 mime_type="application/json",
                 file_size=len(raw_bytes),
                 sha256=sha256,
-                source_url=page_doc.get("url", ""),
-                final_url=page_doc.get("url", ""),
+                source_url=page_url,
+                final_url=page_url,
                 r2_key=r2_key,
                 extra_metadata={
                     "category": category,
@@ -464,9 +471,10 @@ class CollectionJob:
                     "word_count": page_doc.get("word_count", 0),
                 },
             )
-            log.info("web_data_extracted_and_stored", url=page_doc.get("url"), title=title, r2_key=r2_key)
+            log.info("web_data_extracted_and_stored", url=page_url, title=title, r2_key=r2_key)
+            await self._pipeline.report_progress(manifest)
         except Exception as e:
-            log.warning("web_data_storage_failed", url=page_doc.get("url"), error=str(e))
+            log.warning("web_data_storage_failed", url=page_url, error=str(e))
 
     async def _finalize(
         self,

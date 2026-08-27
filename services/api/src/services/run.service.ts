@@ -630,18 +630,35 @@ export async function getRunManifest(id: string, currentUser?: CurrentUser) {
   const run = await getRunById(id, currentUser);
   const typeFolder = run.collector?.type?.toLowerCase() === 'telegram' ? 'telegram' : 'web';
   const slug = run.source?.slug || 'unknown';
-  const manifestKey = run.manifestR2Key || `00_raw/${typeFolder}/${slug}/${run.runId}/manifest.json`;
 
-  const buf = await storageProvider.getBuffer(manifestKey);
+  const candidates = [
+    run.manifestR2Key,
+    `00_raw/${typeFolder}/${slug}/${run.runId}/manifest.json`,
+    `00_raw/${typeFolder}/${slug}/${run.id}/manifest.json`,
+    `00_raw/${slug}/${run.runId}/manifest.json`,
+    `${slug}/${run.runId}/manifest.json`,
+  ].filter(Boolean) as string[];
+
+  let buf: Buffer | null = null;
+  let activeKey = candidates[0];
+
+  for (const key of candidates) {
+    buf = await storageProvider.getBuffer(key);
+    if (buf) {
+      activeKey = key;
+      break;
+    }
+  }
+
   if (!buf) {
     throw new AppError(404, 'Run manifest file not found on storage', 'MANIFEST_NOT_FOUND');
   }
 
   try {
     const json = JSON.parse(buf.toString('utf-8'));
-    return { manifestKey, manifest: json };
+    return { manifestKey: activeKey, manifest: json };
   } catch {
-    return { manifestKey, raw: buf.toString('utf-8') };
+    return { manifestKey: activeKey, raw: buf.toString('utf-8') };
   }
 }
 
@@ -649,9 +666,30 @@ export async function getRunMetadata(id: string, currentUser?: CurrentUser) {
   const run = await getRunById(id, currentUser);
   const typeFolder = run.collector?.type?.toLowerCase() === 'telegram' ? 'telegram' : 'web';
   const slug = run.source?.slug || 'unknown';
-  const metadataKey = `00_raw/${typeFolder}/${slug}/${run.runId}/metadata.jsonl`;
 
-  const buf = await storageProvider.getBuffer(metadataKey);
+  const candidates: string[] = [];
+  if (run.manifestR2Key) {
+    const dir = run.manifestR2Key.substring(0, run.manifestR2Key.lastIndexOf('/'));
+    candidates.push(`${dir}/metadata.jsonl`);
+  }
+  candidates.push(
+    `00_raw/${typeFolder}/${slug}/${run.runId}/metadata.jsonl`,
+    `00_raw/${typeFolder}/${slug}/${run.id}/metadata.jsonl`,
+    `00_raw/${slug}/${run.runId}/metadata.jsonl`,
+    `${slug}/${run.runId}/metadata.jsonl`
+  );
+
+  let buf: Buffer | null = null;
+  let activeKey = candidates[0];
+
+  for (const key of candidates) {
+    buf = await storageProvider.getBuffer(key);
+    if (buf) {
+      activeKey = key;
+      break;
+    }
+  }
+
   if (!buf) {
     throw new AppError(404, 'Run metadata file not found on storage', 'METADATA_NOT_FOUND');
   }
@@ -669,5 +707,5 @@ export async function getRunMetadata(id: string, currentUser?: CurrentUser) {
       }
     });
 
-  return { metadataKey, lines, count: lines.length, raw };
+  return { metadataKey: activeKey, lines, count: lines.length, raw };
 }
