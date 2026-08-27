@@ -124,7 +124,6 @@ export function generateSourceReportHtml(options: {
   const grandDigitalPct = grandTotalPdfs > 0 ? Math.round((grandDigitalPdfs / grandTotalPdfs) * 100) : 75;
   const grandOcrPct = 100 - grandDigitalPct;
 
-  // Find max files among sources for bar scaling
   const maxSourceFiles = Math.max(...sourceStats.map((s) => s.totalFiles), 1);
 
   return `<!DOCTYPE html>
@@ -147,7 +146,7 @@ export function generateSourceReportHtml(options: {
       font-size: 9.5px;
       line-height: 1.35;
       color: #334155;
-      background-color: #f1f5f9;
+      background-color: #f8fafc;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
       padding: 10px;
@@ -157,48 +156,25 @@ export function generateSourceReportHtml(options: {
       width: 100%;
       max-width: 190mm;
       margin: 0 auto;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 14px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
       padding: 14px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
 
-    /* ─── Modern Dual Header Banner (Exact Match to Design) ─── */
+    /* ─── Header: Left Logo & Name, Right Blue Action Block ─── */
     .header-banner {
       display: grid;
-      grid-template-columns: 1.3fr 1fr;
+      grid-template-columns: 1fr 1.3fr;
       gap: 10px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
-    .header-blue-box {
-      background: #1d68f2;
-      border-radius: 12px;
-      padding: 16px 18px;
-      color: #ffffff;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-    .header-blue-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: #ffffff;
-      line-height: 1.2;
-      letter-spacing: -0.2px;
-    }
-    .header-blue-sub {
-      font-size: 10px;
-      color: rgba(255, 255, 255, 0.85);
-      margin-top: 3px;
-      font-weight: 400;
-    }
-
-    .header-white-box {
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 14px 16px;
+    .header-left-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -206,56 +182,83 @@ export function generateSourceReportHtml(options: {
     .header-brand-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 9px;
     }
     .header-logo {
-      width: 26px;
-      height: 26px;
+      width: 28px;
+      height: 28px;
       object-fit: contain;
     }
     .brand-name {
-      font-size: 11px;
+      font-size: 11.5px;
       font-weight: 700;
       color: #0f172a;
       line-height: 1.1;
+      letter-spacing: -0.2px;
     }
     .brand-caption {
       font-size: 8px;
       color: #64748b;
+      font-weight: 500;
     }
     .header-meta-row {
-      border-top: 1px solid #f1f5f9;
-      padding-top: 6px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 5px;
       margin-top: 6px;
     }
     .meta-date {
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 700;
       color: #0f172a;
     }
     .meta-presenter {
-      font-size: 8.5px;
+      font-size: 8px;
       color: #64748b;
     }
 
-    /* ─── Section 1: Executive Summary KPI Cards ─── */
+    .header-right-box {
+      background: #1d68f2;
+      border-radius: 4px;
+      padding: 14px 16px;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .header-blue-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.2;
+      letter-spacing: -0.2px;
+    }
+    .header-blue-sub {
+      font-size: 9.5px;
+      color: rgba(255, 255, 255, 0.9);
+      margin-top: 3px;
+      font-weight: 400;
+    }
+
+    /* ─── Executive Summary KPI Cards ─── */
     .section-heading {
       font-size: 10px;
       font-weight: 700;
       color: #0f172a;
-      margin-bottom: 7px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
 
     .kpi-row {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-bottom: 12px;
+      gap: 8px;
+      margin-bottom: 10px;
     }
     .kpi-card {
       background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
       padding: 10px 12px;
       display: flex;
       flex-direction: column;
@@ -265,58 +268,62 @@ export function generateSourceReportHtml(options: {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .kpi-icon-badge {
-      width: 24px;
-      height: 24px;
-      border-radius: 6px;
-      background: #1d68f2;
-      color: #ffffff;
+      width: 26px;
+      height: 26px;
+      border-radius: 4px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1d68f2;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
+      flex-shrink: 0;
     }
     .kpi-label {
-      font-size: 9px;
+      font-size: 8.5px;
       font-weight: 600;
       color: #475569;
       line-height: 1.2;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
     }
     .kpi-value {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       color: #1d68f2;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       letter-spacing: -0.3px;
     }
     .kpi-foot {
-      font-size: 8px;
+      font-size: 7.8px;
       color: #64748b;
-      margin-top: 2px;
+      margin-top: 1px;
     }
 
-    /* ─── Section 2: Source Data Comparison (Horizontal Bar Chart) ─── */
+    /* ─── Sharp Content Panels ─── */
     .content-panel {
       background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 12px 14px;
-      margin-bottom: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
     }
     .panel-title {
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 700;
       color: #0f172a;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
     }
 
     .chart-layout {
       display: grid;
       grid-template-columns: 1.4fr 1fr;
-      gap: 14px;
+      gap: 12px;
       align-items: center;
     }
 
@@ -324,7 +331,7 @@ export function generateSourceReportHtml(options: {
     .bar-chart-container {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
     .bar-row {
       display: flex;
@@ -335,104 +342,103 @@ export function generateSourceReportHtml(options: {
       display: flex;
       justify-content: space-between;
       font-size: 8px;
-      color: #475569;
+      color: #334155;
     }
     .bar-track {
       width: 100%;
-      height: 14px;
+      height: 12px;
       background: #f1f5f9;
-      border-radius: 3px;
+      border: 1px solid #e2e8f0;
+      border-radius: 2px;
       overflow: hidden;
       display: flex;
     }
     .bar-fill {
       height: 100%;
       background: #1d68f2;
-      border-radius: 3px;
+      border-radius: 1px;
       min-width: 4px;
-    }
-    .bar-fill-sub {
-      height: 100%;
-      background: #93c5fd;
     }
 
     /* Legend List */
     .legend-list {
       display: flex;
       flex-direction: column;
-      gap: 9px;
+      gap: 7px;
       border-left: 2px solid #1d68f2;
-      padding-left: 10px;
+      padding-left: 9px;
     }
     .legend-item {
       display: flex;
       flex-direction: column;
     }
     .legend-name {
-      font-size: 8.5px;
+      font-size: 8px;
       color: #475569;
       font-weight: 500;
     }
     .legend-val {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       color: #1d68f2;
     }
 
-    /* ─── Section 3: PDF & Corpus Breakdown (Pie Chart & Summary) ─── */
+    /* ─── PDF Breakdown Panel ─── */
     .pie-layout {
       display: grid;
       grid-template-columns: 1.2fr 1fr;
-      gap: 14px;
+      gap: 12px;
       align-items: center;
     }
     .pie-chart-wrap {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
     }
     .pie-circle {
-      width: 84px;
-      height: 84px;
+      width: 78px;
+      height: 78px;
       border-radius: 50%;
       background: conic-gradient(#1d68f2 0% ${grandDigitalPct}%, #93c5fd ${grandDigitalPct}% 100%);
       position: relative;
       flex-shrink: 0;
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
+      border: 1px solid #cbd5e1;
     }
     .pie-legend-labels {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
       font-size: 8px;
     }
     .pie-legend-entry {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
     }
     .pie-color-dot {
-      width: 9px;
-      height: 9px;
+      width: 8px;
+      height: 8px;
       border-radius: 2px;
     }
 
     .pie-metrics {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       border-left: 2px solid #1d68f2;
-      padding-left: 10px;
+      padding-left: 9px;
     }
 
     /* ─── Footer ─── */
     .report-footer {
       display: flex;
       justify-content: space-between;
-      font-size: 8px;
+      font-size: 7.8px;
       color: #64748b;
       margin-top: 6px;
-      padding: 0 4px;
+      padding: 0 2px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 4px;
     }
 
     @media print {
@@ -452,14 +458,9 @@ export function generateSourceReportHtml(options: {
 <body>
   <div class="report-card">
     
-    <!-- 1. Header Banner -->
+    <!-- 1. Header: Left Logo & Name, Right Blue Action Title -->
     <div class="header-banner">
-      <div class="header-blue-box">
-        <div class="header-blue-title">Data Collection &amp; Ingestion Report</div>
-        <div class="header-blue-sub">Platform Raw Asset &amp; Intelligence Summary</div>
-      </div>
-
-      <div class="header-white-box">
+      <div class="header-left-box">
         <div class="header-brand-row">
           <img src="/qai.webp" alt="QAI" class="header-logo" onerror="this.style.display='none'" />
           <div>
@@ -472,6 +473,11 @@ export function generateSourceReportHtml(options: {
           <div class="meta-presenter">Presented by ${userName}</div>
         </div>
       </div>
+
+      <div class="header-right-box">
+        <div class="header-blue-title">Data Collection &amp; Ingestion Report</div>
+        <div class="header-blue-sub">Platform Raw Asset &amp; Intelligence Summary</div>
+      </div>
     </div>
 
     <!-- 2. Executive Summary -->
@@ -479,29 +485,51 @@ export function generateSourceReportHtml(options: {
     <div class="kpi-row">
       <div class="kpi-card">
         <div class="kpi-top">
-          <div class="kpi-icon-badge">📁</div>
+          <div class="kpi-icon-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d68f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+            </svg>
+          </div>
           <div class="kpi-label">Total Ingested<br />Data</div>
         </div>
         <div class="kpi-value">${grandTotalFiles.toLocaleString()} Items</div>
-        <div class="kpi-foot">${formatBytes(grandTotalSize)} Total Storage</div>
+        <div class="kpi-foot">${formatBytes(grandTotalSize)} Storage Volume</div>
       </div>
 
       <div class="kpi-card">
         <div class="kpi-top">
-          <div class="kpi-icon-badge" style="background: #2563eb;">📄</div>
+          <div class="kpi-icon-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d68f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
           <div class="kpi-label">Digital Native<br />PDFs</div>
         </div>
         <div class="kpi-value">${grandDigitalPdfs.toLocaleString()}</div>
-        <div class="kpi-foot">${grandDigitalPct}% Direct Text Ready</div>
+        <div class="kpi-foot">${grandDigitalPct}% Direct Text Extraction Ready</div>
       </div>
 
       <div class="kpi-card">
         <div class="kpi-top">
-          <div class="kpi-icon-badge" style="background: #60a5fa;">👁️</div>
+          <div class="kpi-icon-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d68f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+              <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+              <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+              <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </div>
           <div class="kpi-label">Scanned / OCR<br />PDFs</div>
         </div>
         <div class="kpi-value">${grandOcrPdfs.toLocaleString()}</div>
-        <div class="kpi-foot">${grandOcrPct}% OCR Processing Required</div>
+        <div class="kpi-foot">${grandOcrPct}% Vision OCR Pipeline Required</div>
       </div>
     </div>
 
@@ -518,7 +546,7 @@ export function generateSourceReportHtml(options: {
               return `
               <div class="bar-row">
                 <div class="bar-label-line">
-                  <span style="font-weight: 500;">${s.source.name}</span>
+                  <span style="font-weight: 600;">${s.source.name}</span>
                   <span style="color: #64748b;">${formatBytes(s.totalSize)}</span>
                 </div>
                 <div class="bar-track">
@@ -553,11 +581,11 @@ export function generateSourceReportHtml(options: {
           <div class="pie-legend-labels">
             <div class="pie-legend-entry">
               <div class="pie-color-dot" style="background: #1d68f2;"></div>
-              <span>Digital Text (${grandDigitalPct}%)</span>
+              <span>Digital Native Text (${grandDigitalPct}%)</span>
             </div>
             <div class="pie-legend-entry">
               <div class="pie-color-dot" style="background: #93c5fd;"></div>
-              <span>Scanned OCR (${grandOcrPct}%)</span>
+              <span>Scanned OCR Required (${grandOcrPct}%)</span>
             </div>
           </div>
         </div>
