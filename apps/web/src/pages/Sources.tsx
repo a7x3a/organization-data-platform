@@ -17,6 +17,7 @@ import {
   X,
   Power,
   FileText,
+  Printer,
 } from 'lucide-react';
 
 export const Sources: React.FC = () => {
@@ -188,9 +189,10 @@ export const Sources: React.FC = () => {
               variant="secondary"
               onClick={() => setShowAllReport(true)}
               className="text-xs font-semibold text-[var(--color-brand-400)] border-[var(--color-brand-500)]/30 hover:bg-[var(--color-brand-500)]/10"
+              title="Generate and Print Official A4 Pipeline Status Dossier"
             >
-              <FileText className="w-3.5 h-3.5 mr-1.5 text-[var(--color-brand-400)]" />
-              Print Sources Dossier
+              <Printer className="w-3.5 h-3.5 mr-1.5 text-[var(--color-brand-400)]" />
+              Print All Status Dossier
             </Button>
           )}
           <Button onClick={openCreateModal}>
