@@ -562,9 +562,72 @@ export function beautifySourceMetadata(slug: string, rawName?: string, rawBaseUr
   };
 }
 
+function extractSourceAndRunFromRelKey(relKey: string): {
+  sourceSlug: string;
+  runKey: string | null;
+} {
+  const parts = relKey.replace(/\\/g, '/').split('/').filter(Boolean);
+  let sourceSlug = 'recovered-source';
+  let runKey: string | null = null;
+
+  if (parts.length === 0) return { sourceSlug, runKey };
+
+  if (parts[0] === '00_raw' || parts[0] === 'raw') {
+    if (parts.length >= 3 && ['web', 'telegram', 'media', 'data'].includes(parts[1].toLowerCase())) {
+      sourceSlug = parts[2];
+      if (parts.length >= 5) {
+        runKey = parts[3];
+      } else if (parts.length === 4 && !parts[3].includes('.')) {
+        runKey = parts[3];
+      }
+    } else if (parts.length >= 2) {
+      sourceSlug = parts[1];
+      if (parts.length >= 4) {
+        runKey = parts[2];
+      } else if (parts.length === 3 && !parts[2].includes('.')) {
+        runKey = parts[2];
+      }
+    }
+  } else if (['web', 'telegram', 'media', 'data'].includes(parts[0].toLowerCase())) {
+    if (parts.length >= 2) {
+      sourceSlug = parts[1];
+      if (parts.length >= 4) {
+        runKey = parts[2];
+      } else if (parts.length === 3 && !parts[2].includes('.')) {
+        runKey = parts[2];
+      }
+    }
+  } else {
+    sourceSlug = parts[0];
+    if (parts.length >= 3) {
+      runKey = parts[1];
+    } else if (parts.length === 2 && !parts[1].includes('.')) {
+      runKey = parts[1];
+    }
+  }
+
+  // Also check if any segment explicitly looks like a run identifier
+  if (!runKey) {
+    for (const segment of parts) {
+      if (
+        segment.includes('_run_') ||
+        segment.startsWith('run_') ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(segment) ||
+        /^202\d{5}/.test(segment) ||
+        /^202\d-\d\d-\d\d/.test(segment)
+      ) {
+        runKey = segment;
+        break;
+      }
+    }
+  }
+
+  return { sourceSlug, runKey };
+}
+
 export async function syncStorageDirectories() {
   const dbFiles = await prisma.collectedFile.findMany({
-    select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true },
+    select: { id: true, r2Key: true, sha256: true, status: true, collectionRunId: true, sourceId: true },
   });
 
   let syncedCount = 0;
@@ -597,8 +660,6 @@ export async function syncStorageDirectories() {
       }
     }
   }
-
-  const errors: string[] = [];
 
   try {
     const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
@@ -651,7 +712,9 @@ export async function syncStorageDirectories() {
     const runs = await prisma.collectionRun.findMany();
     const runMap = new Map<string, string>();
     for (const r of runs) {
+      runMap.set(r.runId.toLowerCase(), r.id);
       runMap.set(r.runId, r.id);
+      runMap.set(r.id.toLowerCase(), r.id);
       runMap.set(r.id, r.id);
     }
 
@@ -697,9 +760,23 @@ export async function syncStorageDirectories() {
 
     // Helper to get or create collection run
     async function getOrCreateRun(runId: string, sourceId: string, collectorId?: string): Promise<string> {
+      const normKey = runId.toLowerCase();
+      if (runMap.has(normKey)) {
+        return runMap.get(normKey)!;
+      }
       if (runMap.has(runId)) {
         return runMap.get(runId)!;
       }
+
+      const existing = await prisma.collectionRun.findFirst({
+        where: { OR: [{ runId }, { id: runId }] },
+      });
+      if (existing) {
+        runMap.set(normKey, existing.id);
+        runMap.set(runId, existing.id);
+        return existing.id;
+      }
+
       const cId = collectorId || (await getOrCreateCollector(sourceId));
       const newRun = await prisma.collectionRun.create({
         data: {
@@ -713,6 +790,7 @@ export async function syncStorageDirectories() {
           filesDownloaded: 1,
         },
       });
+      runMap.set(normKey, newRun.id);
       runMap.set(runId, newRun.id);
       restoredRunsCount++;
       return newRun.id;
@@ -731,14 +809,9 @@ export async function syncStorageDirectories() {
         const rawContent = await fs.readFile(mFile, 'utf-8');
         const manifest = JSON.parse(rawContent);
         const relKey = path.relative(localStorageDir, mFile).replace(/\\/g, '/');
-        const parts = relKey.split('/');
+        const info = extractSourceAndRunFromRelKey(relKey);
 
-        let sourceSlug = manifest.source_slug || manifest.target_slug;
-        if (!sourceSlug && parts.length >= 3) {
-          sourceSlug = parts[2];
-        }
-        if (!sourceSlug) sourceSlug = 'recovered-source';
-
+        let sourceSlug = manifest.source_slug || manifest.target_slug || info.sourceSlug;
         const sourceId = await getOrCreateSource(
           sourceSlug,
           manifest.source_name,
@@ -746,7 +819,7 @@ export async function syncStorageDirectories() {
         );
         const collectorId = await getOrCreateCollector(sourceId, manifest.collector_name);
 
-        const runId = manifest.run_id || (parts.length >= 4 ? parts[3] : `run_${Date.now()}`);
+        const runId = manifest.run_id || info.runKey || `run_${Date.now()}`;
         const existingRun = await prisma.collectionRun.findFirst({
           where: { OR: [{ runId }, { id: runId }] },
         });
@@ -765,6 +838,7 @@ export async function syncStorageDirectories() {
               manifestR2Key: relKey,
             },
           });
+          runMap.set(runId.toLowerCase(), newRun.id);
           runMap.set(runId, newRun.id);
           restoredRunsCount++;
         } else if (!existingRun.manifestR2Key) {
@@ -778,16 +852,13 @@ export async function syncStorageDirectories() {
       }
     }
 
-    // PASS 2: Recover rich metadata from metadata.jsonl
+    // PASS 2: Recover rich metadata from metadata.jsonl & auto-heal run associations
     for (const jsonlFile of metadataJsonlFiles) {
       try {
         const rawContent = await fs.readFile(jsonlFile, 'utf-8');
         const lines = rawContent.split('\n').filter((l) => l.trim().length > 0);
         const relDir = path.dirname(path.relative(localStorageDir, jsonlFile)).replace(/\\/g, '/');
-        const parts = relDir.split('/');
-
-        let sourceSlug = parts.length >= 3 ? parts[2] : 'recovered-source';
-        let runFolderKey = parts.length >= 4 ? parts[3] : '';
+        const info = extractSourceAndRunFromRelKey(relDir);
 
         for (const line of lines) {
           try {
@@ -797,18 +868,40 @@ export async function syncStorageDirectories() {
             const fileName = obj.file_name || obj.title || (relKey ? path.basename(relKey) : 'document');
             const ext = obj.extension || path.extname(fileName).toLowerCase() || '.json';
 
-            if (sha256 && existingSha256InDb.has(sha256)) {
-              continue;
-            }
-            if (relKey && existingR2KeysInDb.has(relKey)) {
-              continue;
-            }
-
-            const sourceId = await getOrCreateSource(obj.source_slug || sourceSlug);
+            const sourceId = await getOrCreateSource(obj.source_slug || info.sourceSlug);
             let collectionRunId: string | null = null;
-            const targetRunKey = obj.run_id || runFolderKey;
+            const targetRunKey = obj.run_id || info.runKey;
             if (targetRunKey) {
               collectionRunId = await getOrCreateRun(targetRunKey, sourceId);
+            }
+
+            // Check if file is already in DB
+            const existingFile = await prisma.collectedFile.findFirst({
+              where: {
+                OR: [
+                  sha256 ? { sha256 } : undefined,
+                  relKey ? { r2Key: relKey } : undefined,
+                ].filter(Boolean) as any,
+              },
+            });
+
+            if (existingFile) {
+              // Self-heal missing run association or missing sourceId
+              if (!existingFile.collectionRunId && collectionRunId) {
+                await prisma.collectedFile.update({
+                  where: { id: existingFile.id },
+                  data: { collectionRunId },
+                });
+              }
+              if (!existingFile.sourceId && sourceId) {
+                await prisma.collectedFile.update({
+                  where: { id: existingFile.id },
+                  data: { sourceId },
+                });
+              }
+              if (sha256) existingSha256InDb.add(sha256);
+              if (relKey) existingR2KeysInDb.add(relKey);
+              continue;
             }
 
             const seq = (await prisma.collectedFile.count()) + 1;
@@ -863,51 +956,44 @@ export async function syncStorageDirectories() {
       const relKey = path.relative(localStorageDir, diskFile).replace(/\\/g, '/');
       const ext = path.extname(diskFile).toLowerCase();
       const baseName = path.basename(diskFile);
-
-      if (existingR2KeysInDb.has(relKey)) {
-        continue;
-      }
-
-      // Check DB directly
-      const existingInDb = await prisma.collectedFile.findFirst({
-        where: { r2Key: relKey },
-      });
-      if (existingInDb) {
-        existingR2KeysInDb.add(relKey);
-        continue;
-      }
+      const info = extractSourceAndRunFromRelKey(relKey);
 
       try {
         const fileBuf = await fs.readFile(diskFile);
         const sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex').toLowerCase();
 
-        if (existingSha256InDb.has(sha256)) {
-          // File already known by hash under another key
+        const sourceId = await getOrCreateSource(info.sourceSlug);
+        let collectionRunId: string | null = null;
+        if (info.runKey) {
+          collectionRunId = await getOrCreateRun(info.runKey, sourceId);
+        }
+
+        // Check if file is already in DB by r2Key or sha256
+        const existingInDb = await prisma.collectedFile.findFirst({
+          where: {
+            OR: [{ r2Key: relKey }, { sha256 }],
+          },
+        });
+
+        if (existingInDb) {
+          if (!existingInDb.collectionRunId && collectionRunId) {
+            await prisma.collectedFile.update({
+              where: { id: existingInDb.id },
+              data: { collectionRunId },
+            });
+          }
+          if (!existingInDb.sourceId && sourceId) {
+            await prisma.collectedFile.update({
+              where: { id: existingInDb.id },
+              data: { sourceId },
+            });
+          }
           existingR2KeysInDb.add(relKey);
+          existingSha256InDb.add(sha256);
           continue;
         }
 
         const stat = await fs.stat(diskFile);
-        const parts = relKey.split('/');
-
-        // Determine source slug
-        let sourceSlug = 'recovered-source';
-        if (parts.length >= 3 && (parts[0] === '00_raw' || parts[0] === 'raw')) {
-          sourceSlug = parts[2];
-        } else if (parts.length >= 2) {
-          sourceSlug = parts[0] === '00_raw' ? parts[1] : parts[0];
-        }
-
-        const sourceId = await getOrCreateSource(sourceSlug);
-
-        // Determine collection run ID
-        let collectionRunId: string | null = null;
-        for (const segment of parts) {
-          if (segment.includes('_run_') || segment.startsWith('run_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(segment)) {
-            collectionRunId = await getOrCreateRun(segment, sourceId);
-            break;
-          }
-        }
 
         // If JSON file, check if it contains article metadata
         let metadata: Record<string, unknown> | undefined;
@@ -963,11 +1049,31 @@ export async function syncStorageDirectories() {
         logger.warn({ diskFile, err }, 'failed_to_index_discovered_disk_file');
       }
     }
+
+    // PASS 4: Self-heal any orphan records in PostgreSQL where collectionRunId is null
+    const orphanFiles = await prisma.collectedFile.findMany({
+      where: { collectionRunId: null },
+      select: { id: true, r2Key: true, sourceId: true },
+      take: 10000,
+    });
+    for (const ofile of orphanFiles) {
+      if (ofile.r2Key) {
+        const { sourceSlug, runKey } = extractSourceAndRunFromRelKey(ofile.r2Key);
+        if (runKey) {
+          const sId = ofile.sourceId || (await getOrCreateSource(sourceSlug));
+          const rId = await getOrCreateRun(runKey, sId);
+          await prisma.collectedFile.update({
+            where: { id: ofile.id },
+            data: { collectionRunId: rId, sourceId: sId },
+          });
+        }
+      }
+    }
   } catch (err) {
     logger.warn({ err }, 'storage_directory_scan_failed');
   }
 
-  // 4. Recalculate all collection run statistics to match actual recovered records
+  // 5. Recalculate all collection run statistics to match actual records in database
   try {
     const allRuns = await prisma.collectionRun.findMany({ select: { id: true } });
     for (const r of allRuns) {

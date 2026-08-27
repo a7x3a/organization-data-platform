@@ -207,7 +207,10 @@ router.post(
   validate(recordFileSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const file = await fileService.recordFile(req.body);
+      const file = await fileService.recordFile({
+        ...req.body,
+        collectionRunId: req.body.collectionRunId || req.params.id,
+      });
       res.status(201).json(file);
     } catch (err) {
       next(err);
