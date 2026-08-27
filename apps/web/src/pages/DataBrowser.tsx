@@ -499,7 +499,7 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
 
   return (
     <>
-      <div className="flex items-center justify-between py-2 pl-14 pr-3 text-xs border-t border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-elevated)] transition-colors group">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between py-2.5 pl-4 sm:pl-10 md:pl-14 pr-3 text-xs border-t border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-elevated)] transition-colors group gap-2">
         {/* Clickable Title & Details Area */}
         <button
           type="button"
@@ -508,25 +508,25 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
           title={isJsonFile ? 'Click to inspect extracted article / JSON' : file.status === 'UPLOADED' ? 'Click to open file' : `Open ${file.sourceUrl || file.fileName}`}
         >
           <div className="text-[var(--color-text-primary)] truncate font-medium group-hover:text-[var(--color-brand-400)] flex items-center gap-1.5">
-            <span className="hover:underline">{file.fileName}</span>
+            <span className="hover:underline break-all sm:break-normal">{file.fileName}</span>
             {isJsonFile ? (
               <FileCode2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             ) : (
-              <ExternalLink className="w-3 h-3 text-[var(--color-brand-400)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <ExternalLink className="w-3 h-3 text-[var(--color-brand-400)] opacity-70 group-hover:opacity-100 transition-opacity shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-2 mt-0.5 text-[var(--color-text-muted)] font-mono text-[10px]">
+          <div className="flex items-center gap-2 mt-0.5 text-[var(--color-text-muted)] font-mono text-[10px] flex-wrap">
             <span>{formatBytes(file.fileSize)}</span>
             <span>·</span>
             <span>{truncateSha256(file.sha256)}</span>
             {file.r2Key && (
               <>
                 <span>·</span>
-                <span className="text-[var(--color-text-secondary)] truncate max-w-[260px] inline-block">{file.r2Key}</span>
+                <span className="text-[var(--color-text-secondary)] truncate max-w-[200px] sm:max-w-[260px] inline-block">{file.r2Key}</span>
               </>
             )}
           </div>
-          <div className="flex items-center gap-1.5 mt-1">
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             {getLanguageInfo(file) && <LanguageBadge name={getLanguageInfo(file)!.name} />}
             {getQualityScore(file) !== null && <QualityBar score={getQualityScore(file)!} />}
             {getKurdishCategory(file) && <CategoryBadge category={getKurdishCategory(file)!.category} confidence={getKurdishCategory(file)!.confidence} />}
@@ -534,7 +534,7 @@ const FileRow: React.FC<{ file: CollectedFile; onRefetch: () => void }> = ({ fil
         </button>
 
         {/* Quick Action Buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+        <div className="flex items-center gap-1.5 flex-wrap flex-shrink-0 self-end sm:self-auto sm:ml-3">
           <FileApprovalBadge status={file.approvalStatus} />
           <FileStatusBadge status={file.status} />
           {isJsonFile && (

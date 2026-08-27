@@ -167,7 +167,7 @@ export const Dashboard: React.FC = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-[var(--color-border-subtle)]">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5 pt-4 border-t border-[var(--color-border-subtle)]">
             <div className="bg-[var(--color-bg-base)] border border-[var(--color-border-subtle)] rounded-lg p-3">
               <div className="text-[10px] font-mono text-[var(--color-text-muted)] uppercase">Web Zone</div>
               <div className="text-xs font-bold font-mono text-[var(--color-text-primary)] mt-0.5">00_raw/web/</div>
