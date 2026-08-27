@@ -126,26 +126,69 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Cloudflare R2 Info */}
+        {/* Local Storage & Storage Path Configuration */}
         <div>
-          <div className="flex items-center gap-2.5 pb-4 border-b border-[var(--color-border)] mb-4">
-            <HardDrive className="w-4 h-4 text-[var(--color-accent-400)]" />
-            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
-              Cloudflare R2 Immutable Storage
-            </h2>
+          <div className="flex items-center justify-between pb-4 border-b border-[var(--color-border)] mb-4">
+            <div className="flex items-center gap-2.5">
+              <HardDrive className="w-4 h-4 text-[var(--color-accent-400)]" />
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Active Storage Directory & Persistence Mode
+              </h2>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                try {
+                  const res = await apiClient.post('/files/sync');
+                  alert(`Storage synchronization complete!\n\n• New indexed files: ${res.data.indexedNewCount}\n• Restored runs: ${res.data.restoredRunsCount}\n• Total verified: ${res.data.totalChecked}`);
+                } catch {
+                  alert('Storage sync failed. Check server logs.');
+                }
+              }}
+            >
+              Re-scan & Sync Storage Directory
+            </Button>
           </div>
-          <div className="space-y-2 text-xs font-mono">
-            <div className="flex justify-between">
-              <span className="text-[var(--color-text-muted)]">Target Zone:</span>
-              <span className="text-[var(--color-text-primary)]">00_raw/web/ & 00_raw/telegram/</span>
+          <div className="p-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[var(--color-text-muted)]">Active Storage Engine:</span>
+              <span className="text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                Local Storage Mode (Offline / Disk-Bound)
+              </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--color-text-muted)]">Security Model:</span>
-              <span className="text-[var(--color-success-400)]">Private bucket — Signed URLs only</span>
+
+            <div className="flex items-center justify-between border-t border-[var(--color-border-subtle)] pt-2.5">
+              <span className="text-[var(--color-text-muted)]">Host Storage Root Path:</span>
+              <span className="text-[var(--color-brand-400)] font-semibold select-all">
+                ./storage (c:\Users\...\organization-data-platform\storage)
+              </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--color-text-muted)]">Credential Protection:</span>
-              <span className="text-[var(--color-success-400)]">Backend API only (never exposed to React)</span>
+
+            <div className="flex items-center justify-between">
+              <span className="text-[var(--color-text-muted)]">Docker Container Mount:</span>
+              <span className="text-[var(--color-text-primary)] select-all">
+                /app/storage
+              </span>
+            </div>
+
+            <div className="border-t border-[var(--color-border-subtle)] pt-2.5 space-y-1.5 text-[11px]">
+              <span className="text-[var(--color-text-muted)] block font-semibold">Sub-Zone Layout:</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="p-2 rounded bg-[var(--color-bg-subtle)] border border-[var(--color-border)]">
+                  <span className="text-blue-400 font-semibold block">Web Crawler Data</span>
+                  <span className="text-[var(--color-text-muted)] block">/storage/00_raw/web/{'{slug}'}/{'{run_id}'}/</span>
+                </div>
+                <div className="p-2 rounded bg-[var(--color-bg-subtle)] border border-[var(--color-border)]">
+                  <span className="text-cyan-400 font-semibold block">Telegram Channels</span>
+                  <span className="text-[var(--color-text-muted)] block">/storage/00_raw/telegram/{'{slug}'}/{'{run_id}'}/</span>
+                </div>
+                <div className="p-2 rounded bg-[var(--color-bg-subtle)] border border-[var(--color-border)]">
+                  <span className="text-purple-400 font-semibold block">Media & Audio OCR</span>
+                  <span className="text-[var(--color-text-muted)] block">/storage/00_raw/media/{'{slug}'}/{'{run_id}'}/</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

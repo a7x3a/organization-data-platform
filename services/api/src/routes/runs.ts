@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 import { requireDataManager } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import {
@@ -15,11 +15,12 @@ import * as fileService from '../services/file.service';
 
 const router = Router();
 
-router.use(requireAuth);
+router.use(optionalAuth);
 
 // GET /api/runs
 router.get(
   '/',
+  requireAuth,
   validate(listRunsQuerySchema, 'query'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -80,6 +81,7 @@ router.get(
 // DELETE /api/runs/:id — Data Manager+ or run owner. Only terminal-status runs can be cleared
 router.delete(
   '/:id',
+  requireAuth,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -96,6 +98,7 @@ router.delete(
 // POST /api/runs/:id/cancel
 router.post(
   '/:id/cancel',
+  requireAuth,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -111,6 +114,7 @@ router.post(
 // POST /api/runs/:id/force-cancel
 router.post(
   '/:id/force-cancel',
+  requireAuth,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -126,6 +130,7 @@ router.post(
 // POST /api/runs/:id/pause
 router.post(
   '/:id/pause',
+  requireAuth,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -141,6 +146,7 @@ router.post(
 // POST /api/runs/:id/resume
 router.post(
   '/:id/resume',
+  requireAuth,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -156,6 +162,7 @@ router.post(
 // POST /api/runs/:id/approve
 router.post(
   '/:id/approve',
+  requireAuth,
   validate(idParamSchema, 'params'),
   validate(approveRejectRunSchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -172,6 +179,7 @@ router.post(
 // POST /api/runs/:id/reject
 router.post(
   '/:id/reject',
+  requireAuth,
   validate(idParamSchema, 'params'),
   validate(approveRejectRunSchema),
   async (req: Request, res: Response, next: NextFunction) => {

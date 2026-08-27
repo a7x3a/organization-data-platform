@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 import { requireCollector, requireDataManager } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import { AppError } from '../middleware/errorHandler';
@@ -44,7 +44,7 @@ function getEffectiveMimeType(fileName: string, mimeType?: string | null): strin
 
 const router = Router();
 
-router.use(requireAuth);
+router.use(optionalAuth);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -55,6 +55,7 @@ const upload = multer({
 // directly; goes through the same hash/dedupe/store pipeline the scraper uses.
 router.post(
   '/manual-upload',
+  requireAuth,
   requireCollector,
   upload.single('file'),
   validate(manualUploadBodySchema),
@@ -92,6 +93,7 @@ router.post(
 // without attaching a file yet.
 router.post(
   '/manual-entry',
+  requireAuth,
   requireCollector,
   validate(manualEntrySchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -108,7 +110,7 @@ router.post(
 );
 
 // POST /api/files/sync — Trigger storage directory synchronization
-router.post('/sync', async (_req: Request, res: Response, next: NextFunction) => {
+router.post('/sync', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await fileService.syncStorageDirectories();
     res.json(result);
@@ -335,6 +337,7 @@ router.get(
 // never sha256/r2Key/status, which are collection-integrity facts.
 router.patch(
   '/:id',
+  requireAuth,
   requireDataManager,
   validate(idParamSchema, 'params'),
   validate(updateFileSchema),
@@ -354,6 +357,7 @@ router.patch(
 // file.service.ts's deleteFile for why.
 router.delete(
   '/:id',
+  requireAuth,
   requireDataManager,
   validate(idParamSchema, 'params'),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -369,6 +373,7 @@ router.delete(
 // POST /api/files/:id/approve — Approve a single file
 router.post(
   '/:id/approve',
+  requireAuth,
   validate(idParamSchema, 'params'),
   validate(approveRejectFileSchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -384,6 +389,7 @@ router.post(
 // POST /api/files/:id/reject — Decline/reject a single file
 router.post(
   '/:id/reject',
+  requireAuth,
   validate(idParamSchema, 'params'),
   validate(approveRejectFileSchema),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -399,6 +405,7 @@ router.post(
 // POST /api/files/bulk-approve — Bulk approve multiple files
 router.post(
   '/bulk-approve',
+  requireAuth,
   validate(bulkFileApprovalSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -413,6 +420,7 @@ router.post(
 // POST /api/files/bulk-reject — Bulk decline/reject multiple files
 router.post(
   '/bulk-reject',
+  requireAuth,
   validate(bulkFileApprovalSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -427,6 +435,7 @@ router.post(
 // POST /api/files/run/:runId/approve-all — Approve all files for a collection run
 router.post(
   '/run/:runId/approve-all',
+  requireAuth,
   validate(runFilesApprovalSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -441,6 +450,7 @@ router.post(
 // POST /api/files/run/:runId/reject-all — Decline/reject all files for a collection run
 router.post(
   '/run/:runId/reject-all',
+  requireAuth,
   validate(runFilesApprovalSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

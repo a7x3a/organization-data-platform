@@ -83,3 +83,30 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
   }
 }
+
+export async function optionalAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    next();
+    return;
+  }
+  const token = authHeader.slice(7);
+  try {
+    const payload = jwt.verify(token, env.AUTH_ACCESS_SECRET) as JwtPayload;
+    const dbUser = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, isActive: true, roles: true, username: true },
+    });
+    if (dbUser && dbUser.isActive) {
+      req.user = {
+        ...payload,
+        sub: dbUser.id,
+        roles: dbUser.roles as UserRole[],
+        username: dbUser.username,
+      };
+    }
+  } catch {
+    // optional auth, continue gracefully
+  }
+  next();
+}
