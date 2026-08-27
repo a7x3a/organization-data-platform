@@ -1,6 +1,9 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
-import { storageProvider } from './storage';
+import { env } from '../config/env';
+import { storageProvider, LocalStorageProvider } from './storage';
 import { AppError } from '../middleware/errorHandler';
 import { parsePagination, toPrismaSkipTake, buildPaginatedResult } from '../utils/pagination';
 import { collectionQueue } from '../queues/collection.queue';
@@ -191,7 +194,7 @@ export async function startCollectionRun(collectorId: string, userId: string) {
 
 const ACTIVE_STATUSES: RunStatus[] = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED];
 
-export async function deleteRun(id: string, deleteFiles: boolean = false, currentUser?: CurrentUser) {
+export async function deleteRun(id: string, deleteFiles: boolean = true, currentUser?: CurrentUser) {
   const run = await getRunById(id, currentUser);
   assertCanManageRun(run, currentUser);
 
@@ -203,25 +206,58 @@ export async function deleteRun(id: string, deleteFiles: boolean = false, curren
     );
   }
 
-  if (deleteFiles) {
-    const files = await prisma.collectedFile.findMany({
-      where: { collectionRunId: run.id },
-      select: { id: true, r2Key: true },
-    });
-    for (const f of files) {
-      if (f.r2Key) {
-        try {
-          await storageProvider.delete(f.r2Key);
-        } catch (err) {
-          logger.warn({ r2Key: f.r2Key, err }, 'Failed to delete storage file during run purge');
-        }
+  // 1. Delete all individual files from storage provider
+  const files = await prisma.collectedFile.findMany({
+    where: { collectionRunId: run.id },
+    select: { id: true, r2Key: true },
+  });
+  for (const f of files) {
+    if (f.r2Key) {
+      try {
+        await storageProvider.delete(f.r2Key);
+      } catch (err) {
+        logger.warn({ r2Key: f.r2Key, err }, 'Failed to delete storage file during run purge');
       }
     }
-    await prisma.collectedFile.deleteMany({
-      where: { collectionRunId: run.id },
-    });
   }
 
+  // 2. Remove the entire physical run directory on disk (including manifest.json, metadata.jsonl, etc.)
+  try {
+    const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
+    const slug = run.source?.slug || 'unknown';
+
+    const possibleDirs = [
+      path.join(localStorageDir, '00_raw', 'web', slug, run.runId),
+      path.join(localStorageDir, '00_raw', 'telegram', slug, run.runId),
+      path.join(localStorageDir, '00_raw', 'media', slug, run.runId),
+      path.join(localStorageDir, '00_raw', slug, run.runId),
+      path.join(localStorageDir, slug, run.runId),
+    ];
+
+    if (run.manifestR2Key) {
+      const manifestPath = path.dirname(path.join(localStorageDir, run.manifestR2Key.replace(/^[/\\]+/, '')));
+      possibleDirs.push(manifestPath);
+    }
+
+    for (const dir of possibleDirs) {
+      try {
+        await fs.rm(dir, { recursive: true, force: true });
+        logger.info({ dir, runId: run.runId }, 'physical_run_directory_removed');
+      } catch {
+        // ignore if not exists
+      }
+    }
+  } catch (err) {
+    logger.warn({ runId: run.runId, err }, 'failed_to_clean_physical_run_directory');
+  }
+
+  // 3. Delete database records in cascade
+  await prisma.collectedFile.deleteMany({
+    where: { collectionRunId: run.id },
+  });
+  await prisma.collectionError.deleteMany({
+    where: { collectionRunId: run.id },
+  });
   await prisma.collectionRun.delete({ where: { id: run.id } });
 }
 

@@ -45,10 +45,13 @@ export async function updateSource(id: string, input: UpdateSourceInput) {
   return prisma.source.update({ where: { id }, data: input });
 }
 
+import fs from 'fs/promises';
+import path from 'path';
+import { env } from '../config/env';
 import { storageProvider } from './storage';
 
 export async function deleteSource(id: string, cascade = true) {
-  await getSourceById(id);
+  const source = await getSourceById(id);
 
   if (!cascade) {
     const collectorCount = await prisma.collector.count({ where: { sourceId: id } });
@@ -89,6 +92,28 @@ export async function deleteSource(id: string, cascade = true) {
     await prisma.collectedFile.deleteMany({ where: { sourceId: id } });
     await prisma.collectionRun.deleteMany({ where: { sourceId: id } });
     await prisma.collector.deleteMany({ where: { sourceId: id } });
+
+    // Clean up physical source directories on local disk
+    try {
+      const localStorageDir = path.resolve(env.LOCAL_STORAGE_DIR);
+      const possibleDirs = [
+        path.join(localStorageDir, '00_raw', 'web', source.slug),
+        path.join(localStorageDir, '00_raw', 'telegram', source.slug),
+        path.join(localStorageDir, '00_raw', 'media', source.slug),
+        path.join(localStorageDir, '00_raw', source.slug),
+        path.join(localStorageDir, source.slug),
+      ];
+
+      for (const dir of possibleDirs) {
+        try {
+          await fs.rm(dir, { recursive: true, force: true });
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   await prisma.source.delete({ where: { id } });
