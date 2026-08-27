@@ -545,18 +545,17 @@ export function printSourceReportDocument(options: {
   doc.write(html);
   doc.close();
 
-  iframe.onload = () => {
-    setTimeout(() => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch (err) {
-        console.error('Print iframe error:', err);
-      } finally {
-        setTimeout(() => {
-          iframe.remove();
-        }, 60000);
-      }
-    }, 200);
-  };
+  setTimeout(() => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch (err) {
+      console.error('Print iframe error:', err);
+      window.print();
+    } finally {
+      setTimeout(() => {
+        iframe.remove();
+      }, 60000);
+    }
+  }, 250);
 }

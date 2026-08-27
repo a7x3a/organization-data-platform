@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSources, useCreateSource, useUpdateSource, useDeleteSource } from '../hooks/useSources';
+import { useAuth } from '../hooks/useAuth';
+import { collectorsApi } from '../api/collectors';
+import { runsApi } from '../api/runs';
+import { filesApi } from '../api/files';
 import { DataTable, Column } from '../components/DataTable';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Button } from '../components/Button';
 import { Input, Select, Textarea } from '../components/Input';
 import { Source } from '@odp/shared-types';
-import { SourceReportModal } from '../components/SourceReportModal';
+import { printSourceReportDocument, SourceReportData } from '../lib/generateSourceDoc';
 import {
   Plus,
   Pencil,
@@ -15,13 +19,13 @@ import {
   Globe,
   ShieldCheck,
   X,
-  Power,
-  FileText,
   Printer,
+  RefreshCw,
 } from 'lucide-react';
 
 export const Sources: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [page, setPage] = useState(1);
   const { data, isLoading } = useSources({ page, pageSize: 10 });
   const createSource = useCreateSource();
@@ -31,8 +35,9 @@ export const Sources: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
-  const [reportingSource, setReportingSource] = useState<Source | null>(null);
-  const [showAllReport, setShowAllReport] = useState(false);
+
+  const [isPrintingAll, setIsPrintingAll] = useState(false);
+  const [printingSourceId, setPrintingSourceId] = useState<string | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -96,6 +101,65 @@ export const Sources: React.FC = () => {
     setSourceToDelete(null);
   };
 
+  // Direct 1-Click Print for All Platform Sources
+  const handlePrintAllSources = async () => {
+    setIsPrintingAll(true);
+    try {
+      const allSourcesList = data?.data || [];
+      const [collectorsRes, runsRes, filesRes] = await Promise.all([
+        collectorsApi.list({ pageSize: 200 }),
+        runsApi.list({ pageSize: 200 }),
+        filesApi.list({ pageSize: 500 }),
+      ]);
+
+      const sourcesToReport: SourceReportData[] = allSourcesList.map((s) => ({
+        source: s,
+        collectors: (collectorsRes.data || []).filter((c) => c.sourceId === s.id),
+        runs: (runsRes.data || []).filter((r) => r.sourceId === s.id),
+        files: (filesRes.data || []).filter((f) => f.sourceId === s.id),
+      }));
+
+      printSourceReportDocument({
+        title: 'Enterprise Sources & Data Ingestion Dossier',
+        reportCode: 'QAI-AUD-ALL',
+        sourcesData: sourcesToReport,
+        isCombined: true,
+        userName: user?.name || user?.username || 'Administrator',
+      });
+    } finally {
+      setIsPrintingAll(false);
+    }
+  };
+
+  // Direct 1-Click Print for Single Target Source
+  const handlePrintSingleSource = async (source: Source) => {
+    setPrintingSourceId(source.id);
+    try {
+      const [collectorsRes, runsRes, filesRes] = await Promise.all([
+        collectorsApi.list({ sourceId: source.id, pageSize: 100 }),
+        runsApi.list({ sourceId: source.id, pageSize: 100 }),
+        filesApi.list({ sourceId: source.id, pageSize: 200 }),
+      ]);
+
+      printSourceReportDocument({
+        title: `Audit Report — ${source.name}`,
+        reportCode: `QAI-AUD-SRC-${source.slug.toUpperCase()}`,
+        sourcesData: [
+          {
+            source,
+            collectors: collectorsRes.data || [],
+            runs: runsRes.data || [],
+            files: filesRes.data || [],
+          },
+        ],
+        isCombined: false,
+        userName: user?.name || user?.username || 'Administrator',
+      });
+    } finally {
+      setPrintingSourceId(null);
+    }
+  };
+
   const columns: Column<Source>[] = [
     {
       header: t('sources.fields.name'),
@@ -157,10 +221,11 @@ export const Sources: React.FC = () => {
             variant="secondary"
             size="sm"
             iconOnly
-            onClick={() => setReportingSource(s)}
-            title="Generate Source Intelligence PDF Report"
+            onClick={() => handlePrintSingleSource(s)}
+            disabled={printingSourceId === s.id}
+            title="Instant Print A4 Official Dossier"
           >
-            <FileText className="w-3.5 h-3.5 text-[var(--color-brand-400)]" />
+            <Printer className={`w-3.5 h-3.5 text-[var(--color-brand-400)] ${printingSourceId === s.id ? 'animate-spin' : ''}`} />
           </Button>
           <Button variant="ghost" size="sm" iconOnly onClick={() => openEditModal(s)} title="Edit">
             <Pencil className="w-3.5 h-3.5" />
@@ -187,12 +252,17 @@ export const Sources: React.FC = () => {
           {data && data.data.length > 0 && (
             <Button
               variant="secondary"
-              onClick={() => setShowAllReport(true)}
+              onClick={handlePrintAllSources}
+              disabled={isPrintingAll}
               className="text-xs font-semibold text-[var(--color-brand-400)] border-[var(--color-brand-500)]/30 hover:bg-[var(--color-brand-500)]/10"
-              title="Generate and Print Official A4 Pipeline Status Dossier"
+              title="Instant Direct Print Official A4 Dossier for All Targets"
             >
-              <Printer className="w-3.5 h-3.5 mr-1.5 text-[var(--color-brand-400)]" />
-              Print All Status Dossier
+              {isPrintingAll ? (
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin text-[var(--color-brand-400)]" />
+              ) : (
+                <Printer className="w-3.5 h-3.5 mr-1.5 text-[var(--color-brand-400)]" />
+              )}
+              <span>{isPrintingAll ? 'Preparing A4 Dossier...' : 'Print All Status Dossier'}</span>
             </Button>
           )}
           <Button onClick={openCreateModal}>
@@ -221,17 +291,6 @@ export const Sources: React.FC = () => {
           }
         />
       </div>
-
-      {/* Source PDF Report Modal */}
-      <SourceReportModal
-        source={reportingSource}
-        allSources={data?.data || []}
-        isOpen={Boolean(reportingSource || showAllReport)}
-        onClose={() => {
-          setReportingSource(null);
-          setShowAllReport(false);
-        }}
-      />
 
       {/* Create / Edit Source Modal */}
       {isModalOpen && (
