@@ -1,8 +1,6 @@
-# Yadga Data Platform
+# QAI Data Platform
 
-Yadga is a source-aware knowledge collection platform for websites, documents, PDFs, and Telegram text/document channels. It discovers content, filters unwanted resources, deduplicates files, extracts and normalizes text, records provenance, and stores manifests and metadata for downstream data preparation.
-
-The public project domain is `yadga.app`.
+QAI Data Platform is a source-aware knowledge collection platform for websites, documents, PDFs, and Telegram text/document channels. It discovers content, filters unwanted resources, deduplicates files, extracts and normalizes text, records provenance, and stores manifests and metadata for downstream data preparation.
 
 ## What It Does
 
