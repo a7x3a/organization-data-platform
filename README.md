@@ -60,6 +60,8 @@ Text-bearing files and extracted web pages receive a `structured_document.v1` ob
     "raw_text": "Original extracted text",
     "converted_text": "Decoded text",
     "normalized_text": "NFC-normalized text",
+    "primary_text": "Canonical text used by search and NLP",
+    "primary_text_source": "normalized_text",
     "paragraphs": ["First paragraph", "Second paragraph"]
   },
   "conversion": {

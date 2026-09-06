@@ -22,6 +22,8 @@ def test_build_structured_document_matches_canonical_shape():
     assert document["source"]["subdomain"] == "archive"
     assert document["document"]["dialect"] == "sorani"
     assert document["document"]["direction"] == "rtl"
+    assert document["text"]["primary_text"] == document["text"]["normalized_text"]
+    assert document["text"]["primary_text_source"] == "normalized_text"
     assert document["text"]["paragraphs"] == ["یەکەم پەرەگراف", "دووەم پەرەگراف"]
     assert document["structure"]["paragraph_count"] == 2
     assert document["structure"]["word_count"] == 4

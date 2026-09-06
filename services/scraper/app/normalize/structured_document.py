@@ -93,6 +93,8 @@ def build_structured_document(
             "raw_text": raw_text,
             "converted_text": converted_text,
             "normalized_text": normalized_text,
+            "primary_text": normalized_text,
+            "primary_text_source": "normalized_text",
             "paragraphs": paragraphs,
         },
         "conversion": conversion_info,
