@@ -17,6 +17,7 @@ import {
   runFilesApprovalSchema,
   bulkDeleteFilesSchema,
   pruneRunFilesSchema,
+  processFilesSchema,
 } from '../schemas/index';
 import * as fileService from '../services/file.service';
 import { storageProvider, LocalStorageProvider } from '../services/storage';
@@ -118,6 +119,21 @@ router.post('/sync', requireAuth, async (_req: Request, res: Response, next: Nex
     next(err);
   }
 });
+
+// POST /api/files/process — Preview or apply deterministic cleanup.
+router.post(
+  '/process',
+  requireAuth,
+  requireDataManager,
+  validate(processFilesSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await fileService.processFiles(req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // GET /api/files
 router.get(

@@ -253,3 +253,52 @@ def test_extract_page_text_extracts_poetry_and_article_body():
     assert "Prev" not in text
 
 
+def test_extract_structured_page_data_rejects_low_information_gate_page():
+        from app.discovery.extractor import extract_structured_page_data
+
+        page = extract_structured_page_data(
+                "<html><head><title>Access denied</title></head><body>Access denied</body></html>",
+                "https://example.com/private",
+        )
+
+        assert page["is_usable"] is False
+        assert page["quality"]["reason"] == "too_short"
+
+
+def test_extract_structured_page_data_is_versioned_and_structured():
+        from app.discovery.extractor import extract_structured_page_data
+
+        html = """
+        <html lang="ku"><head><title>Research Report</title>
+            <meta name="description" content="A useful report">
+        </head><body><main><h1>Research Report</h1>
+            <p>This is a useful research report with enough text for quality filtering and search.</p>
+            <p>It contains stable information that should be retained for knowledge extraction.</p>
+        </main></body></html>
+        """
+        page = extract_structured_page_data(html, "https://sub.example.com/reports/item#section")
+
+        assert page["schema_version"] == "web_page.v2"
+        assert page["record_type"] == "web_page"
+        assert page["is_usable"] is True
+        assert page["canonical_url"] == "https://sub.example.com/reports/item"
+        assert page["source_domain"] == "example.com"
+        assert page["source_subdomain"] == "sub"
+        assert page["source_route"] == "/reports/item"
+        assert len(page["content_fingerprint"]) == 64
+        assert page["quality"]["word_count"] == page["word_count"]
+
+
+def test_extract_page_text_removes_duplicate_lines():
+        html = """
+        <main><p>Repeated content should appear once.</p>
+            <p>Repeated content should appear once.</p>
+            <p>Unique content remains available.</p></main>
+        """
+
+        text = extract_page_text(html)
+
+        assert text.count("Repeated content should appear once.") == 1
+        assert "Unique content remains available." in text
+
+

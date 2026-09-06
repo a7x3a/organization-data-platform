@@ -277,6 +277,11 @@ export const updateFileSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+export const processFilesSchema = z.object({
+  apply: z.boolean().default(false),
+  limit: z.number().int().min(1).max(5000).default(1000),
+});
+
 // ─── Collection Error reporting (scraper worker callback) ─────
 
 export const recordErrorSchema = z.object({
@@ -327,4 +332,5 @@ export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;
 export type CreateCollectorInput = z.infer<typeof createCollectorSchema>;
 export type UpdateCollectorInput = z.infer<typeof updateCollectorSchema>;
 export type UpdateFileInput = z.infer<typeof updateFileSchema>;
+export type ProcessFilesInput = z.infer<typeof processFilesSchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;

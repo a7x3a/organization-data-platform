@@ -5,7 +5,7 @@ import { useCreateSource, useSources } from '../hooks/useSources';
 import { useCreateCollector, useRunCollector } from '../hooks/useCollectors';
 import { Button } from './Button';
 import { Input } from './Input';
-import { Zap, BookOpen, FileText, Music, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor, Video, Image, Archive, AlertCircle } from 'lucide-react';
+import { Zap, BookOpen, FileText, Database, X, Sparkles, CheckCircle2, Send, Globe, Monitor, Video, Image, Archive, AlertCircle } from 'lucide-react';
 import { RobotsPolicy } from '@odp/shared-types';
 import { TelegramSetupModal } from './TelegramSetupModal';
 
@@ -14,7 +14,7 @@ interface QuickCollectModalProps {
   onClose: () => void;
 }
 
-type PresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
+type PresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'video' | 'images' | 'archives' | 'all';
 
 const PRESETS: { id: PresetType; label: string; description: string; icon: React.ElementType; extensions: string[] }[] = [
   {
@@ -23,13 +23,6 @@ const PRESETS: { id: PresetType; label: string; description: string; icon: React
     description: 'Extract full page text, article bodies, headings & JSON dataset records',
     icon: Globe,
     extensions: ['.html', '.json'],
-  },
-  {
-    id: 'books',
-    label: 'Books & Ebooks',
-    description: 'PDF books, EPUB ebooks, MOBI, and AZW3 documents',
-    icon: BookOpen,
-    extensions: ['.pdf', '.epub', '.mobi', '.azw3', '.fb2', '.djvu'],
   },
   {
     id: 'documents',
@@ -44,13 +37,6 @@ const PRESETS: { id: PresetType; label: string; description: string; icon: React
     description: 'Parquet, JSONL, CSV, TSV, and XML datasets',
     icon: Database,
     extensions: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'],
-  },
-  {
-    id: 'audio',
-    label: 'Audio & Recordings',
-    description: 'MP3, WAV, FLAC, M4A, and speech audio files',
-    icon: Music,
-    extensions: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'],
   },
   {
     id: 'video',
@@ -170,16 +156,15 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
           )
         );
 
-    const tgMediaTypes: Array<'photo' | 'video' | 'audio' | 'document'> = isAll
-      ? ['photo', 'video', 'audio', 'document']
+    const tgMediaTypes: Array<'photo' | 'video' | 'document'> = isAll
+      ? ['photo', 'video', 'document']
       : Array.from(
           new Set(
             selectedPresets.flatMap((p) => {
-              if (p === 'audio') return ['audio', 'document'];
               if (p === 'video') return ['video', 'document'];
               if (p === 'images') return ['photo', 'document'];
               return ['document'];
-            }) as Array<'photo' | 'video' | 'audio' | 'document'>
+            }) as Array<'photo' | 'video' | 'document'>
           )
         );
 
@@ -307,7 +292,6 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
         hostname.includes('youtube.com') ||
         hostname.includes('youtu.be') ||
         /\.(mp4|mp3|wav|m4a|ogg|flac|webm|mkv)$/i.test(parsedUrl.pathname) ||
-        selectedPresets.includes('audio') ||
         selectedPresets.includes('video');
 
       const isWebArticles = selectedPresets.includes('articles') || selectedPresets.includes('all');
@@ -333,7 +317,6 @@ export const QuickCollectModal: React.FC<QuickCollectModalProps> = ({ isOpen, on
 
       if (isMediaUrl) {
         collectorConfig.mediaUrl = parsedUrl.href;
-        collectorConfig.audioChunkSeconds = 60;
       }
 
       const newCollector = await createCollector.mutateAsync({

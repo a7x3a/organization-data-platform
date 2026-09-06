@@ -9,6 +9,7 @@ import {
   Bot,
   PlaySquare,
   FolderTree,
+  Workflow,
   UploadCloud,
   ShieldCheck,
   Settings,
@@ -93,6 +94,7 @@ export const AppLayout: React.FC = () => {
     { to: '/collectors', label: t('nav.collectors'), icon: Bot },
     { to: '/runs', label: t('nav.runs'), icon: PlaySquare },
     { to: '/data', label: t('nav.dataBrowser'), icon: FolderTree },
+    { to: '/process', label: 'Process', icon: Workflow },
     { to: '/upload', label: t('nav.upload'), icon: UploadCloud },
     ...(user?.roles?.includes(UserRole.ADMIN)
       ? [{ to: '/users', label: t('nav.users'), icon: ShieldCheck }]

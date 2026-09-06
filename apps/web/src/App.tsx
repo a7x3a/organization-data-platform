@@ -17,6 +17,7 @@ import { DataBrowser } from './pages/DataBrowser';
 import { Settings } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Upload } from './pages/Upload';
+import { Process } from './pages/Process';
 import { Login } from './pages/Login';
 import { NotFound } from './pages/NotFound';
 
@@ -83,6 +84,7 @@ export function App() {
                   <Route path="/files" element={<Navigate to="/data" replace />} />
                   <Route path="/data" element={<DataBrowser />} />
                   <Route path="/upload" element={<Upload />} />
+                  <Route path="/process" element={<Process />} />
                   <Route path="/users" element={<Users />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="*" element={<NotFound />} />

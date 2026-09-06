@@ -434,6 +434,85 @@ export async function updateFile(id: string, input: UpdateFileInput) {
   return serializeFile(file);
 }
 
+export async function processFiles(options: { apply?: boolean; limit?: number } = {}) {
+  const apply = options.apply === true;
+  const limit = Math.min(Math.max(options.limit || 1000, 1), 5000);
+  const files = await prisma.collectedFile.findMany({
+    take: limit,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      fileId: true,
+      fileName: true,
+      originalFilename: true,
+      extension: true,
+      sha256: true,
+      status: true,
+      metadata: true,
+    },
+  });
+
+  const firstByHash = new Map<string, string>();
+  const changes: Array<{ id: string; fileId: string; oldName: string; newName: string; duplicate: boolean }> = [];
+  let duplicateCount = 0;
+
+  for (const file of files) {
+    const cleanName = canonicalFilename(
+      file.originalFilename || file.fileName,
+      file.fileId,
+      file.extension,
+    );
+    const hash = file.sha256?.trim();
+    const isDuplicate = Boolean(hash && firstByHash.has(hash));
+    if (hash && !firstByHash.has(hash)) firstByHash.set(hash, file.id);
+    if (isDuplicate) duplicateCount += 1;
+
+    const metadata = (file.metadata && typeof file.metadata === 'object' && !Array.isArray(file.metadata))
+      ? file.metadata as Record<string, unknown>
+      : {};
+    const processedMetadata = {
+      ...metadata,
+      processing: {
+        version: '1.0',
+        normalized: true,
+        processedAt: new Date().toISOString(),
+        duplicate: isDuplicate,
+      },
+    };
+
+    if (file.fileName !== cleanName || isDuplicate) {
+      changes.push({
+        id: file.id,
+        fileId: file.fileId,
+        oldName: file.fileName,
+        newName: cleanName,
+        duplicate: isDuplicate,
+      });
+    }
+
+    if (apply) {
+      await prisma.collectedFile.update({
+        where: { id: file.id },
+        data: {
+          fileName: cleanName,
+          canonicalFilename: cleanName,
+          metadata: processedMetadata,
+          ...(isDuplicate && file.status !== 'DUPLICATE' ? { status: 'DUPLICATE' } : {}),
+        },
+      });
+    }
+  }
+
+  return {
+    mode: apply ? 'applied' : 'preview',
+    scanned: files.length,
+    changed: changes.length,
+    renamed: changes.filter((change) => change.oldName !== change.newName).length,
+    duplicates: duplicateCount,
+    changes: changes.slice(0, 200),
+  };
+}
+
 // Hard delete — removes the database record AND the underlying stored
 // object (R2/local), for a file of ANY origin including scraped ones. This
 // is a deliberate, explicit exception to "00_raw is immutable": unlike

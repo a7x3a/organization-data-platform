@@ -1,222 +1,235 @@
-# Organization Data Platform (ODP)
+# Yadga Data Platform
 
-A unified, automated platform for harvesting, processing, categorizing, transcribing, and storing digital resources (Documents, Web pages, Telegram channels, Media/Voice audio, Ebooks, and Datasets).
+Yadga is a source-aware knowledge collection platform for websites, documents, PDFs, and Telegram text/document channels. It discovers content, filters unwanted resources, deduplicates files, extracts and normalizes text, records provenance, and stores manifests and metadata for downstream data preparation.
 
----
+The public project domain is `yadga.app`.
 
-## 🎯 Key Capabilities
+## What It Does
 
-- **Multi-Source Scraping**: Harvest content from standard websites, JavaScript SPAs, Wix sites (`usrfiles.com`), Cloudflare-protected sites, and Telegram channels.
-- **Adaptive Stealth Engine**: Powered by **Scrapling** and **Playwright Chromium** with automatic Cloudflare Turnstile challenge solving.
-- **Smart File Filtering & Categorization**: Automatically filters non-content assets, checks file types, inspects text density in PDFs, detects languages, and categorizes content.
-- **Media & Audio Datasets**: Download YouTube videos and podcasts via `yt-dlp`, chunk audio, and transcribe them into Speech-to-Text (STT) and Text-to-Speech (TTS) datasets.
-- **Deduplication & Immutable Storage**: Deduplicates files by SHA-256 hash and writes structured `metadata.jsonl` and `manifest.json` reports to Cloudflare R2 or local storage.
+- Crawls standard websites and JavaScript-heavy sites through HTTP, browser, or Scrapling engines.
+- Keeps crawling inside configured domains and protects requests from private-network and metadata-service access.
+- Discovers documents, ebooks, datasets, images, and video links while excluding ordinary website assets.
+- Classifies PDFs as digital text or OCR candidates using text density, printable ratio, and image evidence.
+- Decodes supported Kurdish legacy-font text and normalizes Arabic-script Unicode.
+- Detects language and script, scores file quality, and categorizes Kurdish content.
+- Deduplicates files by SHA-256 and web pages by normalized content fingerprint.
+- Preserves source URL, final URL, domain, subdomain, route, discovery context, and storage key.
+- Writes `metadata.jsonl`, `manifest.json`, and structured web/document records.
+- Supports local filesystem storage by default and Cloudflare R2 when explicitly configured.
 
----
+Audio collection, YouTube collection, and transcription are intentionally disabled. Existing media code may remain for compatibility, but the worker rejects those collector types and skips audio discovery.
 
-## 🚀 Server Installation & Network Deployment Guide
+## Current Processing Model
 
-Follow these steps to deploy and run the platform on your server PC so that any computer on your local network (LAN or Wi-Fi) can access the dashboard.
-
-### Step 1: Prerequisites on the Server PC
-Make sure the server PC has the following installed:
-- **Docker** & **Docker Compose** ([Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) or `docker-ce` + `docker-compose-plugin` for Linux).
-- Ensure Docker is running.
-
----
-
-### Step 2: Copy the Project to Your Server
-Either clone via Git or copy the project folder to your server PC:
-```bash
-git clone <YOUR_GIT_REPO_URL> organization-data-platform
-cd organization-data-platform
-```
-*(If copying the folder manually, you can omit `node_modules`, `.venv`, and `.git` folders to keep transfer fast).*
-
----
-
-### Step 3: Configure `.env`
-Create your `.env` configuration from the template:
-
-**Windows (PowerShell):**
-```powershell
-Copy-Item .env.example .env
+```text
+source
+  -> discovery and domain safety
+  -> URL, extension, MIME, and HTML filtering
+  -> download and SHA-256 hashing
+  -> PDF/text extraction and Unicode normalization
+  -> language, quality, and topic analysis
+  -> structured metadata export
+  -> storage, manifest, and API registration
 ```
 
-**Linux / macOS:**
-```bash
-cp .env.example .env
+Raw files remain the source of truth. Processing changes metadata and database display names; it does not rewrite or delete raw storage objects.
+
+## Structured Export
+
+Text-bearing files and extracted web pages receive a `structured_document.v1` object. Its shape is designed for later search, NLP, review, and dataset creation:
+
+```json
+{
+  "schema_version": "structured_document.v1",
+  "id": "content-or-file-identity",
+  "source": {
+    "publisher": "source name",
+    "url": "https://example.com/path",
+    "domain": "example.com",
+    "subdomain": "archive",
+    "route": "/path",
+    "file_path": "00_raw/web/source/run/document.pdf"
+  },
+  "document": {
+    "title": "Document title",
+    "document_type": "pdf",
+    "language": "ckb",
+    "dialect": "sorani",
+    "script": "arabic",
+    "direction": "rtl"
+  },
+  "text": {
+    "raw_text": "Original extracted text",
+    "converted_text": "Decoded text",
+    "normalized_text": "NFC-normalized text",
+    "paragraphs": ["First paragraph", "Second paragraph"]
+  },
+  "conversion": {
+    "encoding_type": "unicode_normalized",
+    "conversion_confidence": 0.95,
+    "normalization": "unicode_nfc"
+  },
+  "structure": {
+    "paragraph_count": 2,
+    "word_count": 20,
+    "char_count": 140
+  },
+  "quality": {
+    "text_quality": "verified",
+    "conversion_verified": true,
+    "language_verified": true,
+    "structure_verified": true
+  }
+}
 ```
 
-Open `.env` and verify key settings (the defaults work out of the box for local storage):
-- `STORAGE_PROVIDER=local` (stores all downloads in `./storage` on the server disk).
-- `AUTH_ACCESS_SECRET` & `AUTH_REFRESH_SECRET` (generate any random secret strings for security).
+Confidence and verification values are evidence-based. The platform does not claim 100% language or conversion accuracy when the available evidence is uncertain.
 
----
+## Dashboard Workflow
 
-### Step 4: Start All Services with Docker
-Build and launch all 5 microservices in the background:
+1. Create a source and configure a web or Telegram collector.
+2. Run the collector and inspect pages, files, duplicates, errors, and manifests.
+3. Open **Process** from the dashboard.
+4. Run **Preview changes** first.
+5. Review proposed names, duplicate records, and processing counts.
+6. Run **Apply processing** when the preview is correct.
+
+The Process section is restricted to Data Manager-level users. It applies deterministic canonical names, adds processing metadata, and marks repeated SHA-256 records as duplicates without deleting source lineage.
+
+## Storage Layout
+
+Typical local storage paths look like:
+
+```text
+storage/
+  00_raw/
+    web/{source}/{run}/
+      pdf/digital/
+      pdf/ocr/
+      documents/
+      ebooks/
+      data/web_content/
+      metadata.jsonl
+      manifest.json
+    telegram/{source}/{run}/
+```
+
+`pdf/ocr` currently means that the PDF is likely scanned, sparse, or unsuitable for native text extraction. It is not yet a generated OCR text layer. Actual OCR generation remains a separate future processing stage.
+
+## Services
+
+Docker runs three application services plus infrastructure:
+
+- `web`: React/Vite dashboard served through Nginx
+- `api`: Express, TypeScript, Prisma-backed API
+- `scraper`: Python collection worker
+- `postgres`: database
+- `redis`: queue and progress state
+
+Important directories:
+
+```text
+apps/web/                 Dashboard
+services/api/             API and storage reconciliation
+services/scraper/         Crawlers and processing pipeline
+packages/database/        Prisma schema and database scripts
+packages/shared-types/    Shared TypeScript types
+storage/                  Local development storage
+```
+
+## Deployment
+
+### Requirements
+
+- Docker Desktop or Docker Engine with Compose
+- A `.env` file based on `.env.example`
+- Auth secrets of at least 32 characters
+- `API_SERVICE_TOKEN` for scraper-to-API communication
+- PostgreSQL and Redis values matching the Compose configuration
+
+Local storage is the default and does not require R2 credentials. To use Cloudflare R2, set `STORAGE_PROVIDER=r2` and provide the configured account, bucket, access key, and secret key values.
+
+### Start
 
 ```bash
 docker compose up --build -d
-```
-
-> **Automated Setup:** On startup, the database migrations run automatically and the default admin user is created.
-
----
-
-### Step 5: Access the Dashboard (Direct URL Without Port)
-
-The web dashboard is bound to standard HTTP port **`80`**, so no port number is needed in the browser!
-
-#### 1. Lock Server's Static IP (So IP Never Changes on Restart)
-On your Server PC, open **PowerShell as Administrator** and run:
-```powershell
-# Set static IP (replace 10.10.0.118 and 10.10.0.1 with your network IP and Gateway)
-New-NetIPAddress -InterfaceAlias "Wi-Fi" -IPAddress 10.10.0.118 -PrefixLength 16 -DefaultGateway 10.10.0.1
-Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses ("1.1.1.1", "8.8.8.8")
-```
-
-#### 2. Open Windows Firewall & Network Sharing
-On your Server PC, run in **PowerShell as Administrator** to allow other computers on your network to connect and ping:
-```powershell
-# Set Wi-Fi network profile to Private (enables local sharing)
-Set-NetConnectionProfile -InterfaceAlias "Wi-Fi" -NetworkCategory Private
-
-# Allow incoming Ping (ICMP)
-New-NetFirewallRule -DisplayName "Allow Ping ICMPv4" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow
-
-# Allow incoming Port 80 (Web Dashboard)
-New-NetFirewallRule -DisplayName "ODP Platform Port 80" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow
-```
-
-#### 3. Access via Custom URL `http://qai.local` (Recommended)
-
-1. **On the Server / Host PC (Running Docker)**:
-   Open **PowerShell as Administrator** and run:
-   ```powershell
-   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n127.0.0.1 qai.local`n" -Force
-   ```
-   Now you can open: **`http://qai.local`**
-
-2. **On other PCs / Laptops on the same Wi-Fi / LAN**:
-   Open **PowerShell as Administrator** and run:
-   ```powershell
-   # Replace 10.10.0.118 with your server PC's actual local IP address:
-   Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n10.10.0.118 qai.local`n" -Force
-   ```
-   Now any device on the network can open: **`http://qai.local`**
-
-#### 4. Remote Access via Tailscale (Optional)
-If you use [Tailscale](https://tailscale.com), your server's Tailscale IP (e.g. `100.127.128.53`) is 100% static and accessible securely from anywhere in the world. You can map it in hosts:
-```powershell
-Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "`n100.127.128.53 qai.local`n" -Force
-```
-
----
-
-### 🔑 Default Login Credentials
-
-| Role | Username | Default Password |
-| :--- | :--- | :--- |
-| **Administrator** | `admin` | `admin12345` |
-
-> 💡 *Once logged in, you can change passwords or manage users from the **Users** tab.*
-
----
-
-## 🛠️ Handy Server Management Commands
-
-| Action | Command |
-| :--- | :--- |
-| **Check container status** | `docker compose ps` |
-| **View real-time logs** | `docker compose logs -f` |
-| **View scraper engine logs** | `docker compose logs -f scraper` |
-| **View API logs** | `docker compose logs -f api` |
-| **Restart all services** | `docker compose restart` |
-| **Stop all services** | `docker compose down` |
-| **Update & Apply Migrations** | `git pull && docker compose up -d` |
-
----
-
-## 🔄 Clean Reset & Rebuild (Fix Broken or Stale Builds)
-
-If a previous Docker build failed, corrupted cache layers, or containers fail to start (e.g., stale entrypoints or cache mismatch), run this complete clean rebuild:
-
-### 1. Stop and remove existing containers:
-```bash
-docker compose down --remove-orphans
-```
-
-### 2. (Optional) Wipe database volumes for a fresh start:
-> ⚠️ **Warning:** This removes existing database data so fresh migrations and default admins re-initialize from scratch.
-```bash
-docker compose down -v --remove-orphans
-```
-
-### 3. Rebuild all images from scratch (ignoring old cache):
-```bash
-docker compose build --no-cache
-```
-
-### 4. Start all services in the background:
-```bash
-docker compose up -d
-```
-
-### 5. Check container health:
-```bash
 docker compose ps
+```
+
+Open the dashboard at `http://localhost` unless your Nginx or host configuration uses another address.
+
+The API entrypoint runs migrations and attempts development admin bootstrap. Change development credentials immediately before using the platform outside a local environment.
+
+### Logs and shutdown
+
+```bash
 docker compose logs -f
+docker compose logs -f api
+docker compose logs -f scraper
+docker compose restart
+docker compose down
 ```
 
----
-
-## 📥 How Files Are Downloaded, Filtered & Categorized
-
-```
-┌─────────────────┐     ┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
-│  1. Discovery   │ ──► │  2. Filtering &     │ ──► │ 3. Download &        │ ──► │ 4. Categorize &  │
-│  & Domain Check │     │     FileType Rules  │     │    Deduplication     │     │    Store Metadata│
-└─────────────────┘     └─────────────────────┘     └──────────────────────┘     └──────────────────┘
-```
-
-1. **Discovery & Domain Safety**: Confines crawling to target domains, permits trusted CDNs (`cdn.gov.krd`, `usrfiles.com`, `drive.google.com`, etc.), with built-in SSRF protection against private IP probing.
-2. **File Filtering & Rules**: Extracts documents (`.pdf`, `.epub`, `.docx`), audio/video (`.mp3`, `.wav`, `.mp4`), and datasets (`.csv`, `.parquet`, `.jsonl`) while eliminating web assets (`.css`, `.js`, `.woff`).
-3. **Streaming Download & Deduplication**: Streams downloads to conserve RAM and computes SHA-256 hashes to prevent redundant downloads.
-4. **Classification & Categorization**: Differentiates native digital PDFs from scanned image PDFs, detects languages (Kurdish, Arabic, English, Persian), and applies Kurdish topic classification with clean Unicode preservation.
-
----
-
-## 📂 Project Structure
-
-```
-organization-data-platform/
-├── apps/
-│   └── web/                      # React + Vite dashboard (served via Nginx on port 80)
-├── services/
-│   ├── api/                      # Express + TypeScript REST API (port 4000)
-│   └── scraper/                  # Python worker (Playwright, Scrapling, yt-dlp, Telethon)
-├── packages/
-│   ├── database/                 # Prisma ORM schema & PostgreSQL migrations
-│   └── shared-types/             # Shared TypeScript models & enums
-├── storage/                      # Local persistent storage for scraped content & manifests
-├── docker-compose.yml            # Production deployment orchestration
-└── docker-compose.dev.yml        # Local development orchestration with hot reloading
-```
-
----
-
-## 💻 Local Development Mode
-
-If you are developing locally with hot reloading enabled:
+### Development Compose
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d
 ```
 
-Run Scraper unit and integration tests:
-```bash
-cd services/scraper
-.venv\Scripts\python.exe -m pytest tests/
+## Authentication and Security
+
+- Use strong, unique access and refresh secrets.
+- Do not expose development credentials on a shared network.
+- Keep R2 credentials and Telegram account credentials out of collector configuration and frontend code.
+- Use configured domain allowlists and URL patterns for each collector.
+- Treat raw storage as sensitive source material and protect the host filesystem or bucket.
+- File access and management routes should be used only through authenticated dashboard/API sessions.
+
+## Testing
+
+Run the scraper suite on Windows:
+
+```powershell
+Push-Location services/scraper
+.\.venv\Scripts\python.exe -m pytest
+Pop-Location
 ```
+
+Run the JavaScript suites when workspace dependencies are installed correctly:
+
+```bash
+npm run test --workspace=services/api
+npm run test:e2e --workspace=apps/web
+npm run test
+```
+
+The scraper suite covers discovery, SSRF protection, URL normalization, PDF classification, storage manifests, Telegram behavior, and structured-document exports.
+
+## Database Commands
+
+```bash
+npm run db:generate
+npm run db:migrate
+npm run db:studio
+npm run db:create-admin --workspace=packages/database
+npm run db:create-service-account --workspace=packages/database
+```
+
+## Operational Notes
+
+- Collection deduplication occurs before and after download: known URLs can be skipped, and identical content is caught by SHA-256.
+- Web pages are rejected when they are empty, too short, repetitive, or clearly an error/login/consent page.
+- `source_url`, `final_url`, route metadata, content fingerprints, and processing metadata should be retained for lineage.
+- Do not treat a classifier confidence value as a human verification record. Review low-confidence language, OCR, and conversion results before publishing a dataset.
+- Processing is intentionally repeatable and non-destructive.
+
+## Known Limitations
+
+- Scanned PDFs are classified as OCR candidates, but an OCR engine and generated searchable PDF/text output are not yet integrated.
+- Language and dialect detection is heuristic and should expose confidence for review.
+- R2 reconciliation and some API/frontend checks depend on the workspace package links being installed correctly.
+- Existing raw files are not retroactively rewritten by the Process section; apply processing to update database metadata and display names.
+
+## License and Contributions
+
+Keep changes focused on the owning service, add regression tests for behavior changes, and run the scraper suite before submitting a change. Do not commit credentials, downloaded source corpora, local storage, `.venv`, or build output.

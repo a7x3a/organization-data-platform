@@ -27,6 +27,7 @@ class PDFExtractionResult:
     quality_score: float  # 0.0 to 1.0 overall extraction quality
     has_images: bool
     reason: str
+    text_content: str = ""  # Full clean decoded text for downstream processing
     text_sample: str = ""  # First 500 characters of clean decoded text preview
     raw_text_sample: str = ""  # First 500 characters of raw extracted text preview
     encoding_type: str = "clean_unicode"
@@ -178,6 +179,7 @@ def extract_and_classify_pdf(
             quality_score=quality_score,
             has_images=has_images,
             reason=reason,
+            text_content=decoded_text,
             text_sample=decoded_sample,
             raw_text_sample=raw_sample,
             encoding_type=kurdish_res.encoding_type,

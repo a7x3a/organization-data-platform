@@ -13,9 +13,11 @@ same job, plus the media/JSON extraction this module adds on top.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 import re
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from selectolax.parser import HTMLParser
 
@@ -459,7 +461,58 @@ def extract_page_text(html: str) -> str:
                 if not lines or lines[-1] != clean:
                     lines.append(clean)
 
-    return "\n".join(lines)
+    normalized_lines: list[str] = []
+    seen_lines: set[str] = set()
+    for line in lines:
+        normalized = re.sub(r"\s+", " ", line).strip()
+        if not normalized or normalized in seen_lines:
+            continue
+        seen_lines.add(normalized)
+        normalized_lines.append(normalized)
+
+    return "\n".join(normalized_lines)
+
+
+_LOW_INFORMATION_PHRASES = (
+    "access denied",
+    "page not found",
+    "404 not found",
+    "sign in to continue",
+    "log in to continue",
+    "enable javascript to continue",
+    "accept cookies to continue",
+)
+
+
+def _assess_page_quality(text: str, title: str, headings: list[dict[str, str]]) -> dict[str, Any]:
+    """Return deterministic quality metadata used before a page is persisted."""
+    words = text.split()
+    character_count = len(text)
+    unique_line_count = len(set(text.splitlines())) if text else 0
+    line_count = len([line for line in text.splitlines() if line.strip()])
+    repeated_line_ratio = 1.0 - (unique_line_count / line_count) if line_count else 0.0
+    normalized_for_checks = re.sub(r"\s+", " ", text).strip().lower()
+
+    reason = "accepted"
+    if not text or len(words) < 8 or character_count < 50:
+        reason = "too_short"
+    elif any(phrase in normalized_for_checks for phrase in _LOW_INFORMATION_PHRASES):
+        reason = "low_information_error_or_gate_page"
+    elif repeated_line_ratio > 0.35:
+        reason = "repetitive_boilerplate"
+    elif not title.strip() and not headings:
+        reason = "missing_page_identity"
+
+    return {
+        "status": "accepted" if reason == "accepted" else "rejected",
+        "reason": reason,
+        "word_count": len(words),
+        "character_count": character_count,
+        "line_count": line_count,
+        "repeated_line_ratio": round(repeated_line_ratio, 4),
+        "has_title": bool(title.strip()),
+        "heading_count": len(headings),
+    }
 
 
 def extract_structured_page_data(html: str, url: str) -> dict[str, Any]:
@@ -490,7 +543,7 @@ def extract_structured_page_data(html: str, url: str) -> dict[str, Any]:
     for link_url, ctx in page_links:
         ext = link_url.split("?")[0].split("#")[0].lower()
         if any(ext.endswith(target_ext) for target_ext in (
-            ".pdf", ".epub", ".mobi", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".zip", ".rar", ".mp3", ".mp4"
+            ".pdf", ".epub", ".mobi", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".zip", ".rar", ".mp4"
         )):
             downloadable_files.append({
                 "url": link_url,
@@ -498,15 +551,41 @@ def extract_structured_page_data(html: str, url: str) -> dict[str, Any]:
                 "accordion_group": ctx.get("accordion_group") or "",
             })
 
+    title = metadata.get("title") or ""
+    quality = _assess_page_quality(body_text, title, headings)
+    parsed_url = urlparse(url)
+    hostname = parsed_url.hostname or ""
+    host_parts = hostname.split(".")
+    source_domain = ".".join(host_parts[-2:]) if len(host_parts) >= 2 else hostname
+    source_subdomain = ".".join(host_parts[:-2]) if len(host_parts) > 2 else ""
+    content_fingerprint = hashlib.sha256(
+        "\n".join(
+            [
+                title.strip().lower(),
+                body_text,
+                json.dumps(headings, ensure_ascii=False, sort_keys=True),
+            ]
+        ).encode("utf-8")
+    ).hexdigest()
+
     return {
+        "schema_version": "web_page.v2",
+        "record_type": "web_page",
         "url": url,
-        "title": metadata.get("title") or "",
+        "canonical_url": url.split("#", 1)[0],
+        "source_domain": source_domain,
+        "source_subdomain": source_subdomain,
+        "source_route": parsed_url.path or "/",
+        "title": title,
         "description": metadata.get("description") or "",
         "author": metadata.get("author") or "",
         "language": metadata.get("language") or "ku",
         "headings": headings,
         "body_text": body_text,
         "word_count": word_count,
+        "content_fingerprint": content_fingerprint,
+        "quality": quality,
+        "is_usable": quality["status"] == "accepted",
         "downloadable_files": downloadable_files,
         "crawled_at": datetime.now(timezone.utc).isoformat(),
     }

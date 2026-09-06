@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 import redis.asyncio as aioredis
@@ -91,6 +92,7 @@ class FilePipeline:
         *,
         manifest: ManifestWriter,
         metadata: MetadataWriter,
+        source_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """
         Dedup by content hash, upload to R2, record metadata, and report run
@@ -114,7 +116,10 @@ class FilePipeline:
                 await self.report_progress(manifest)
                 return
 
-            extra_metadata = {}
+            extra_metadata = dict(source_metadata or {})
+            source_url_parts = urlparse(result.source_url)
+            extra_metadata.setdefault("source_domain", source_url_parts.hostname or "")
+            extra_metadata.setdefault("source_route", source_url_parts.path or "/")
             is_pdf = (result.mime_type == "application/pdf") or (
                 result.extension and result.extension.lower() == ".pdf"
             )
@@ -127,9 +132,15 @@ class FilePipeline:
                 pdf_res = extract_and_classify_pdf(result.temp_path)
                 extra_metadata["pdf_extraction"] = pdf_res.to_dict()
                 category = pdf_res.folder_path
-                extracted_text = pdf_res.text_content if hasattr(pdf_res, "text_content") else ""
+                extracted_text = pdf_res.text_content
+                conversion_metadata = {
+                    "encoding_type": pdf_res.encoding_type,
+                    "conversion_confidence": 1.0 if pdf_res.is_native else 0.0,
+                    "normalization": "unicode_nfc",
+                }
             else:
                 category = categorize_file(result.mime_type, result.extension, temp_path=result.temp_path)
+                conversion_metadata = None
 
             # Data Intelligence: language detection, quality scoring, Kurdish categorization
             if os.path.exists(result.temp_path):
@@ -165,6 +176,24 @@ class FilePipeline:
                     log.warning("data_intelligence_failed", url=result.source_url, error=str(e))
 
             r2_key = f"{self._run_folder_key}/{category}/{result.file_name}"
+
+            if extracted_text:
+                from app.normalize.structured_document import build_structured_document
+
+                lang_dict = extra_metadata.get("language")
+                quality_dict = extra_metadata.get("quality")
+                extra_metadata["structured_document"] = build_structured_document(
+                    document_id=result.sha256,
+                    source_name=self._source_id,
+                    source_url=result.source_url,
+                    file_path=r2_key,
+                    title=result.file_name,
+                    raw_text=extracted_text,
+                    language=lang_dict if isinstance(lang_dict, dict) else None,
+                    quality=quality_dict if isinstance(quality_dict, dict) else None,
+                    conversion=conversion_metadata,
+                    document_type=category.split("/")[0],
+                )
 
             try:
                 storage.upload_file(result.temp_path, r2_key, content_type=result.mime_type)

@@ -78,8 +78,7 @@ DOWNLOADABLE_EXTENSIONS = {
     ".csv", ".tsv", ".jsonl", ".json", ".xml", ".parquet", ".srt", ".vtt",
     # Archives
     ".zip", ".tar", ".gz", ".rar", ".7z", ".bz2", ".xz",
-    # Audiobooks & Media
-    ".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac",
+    # Media
     ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv",
     # Images (Content)
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic",

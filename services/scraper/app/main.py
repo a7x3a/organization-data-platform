@@ -17,7 +17,6 @@ import redis.asyncio as aioredis
 from app.config.settings import settings
 from app.jobs.collection_job import CollectionJob
 from app.jobs.telegram_collection_job import TelegramCollectionJob
-from app.jobs.media_job import MediaCollectionJob
 
 # Configure structlog
 structlog.configure(
@@ -52,10 +51,10 @@ async def process_job(job_data: dict, api_client: httpx.AsyncClient) -> None:
     cfg = job_data.get("configuration", {})
     has_media_config = "mediaUrl" in cfg or "localPath" in cfg
 
+    if collector_type in ("MEDIA", "YOUTUBE", "AUDIO", "VIDEO") or has_media_config:
+        raise ValueError("Audio and transcription collectors are disabled")
     if collector_type == "TELEGRAM":
         job = TelegramCollectionJob(job_data, api_client)
-    elif collector_type in ("MEDIA", "YOUTUBE", "AUDIO", "VIDEO") or has_media_config:
-        job = MediaCollectionJob(job_data, api_client)
     else:
         job = CollectionJob(job_data, api_client)
     await job.run()

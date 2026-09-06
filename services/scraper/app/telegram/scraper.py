@@ -312,6 +312,10 @@ async def scrape_channel(
         kind = _media_kind(message)
         base_url = _message_url(channel, message.id)
 
+        if kind == "audio":
+            log.info("telegram_skipping_audio_media", channel=channel, msg_id=message.id)
+            kind = None
+
         if (
             cfg.download_media
             and kind

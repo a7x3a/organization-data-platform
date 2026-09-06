@@ -28,7 +28,6 @@ import {
   Database,
   BookOpen,
   FileText,
-  Music,
   Video,
   Image,
   Archive,
@@ -38,7 +37,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-type CollectorPresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'audio' | 'video' | 'images' | 'archives' | 'all';
+type CollectorPresetType = 'articles' | 'books' | 'documents' | 'datasets' | 'video' | 'images' | 'archives' | 'all';
 
 const COLLECTOR_PRESETS: {
   id: CollectorPresetType;
@@ -74,13 +73,6 @@ const COLLECTOR_PRESETS: {
     description: 'Parquet, JSONL, CSV, TSV, and XML datasets',
     icon: Database,
     extensions: ['.parquet', '.jsonl', '.csv', '.tsv', '.json', '.xml', '.arrow'],
-  },
-  {
-    id: 'audio',
-    label: 'Audio & Recordings',
-    description: 'MP3, WAV, FLAC, M4A, and speech audio files',
-    icon: Music,
-    extensions: ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'],
   },
   {
     id: 'video',
@@ -171,7 +163,7 @@ export const Collectors: React.FC = () => {
   const [channels, setChannels] = useState('');
   const [messageLimit, setMessageLimit] = useState(500);
   const [downloadMedia, setDownloadMedia] = useState(true);
-  const ALL_MEDIA_TYPES = ['photo', 'video', 'audio', 'document'] as const;
+  const ALL_MEDIA_TYPES = ['photo', 'video', 'document'] as const;
   const [mediaTypes, setMediaTypes] = useState<string[]>([...ALL_MEDIA_TYPES]);
 
   const toggleMediaType = (type: string) => {
@@ -292,7 +284,7 @@ export const Collectors: React.FC = () => {
         channels: channelList,
         messageLimit,
         downloadMedia: downloadMedia && effectiveMediaTypes.length > 0,
-        includeMediaTypes: effectiveMediaTypes as Array<'photo' | 'video' | 'audio' | 'document'>,
+        includeMediaTypes: effectiveMediaTypes as Array<'photo' | 'video' | 'document'>,
         allowedExtensions: extensions,
       };
 

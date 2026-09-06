@@ -68,6 +68,7 @@ class CollectionJob:
         self._cfg: dict = job_data["configuration"]
         self._run_folder_key: str = job_data["runFolderKey"]
         self._source_slug: str = job_data["sourceSlug"]
+        self._web_content_fingerprints: set[str] = set()
         self._pipeline = FilePipeline(
             api_client=api_client,
             run_db_id=self._run_db_id,
@@ -258,6 +259,14 @@ class CollectionJob:
                     await self._process_file(
                         discovered.url,
                         preferred_name=pref_name,
+                        source_metadata={
+                            "discovery_context": {
+                                "page_url": discovered.page_url,
+                                "page_title": discovered.page_title,
+                                "context_name": discovered.context_name,
+                                **discovered.metadata,
+                            },
+                        },
                         http_client=http_client,
                         manifest=manifest,
                         metadata=metadata,
@@ -305,6 +314,7 @@ class CollectionJob:
         url: str,
         *,
         preferred_name: Optional[str] = None,
+        source_metadata: Optional[dict[str, Any]] = None,
         http_client: httpx.AsyncClient,
         manifest: ManifestWriter,
         metadata: MetadataWriter,
@@ -348,7 +358,6 @@ class CollectionJob:
                         (".pdf" in normalized_allowed and "application/pdf" in mime)
                         or (".epub" in normalized_allowed and "epub" in mime)
                         or (".docx" in normalized_allowed and "wordprocessingml" in mime)
-                        or (".mp3" in normalized_allowed and "audio/" in mime)
                     )
                     if not matches_ext and not matches_mime:
                         log.info("discarding_unallowed_downloaded_extension", url=url, ext=res_ext, mime=mime, allowed=normalized_allowed)
@@ -360,7 +369,39 @@ class CollectionJob:
                         manifest.record_file_skipped()
                         return
 
-                await self._pipeline.process_downloaded_file(result, manifest=manifest, metadata=metadata)
+                allowed_mime_types = [
+                    value.strip().lower()
+                    for value in (self._cfg.get("allowedMimeTypes") or [])
+                    if value and value.strip()
+                ]
+                if allowed_mime_types:
+                    detected_mime = (result.mime_type or "").split(";", 1)[0].strip().lower()
+                    mime_allowed = any(
+                        detected_mime == allowed
+                        or (allowed.endswith("/*") and detected_mime.startswith(allowed[:-1]))
+                        for allowed in allowed_mime_types
+                    )
+                    if not mime_allowed:
+                        log.info(
+                            "discarding_unallowed_downloaded_mime",
+                            url=url,
+                            mime=detected_mime,
+                            allowed=allowed_mime_types,
+                        )
+                        if os.path.exists(result.temp_path):
+                            try:
+                                os.unlink(result.temp_path)
+                            except OSError:
+                                pass
+                        manifest.record_file_skipped()
+                        return
+
+                await self._pipeline.process_downloaded_file(
+                    result,
+                    manifest=manifest,
+                    metadata=metadata,
+                    source_metadata=source_metadata,
+                )
                 return
 
             except DownloadCancelled:
@@ -412,10 +453,56 @@ class CollectionJob:
         import json
         import hashlib
         from app.downloader.downloader import sanitize_filename
+        from urllib.parse import urlparse
 
         body_text = page_doc.get("body_text", "").strip()
-        if not body_text or len(body_text) < 30:
+        quality = page_doc.get("quality") or {}
+        if not body_text or not page_doc.get("is_usable", True) or quality.get("status") == "rejected":
+            log.info(
+                "web_data_rejected_low_quality",
+                url=page_doc.get("url", ""),
+                reason=quality.get("reason", "missing_or_empty_body"),
+            )
             return
+
+        content_fingerprint = page_doc.get("content_fingerprint")
+        if content_fingerprint and content_fingerprint in self._web_content_fingerprints:
+            log.info("duplicate_web_data_in_run", url=page_doc.get("url", ""))
+            return
+        if content_fingerprint:
+            self._web_content_fingerprints.add(content_fingerprint)
+
+        page_url = page_doc.get("url", "")
+        parsed_url = urlparse(page_url)
+        hostname = parsed_url.hostname or ""
+        host_parts = hostname.split(".")
+        source_domain = ".".join(host_parts[-2:]) if len(host_parts) >= 2 else hostname
+        source_subdomain = ".".join(host_parts[:-2]) if len(host_parts) > 2 else ""
+        page_doc["source_domain"] = source_domain
+        page_doc["source_subdomain"] = source_subdomain
+        page_doc["source_route"] = parsed_url.path or "/"
+        from app.normalize.structured_document import build_structured_document
+        from app.media.language_detector import detect_language
+
+        page_language = detect_language(body_text).to_dict()
+        page_doc["language_detection"] = page_language
+
+        page_doc["structured_document"] = build_structured_document(
+            document_id=page_doc.get("content_fingerprint") or page_url,
+            source_name=self._source_slug,
+            source_url=page_url,
+            file_path=page_doc.get("source_route", "/"),
+            title=page_doc.get("title", ""),
+            raw_text=body_text,
+            language=page_language,
+            quality={
+                "text_quality": "verified" if quality.get("status") == "accepted" else "rejected",
+                "conversion_verified": True,
+                "language_verified": page_language.get("confidence", 0) >= 0.8,
+                "structure_verified": bool(page_doc.get("word_count")),
+            },
+            document_type="web_page",
+        )
 
         raw_bytes = json.dumps(page_doc, ensure_ascii=False, indent=2).encode("utf-8")
         sha256 = hashlib.sha256(raw_bytes).hexdigest()
@@ -425,7 +512,6 @@ class CollectionJob:
         file_name = f"{clean_title}_{sha256[:8]}.json" if clean_title else f"web_content_{sha256[:8]}.json"
         category = "data/web_content"
         r2_key = f"{self._run_folder_key}/{category}/{file_name}"
-        page_url = page_doc.get("url", "")
 
         if await self._pipeline.is_duplicate(sha256):
             log.info("duplicate_web_data_detected", url=page_url, sha256=sha256)
@@ -469,6 +555,9 @@ class CollectionJob:
                     "type": "web_page_data",
                     "title": title,
                     "word_count": page_doc.get("word_count", 0),
+                    "source_domain": source_domain,
+                    "source_subdomain": source_subdomain,
+                    "source_route": parsed_url.path or "/",
                 },
             )
             log.info("web_data_extracted_and_stored", url=page_url, title=title, r2_key=r2_key)
