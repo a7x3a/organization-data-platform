@@ -176,6 +176,28 @@ docker compose down
 docker compose -f docker-compose.dev.yml up --build -d
 ```
 
+### Update an Existing Docker Installation
+
+From the repository directory on the other PC, run the update script after pulling the latest code:
+
+```powershell
+.\scripts\update-and-process.ps1 -AccessToken "YOUR_DATA_MANAGER_ACCESS_TOKEN"
+```
+
+The script pulls `main`, rebuilds and restarts Docker, waits for the API, and runs a **preview** of the existing-data processing pass. To apply the preview:
+
+```powershell
+.\scripts\update-and-process.ps1 -AccessToken "YOUR_DATA_MANAGER_ACCESS_TOKEN" -Apply
+```
+
+To update Docker without processing existing records:
+
+```powershell
+.\scripts\update-and-process.ps1 -SkipProcessing
+```
+
+The processing pass normalizes database display names, canonical filenames, processing metadata, and duplicate status. It does not delete or rewrite raw storage files. Use a Data Manager access token; do not place credentials in the script or commit them to the repository.
+
 ## Authentication and Security
 
 - Use strong, unique access and refresh secrets.
